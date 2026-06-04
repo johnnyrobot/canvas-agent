@@ -1,0 +1,25 @@
+{
+  "id": "rubric-criteria",
+  "title": "Sample Writing Rubric",
+  "intents": ["rubric", "grading", "feedback"],
+  "units": [
+    {
+      "id": "RUB-1",
+      "heading": "Thesis",
+      "text": "The response states a clear, arguable thesis in the opening paragraph and sustains it throughout.",
+      "citation": "Writing Rubric §RUB-1 Thesis"
+    },
+    {
+      "id": "RUB-2",
+      "heading": "Evidence",
+      "text": "Claims are supported with specific, relevant evidence that is accurately cited.",
+      "citation": "Writing Rubric §RUB-2 Evidence"
+    },
+    {
+      "id": "RUB-3",
+      "heading": "Organization",
+      "text": "Paragraphs follow a logical order with clear transitions between ideas.",
+      "citation": "Writing Rubric §RUB-3 Organization"
+    }
+  ]
+}
