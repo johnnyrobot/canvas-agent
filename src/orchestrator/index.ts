@@ -11,6 +11,8 @@ export { ToolRegistry } from './registry.js';
 export { createCanonicalTools, NotImplementedError } from './tools.js';
 export type { EngineDeps } from './tools.js';
 export { enforceGate } from './gate.js';
+export { groundSystemPrompt, DEFAULT_MAX_CITATIONS } from './prompt.js';
+export type { GroundingOptions } from './prompt.js';
 export type {
   GateDeps,
   GateResult,
