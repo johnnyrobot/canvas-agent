@@ -7,8 +7,10 @@
  * transcript and a trace of every tool invocation.
  */
 import type { ChatMessage, ChatOptions } from '../llm/index.js';
+import type { KbRetriever } from '../contracts/index.js';
 import type { ChatRunner, ToolContext, ToolInvocation, TurnInput, TurnResult } from './types.js';
 import type { ToolRegistry } from './registry.js';
+import { groundSystemPrompt } from './prompt.js';
 
 export class OrchestratorError extends Error {
   constructor(message: string) {
@@ -20,6 +22,14 @@ export class OrchestratorError extends Error {
 export interface OrchestratorOptions {
   /** Max model round-trips per turn (bounded loop). */
   maxToolIterations?: number;
+  /**
+   * Optional Knowledge-Pack retriever. When present, `handleTurn` retrieves on
+   * the user message and prepends the top citations to the system prompt
+   * (PRD §13.1). Omitted → the system prompt is passed through unchanged.
+   */
+  retrieveKb?: KbRetriever;
+  /** Max citations grounded into the system prompt (see `groundSystemPrompt`). */
+  maxCitations?: number;
 }
 
 export class Orchestrator {
@@ -32,7 +42,16 @@ export class Orchestrator {
   async handleTurn(input: TurnInput, ctx: ToolContext = {}): Promise<TurnResult> {
     const maxIterations = this.options.maxToolIterations ?? 5;
     const messages: ChatMessage[] = [];
-    if (input.system) messages.push({ role: 'system', content: input.system });
+
+    // Knowledge-Pack grounding: prepend the top citations to the hard rules.
+    let system = input.system;
+    if (this.options.retrieveKb) {
+      const kb = await this.options.retrieveKb(input.user);
+      const gopts =
+        this.options.maxCitations !== undefined ? { maxCitations: this.options.maxCitations } : {};
+      system = groundSystemPrompt(system, kb, gopts);
+    }
+    if (system) messages.push({ role: 'system', content: system });
     if (input.history) messages.push(...input.history);
     messages.push({ role: 'user', content: input.user });
 
