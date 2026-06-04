@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Lock the renderer down with a strict CSP: no remote origins, no inline
+      script. This is a single-user, fully on-device app — the renderer only
+      ever talks to the main process through the `canvasAgent` preload bridge.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Canvas Course Design &amp; Accessibility Assistant</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      header {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid rgba(127, 127, 127, 0.3);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      header h1 { font-size: 1rem; margin: 0; }
+      .health { font-size: 0.8rem; }
+      .health--ok { color: #1a7f37; }
+      .health--degraded { color: #9a6700; }
+      #transcript {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .turn { max-width: 70ch; }
+      .turn--user { align-self: flex-end; text-align: right; opacity: 0.85; }
+      .turn--error { color: #cf222e; }
+      .turn__tools { font-size: 0.75rem; opacity: 0.7; }
+      .fragment {
+        border: 1px solid rgba(127, 127, 127, 0.35);
+        border-radius: 8px;
+        padding: 0.75rem;
+        margin-top: 0.5rem;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        margin-bottom: 0.5rem;
+      }
+      .badge--passed { background: #d2f8d2; color: #0a5d1f; }
+      .badge--withheld { background: #ffe1c2; color: #8a4b00; }
+      .fragment__blockers-label, .fragment__review-label {
+        font-size: 0.78rem; font-weight: 600; margin: 0.5rem 0 0.2rem;
+      }
+      .fragment__blockers { color: #8a4b00; }
+      footer {
+        padding: 0.75rem 1rem;
+        border-top: 1px solid rgba(127, 127, 127, 0.3);
+        display: flex;
+        gap: 0.5rem;
+      }
+      #prompt {
+        flex: 1;
+        resize: vertical;
+        min-height: 2.5rem;
+        font: inherit;
+        padding: 0.5rem;
+      }
+      #submit { padding: 0.5rem 1rem; font: inherit; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Canvas Course Design &amp; Accessibility Assistant</h1>
+      <span id="health" class="health">Local runtime: checking…</span>
+    </header>
+
+    <main id="transcript" aria-live="polite"></main>
+
+    <footer>
+      <textarea
+        id="prompt"
+        placeholder="Describe what you want to build (⌘/Ctrl+Enter to send)…"
+        aria-label="Your request"
+      ></textarea>
+      <button id="submit" type="button">Send</button>
+    </footer>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
