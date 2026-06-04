@@ -11,7 +11,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "tsx --test 'src/**/*.test.ts'",
+    "test": "tsx --test 'src/**/*.test.ts' 'e2e/**/*.test.ts'",
+    "e2e": "tsx --test 'e2e/**/*.test.ts'",
+    "app": "tsc && cp src/app/renderer/index.html dist/app/renderer/index.html && electron .",
     "llm:smoke": "tsx src/llm/example.ts"
   },
   "devDependencies": {
