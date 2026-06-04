@@ -1,0 +1,31 @@
+{
+  "id": "canvas-templates",
+  "title": "Canvas Template Patterns",
+  "intents": ["templates", "authoring", "structure"],
+  "units": [
+    {
+      "id": "module-overview",
+      "heading": "Module overview page",
+      "text": "A module overview page opens with the module learning objectives, a short summary of the topics, and a checklist of what students will read, watch, and submit.",
+      "citation": "Canvas Template Guide §2 Module Overview"
+    },
+    {
+      "id": "syllabus",
+      "heading": "Syllabus page",
+      "text": "A syllabus page states the course description, instructor contact information, grading breakdown, required materials, and the institutional accessibility and academic-integrity policies.",
+      "citation": "Canvas Template Guide §1 Syllabus"
+    },
+    {
+      "id": "assignment",
+      "heading": "Assignment page",
+      "text": "An assignment page describes the task, lists the submission steps, states the due date and point value, and links the grading rubric so expectations are explicit.",
+      "citation": "Canvas Template Guide §4 Assignments"
+    },
+    {
+      "id": "discussion",
+      "heading": "Discussion prompt",
+      "text": "A discussion prompt poses an open question, sets expectations for the initial post and peer replies, and gives a clear deadline for each.",
+      "citation": "Canvas Template Guide §5 Discussions"
+    }
+  ]
+}
