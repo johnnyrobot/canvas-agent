@@ -1,0 +1,21 @@
+{
+  "name": "canvas-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Canvas Course Design & Accessibility Assistant — on-device, single-user macOS app (see PRD).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsx --test src/**/*.test.ts",
+    "llm:smoke": "tsx src/llm/example.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# env / secrets (Canvas token lives in the macOS Keychain, not here)
+.env
+.env.local
+
+# local data (SQLite DB, exports, uploads)
+data/
+
+# os / tooling
+.DS_Store
+*.log
+
+# parallel agent-team build artifacts (dropped into worktrees)
+.agent-status
+AGENT_BRIEF.md
+AGENT_CONTRACT.md
