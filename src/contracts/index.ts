@@ -223,3 +223,49 @@ export interface EngineCapabilities {
   renderTemplate: TemplateRenderer;
   retrieveKb: KbRetriever;
 }
+
+// ── App runtime boundary (Wave 3) ────────────────────────────────────────────
+// The integration track IMPLEMENTS `AppApi` (orchestrator + gate + sidecars +
+// the engine capabilities, all wired). The app-shell track CONSUMES `AppApi`
+// over Electron IPC and builds its UI against these types — it uses a fake
+// `AppApi` in its own tests so it never needs the real runtime to build.
+
+import type { GateResult } from '../orchestrator/gate.js';
+
+export interface TurnRequest {
+  /** The user's message for this turn. */
+  user: string;
+  /** Optional system prompt override (else the runtime assembles one). */
+  system?: string;
+  /** Session to continue (the runtime persists/loads via the storage track). */
+  sessionId?: string;
+}
+
+/** A gated, safe-to-render HTML fragment produced during a turn. */
+export interface TurnFragment {
+  html: string;
+  gate: GateResult;
+}
+
+/** What the UI renders after a turn (a view over the orchestrator's TurnResult). */
+export interface TurnView {
+  text: string;
+  /** Gated HTML fragments emitted this turn (each already through `enforceGate`). */
+  fragments: TurnFragment[];
+  /** Canonical tool names the model invoked. */
+  toolsUsed: string[];
+  iterations: number;
+}
+
+/** Health of the local sidecars (for a UI status indicator). */
+export interface RuntimeHealth {
+  llm: boolean;
+  ingest: boolean;
+}
+
+/** The single surface the Electron main process exposes to the renderer via IPC. */
+export interface AppApi {
+  runTurn(req: TurnRequest): Promise<TurnView>;
+  importCanvas(config: CanvasConfig, courseId: string): Promise<CanvasImportResult>;
+  health(): Promise<RuntimeHealth>;
+}
