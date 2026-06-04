@@ -1,0 +1,37 @@
+{
+  "id": "wcag-basics",
+  "title": "WCAG 2.2 AA Essentials",
+  "intents": ["accessibility", "audit", "contrast"],
+  "units": [
+    {
+      "id": "contrast",
+      "heading": "Color contrast",
+      "text": "Body text must have a contrast ratio of at least 4.5 to 1 against its background. Large text (at least 18pt, or 14pt bold) may use a ratio of 3 to 1.",
+      "citation": "WCAG 2.2 §1.4.3 Contrast (Minimum)"
+    },
+    {
+      "id": "alt-text",
+      "heading": "Image alternative text",
+      "text": "Every meaningful image needs concise descriptive alternative text. Decorative images should use an empty alt attribute so screen readers skip them.",
+      "citation": "WCAG 2.2 §1.1.1 Non-text Content"
+    },
+    {
+      "id": "headings",
+      "heading": "Heading structure",
+      "text": "Use real heading elements in a logical order without skipping levels. Do not fake headings with bold text, and start page content at heading level two inside Canvas.",
+      "citation": "WCAG 2.2 §1.3.1 Info and Relationships"
+    },
+    {
+      "id": "link-purpose",
+      "heading": "Link purpose",
+      "text": "Link text must describe its destination on its own. Avoid bare URLs and ambiguous phrases like click here or read more.",
+      "citation": "WCAG 2.2 §2.4.4 Link Purpose (In Context)"
+    },
+    {
+      "id": "table-headers",
+      "heading": "Data table headers",
+      "text": "Data tables need header cells marked with th and an appropriate scope so assistive technology can associate each cell with its row and column.",
+      "citation": "WCAG 2.2 §1.3.1 Info and Relationships"
+    }
+  ]
+}
