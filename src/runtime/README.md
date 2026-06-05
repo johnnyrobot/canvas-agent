@@ -6,11 +6,14 @@ Electron app-shell track consumes `AppApi` over IPC and never imports the real
 runtime (it builds against a fake `AppApi` in its own tests).
 
 ```
-chatRunner (local model)
-      │  advertises 8 canonical tools
+TurnRequest ──► routeIntent (guidance | build | remediate)
+      │
+      ▼
+chatRunner (local model)  ── per-mode system prompt + per-mode tools/packs
+      │  advertises the mode's canonical tools
       ▼
 Orchestrator.handleTurn ──► retrieve_kb grounding ──► bounded tool loop
-      │                                                     │
+      │  (onEvent → onChunk: text / tool / fragment)        │
       │  real tools (createEngineDeps):                     │
       │  audit_html · validate_allowlist · check_contrast   │
       │  resolve_theme · render_template · retrieve_kb      │
@@ -18,6 +21,10 @@ Orchestrator.handleTurn ──► retrieve_kb grounding ──► bounded tool l
       ▼                                                     ▼
 emitted HTML fragments ───────► enforceGate (allowlist + audit) ──► TurnView
 ```
+
+The product layer adds **mode routing**, **streaming**, the **Remediate** repair
+flow, **session persistence**, **brand-kit theme resolution**, and **read-only
+Canvas page access** — all on top of the same unconditional gate.
 
 ## Layout
 
@@ -36,30 +43,73 @@ outside the `src/**/*.test.ts` unit glob) — see [Testing](#testing).
 ```ts
 import { createAppApi } from './src/runtime/index.js';
 
-const app = createAppApi(); // defaults: real model + sidecars + engine + gate
+const app = createAppApi(); // defaults: real model + sidecars + engine + gate + on-device SQLite
 
 const view = await app.runTurn({ user: 'Build a Week 1 module overview page.' });
-// → { text, fragments: [{ html, gate }], toolsUsed, iterations }
+// → { text, fragments: [{ html, gate }], toolsUsed, iterations, mode }
 
-const summary = await app.importCanvas({ baseUrl, token }, courseId); // read-only
+// Streaming (in-process): chunks arrive as text / tool / fragment events.
+await app.runTurn({ user: 'Make a syllabus page.' }, (chunk) => render(chunk));
+
+// Sessions persist each turn; pass the id to continue the transcript.
+const session = await app.createSession({ title: 'Bio 101', mode: 'build' });
+await app.runTurn({ user: 'Outline week 1', sessionId: session.id });
+
+// Remediate (repair user-supplied HTML; Canvas stays GET-only).
+const fixed = await app.runTurn({
+  user: 'Fix this page', mode: 'remediate',
+  remediateInput: { sourceHtml: '<p style="color:#ccc">low contrast</p>' },
+});
+// fixed.fragments[0].remediateResult → { before, after, issueDiffs, gate }
+
+const theme   = await app.resolveBrandTheme('#0a0a0a', '#ffffff');     // pure WCAG math, no LLM
+const summary = await app.importCanvas({ baseUrl, token }, courseId);  // read-only
 const health  = await app.health();                                   // { llm, ingest }
 ```
 
-### `runTurn`
-1. Builds the canonical tools from `createEngineDeps` and runs
-   `Orchestrator.handleTurn`. The orchestrator **grounds the system prompt** with
-   the top Knowledge-Pack citations for the user message (PRD §13.1), prepended
-   above the hard rules (`DEFAULT_SYSTEM_PROMPT`).
-2. **Emitted-fragment rule** (documented + gated): an HTML fragment is
+### `runTurn(req, onChunk?)`
+1. **Mode routing.** `routeIntent(req.user, req.mode)` resolves the
+   `ProductMode` (`guidance | build | remediate`); an explicit `req.mode` wins.
+   The resolved `mode` is echoed in the `TurnView` and drives the per-mode system
+   prompt (`systemPromptForMode`), the advertised tool set, and the KB packs.
+   The base prompt is `req.system ?? opts.systemPrompt ?? systemPromptForMode(mode)`.
+2. **History.** When `req.sessionId` is set, the session transcript is loaded and
+   mapped (`SessionMessage[]` → `ChatMessage[]`) into the turn's `history`.
+3. **Streaming.** When `onChunk` is supplied, the orchestrator's `onEvent`
+   (`{type:'text'}` / `{type:'tool'}`) is forwarded as `TurnChunk`s; each gated
+   fragment is emitted as `{type:'fragment', fragment}`.
+4. **Emitted-fragment rule** (documented + gated): an HTML fragment is
    - any **tool result** carrying a string `html` field (`render_template`,
      `validate_allowlist`), and
    - any ` ```html ` fenced block in the model's final text.
    Each fragment runs through `enforceGate(html, { validateAllowlist, audit })`.
    A residual **blocker withholds the badge** (`badgeWithheld === true`,
    `passedChecks === false`) — the model is never trusted to self-certify
-   (PRD §8.6/§15.7). `fragment.html` is the allowlist-gated (safe-to-render) HTML.
-3. Returns a `TurnView`: `{ text, fragments, toolsUsed, iterations }` (`toolsUsed`
-   is the de-duplicated set of canonical tool names the model invoked).
+   (PRD §8.6/§15.7). **No mode bypasses the gate.** `fragment.html` is the
+   allowlist-gated (safe-to-render) HTML.
+5. **Persistence.** With `req.sessionId`, the `{user, assistant}` pair is appended
+   to the transcript after the turn.
+6. Returns a `TurnView`: `{ text, fragments, toolsUsed, iterations, mode }`.
+
+### Remediate flow (`mode === 'remediate'` + `req.remediateInput`)
+1. `before = enforceGate(sourceHtml)` captures the source's conformance issues.
+2. A remediate orchestrator turn is run with the source HTML + before-issues; the
+   model's emitted HTML is taken and `after = enforceGate(modelHtml)`.
+3. A **bounded re-audit loop** (max 3) re-runs while the badge is still withheld
+   and each pass improves (clears the badge, or strictly reduces the issue count).
+4. The single emitted `TurnFragment` carries a `RemediateResult`
+   `{ before, after, issueDiffs, gate }` — `issueDiffs` compares before vs after
+   by `AuditIssue.id` (`fixed = present-before && absent-after`). **Canvas is
+   never written to** — Remediate only ever reads (GET-only page fetch).
+
+### Sessions / brand kits / Canvas pages
+- `createSession` / `listSessions` / `loadSession` / `deleteSession` — storage
+  `SessionStore` passthrough (the on-device DB is opened + `migrate()`d lazily).
+- `resolveBrandTheme(primary, secondary)` — the real `resolveTheme` (engine WCAG
+  math; **no LLM**). `listBrandKits` / `saveBrandKit` / `deleteBrandKit` —
+  `BrandKitStore` passthrough.
+- `fetchCanvasPage` / `listCanvasPages` — the read-only canvas page readers
+  (`fetchPageBody` / `listPages`); GET-only, never mutating.
 
 ### `health`
 Best-effort sidecar reachability (`{ llm, ingest }`). Never throws — an
@@ -78,8 +128,12 @@ exercised:
 | `ingest` | real Docling sidecar | fake `{ convertPath, isHealthy }` |
 | `retriever` | bundled Knowledge Packs | scripted `KbRetriever` |
 | `audit` | real Chromium render-and-scan | `createAuditor(fakeScanRunner)` (real mapping, no browser) |
-| `gate` | `{ validateAllowlist, audit }` | — |
+| `gate` | `{ validateAllowlist, audit }` | marker/issue-counting `GateDeps` fake |
 | `importer` | real `importCourse` | fake / `createImporter({ fetch })` |
+| `db` | on-device SQLite (lazy `openDatabase` + `migrate`) | `openDatabase(':memory:')` + `migrate` |
+| `sessionStore` / `brandKitStore` | built lazily from `db` | injected fake store |
+| `resolveTheme` | real `resolveTheme` (no LLM) | injected resolver |
+| `fetchPageBody` / `listPages` | real read-only canvas readers | injected fakes / spies |
 
 `createEngineDeps` adapts each module's real signature (e.g. wraps the sync
 `checkContrast` as async, validates the `render_template` `type` against the 8
