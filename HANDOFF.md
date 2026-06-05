@@ -1,151 +1,116 @@
 # Canvas Agent — Session Handoff
 
-**Date:** 2026-06-04 · **Status:** scaffolds complete & verified; ready to build the engine + app in parallel.
+**Date:** 2026-06-05 · **Status:** built end-to-end + live-verified; knowledge graph built & audited. Open work is polish + graph corrections, not core build.
 **Authoritative spec:** `PRD_Canvas_Course_Design_Accessibility_Assistant.md` (v1.6).
-**Read this with:** the two project memories (`no-cloud-models-constraint`, `document-ingestion-stack`, `build-status-and-conventions`).
+**Read this with the project memories:** `build-status-and-conventions`, `no-cloud-models-constraint`, `document-ingestion-stack` (in `~/.claude/projects/-Users-laccd-code-canvas-agent/memory/`).
+
+> This file replaces an earlier (2026-06-04) handoff that predated the engine + product-layer build. The build state below is current; the memory `build-status-and-conventions` is the fuller record. The Decision Log (§6) is preserved from that earlier handoff.
 
 ---
 
 ## 1. TL;DR — where we are
 
-We have built and **verified** three TypeScript modules — the transport/orchestration skeleton — with mock-based tests. The **deterministic accessibility engine (the heart of the product) does not exist yet**; the orchestrator wires to it via dependency injection and stubs it with `NotImplementedError`. Next session begins building the real modules, parallelizable across tracks (see §6).
+Canvas Agent is **built end-to-end and on `main`**: the deterministic accessibility engine, the three-mode product layer (Guidance / Build / Remediate), the intent router, session + brand-kit persistence, the read-only Canvas importer, the streaming Electron app, and the **unconditional server-side output gate**. It was built across parallel agent waves (worktrees under `canvas-agent-trees/`, all merged). **Build + Remediate are live-verified** against real local models through the gate.
 
-**Verified facts (re-run to confirm):**
-- `npm run typecheck` → clean (strict TS: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`).
-- `npm test` → **45 pass / 0 fail / 4 skipped** (the 4 skipped are the gated live-Ollama integration tests).
-- **Zero runtime dependencies.** Only devDeps: `tsx`, `typescript`, `@types/node`.
+This session did **no code changes**. It (a) ran `/graphify update` (no-op — nothing changed since the full build), and (b) **traced and adversarially verified** the two INFERRED knowledge-graph edges on `createAppApi()`. Both verified correct; two small graph-quality corrections are **proposed but not applied** (see §4). That's the main open thread.
+
+**Verified facts (per memory; re-run to confirm — this session did not re-run the suite):**
+- `npm run typecheck` → clean (strict TS).
+- `npm test` → ~**359 tests / 349 pass / 0 fail / 10 gated-skip** (skips are live Ollama/browser/docling).
+- **Zero runtime deps** except `playwright`+`axe-core` (engine-render) and `electron`(+builder) (shell).
 
 ---
 
-## 2. Environment (this machine)
+## 2. How to run / verify
 
-| Thing | State |
-|---|---|
-| Node | **v25.8.1** (package.json `engines` says `>=20`) |
-| Package manager | npm; `node_modules/` present (tsx/typescript/@types/node only) |
-| Git | **Not a git repo yet** (`git init` when ready to version) |
-| `ollama` | ✅ installed (`/usr/local/bin/ollama`) — but `gemma4:12b-mlx` model **not pulled** |
-| `docling-serve` | ❌ **not installed** (Python service for ingestion; `pip install docling-serve`) |
-| `python3` | ✅ 3.13.7 (`/Library/Frameworks/Python.framework/...`) |
-| Platform | macOS (darwin 25.5.0), Apple Silicon target |
-
-**Stray files to ignore / clean later:** `firebase-debug.log`, `.DS_Store` (leftovers, unrelated to this project; not in scope).
-
-### Run commands
 ```bash
-npm run typecheck          # tsc --noEmit (strict)
-npm test                   # tsx --test src/**/*.test.ts  (offline; mocks)
-npm run build              # tsc → dist/
-npm run llm:smoke          # tsx src/llm/example.ts  (needs live Ollama + model)
+npm run typecheck            # tsc --noEmit (strict)
+npm test                     # offline; src/**/*.test.ts + e2e (mocks/injected deps)
+npm run build                # tsc + copy:assets (knowledge-pack JSON + renderer html → dist/)
+npm run app                  # build + electron .   (the GUI)
 
-# To exercise the gated live-LLM integration tests:
-#   1) ollama pull gemma4:12b-mlx
-#   2) ollama serve   (or let OllamaProcess spawn it)
-#   3) RUN_OLLAMA_INTEGRATION=1 npm test
+# Live (real sidecars). Models pulled into Ollama; docling in .venv-docling:
+PATH=".venv-docling/bin:$PATH" MODEL_TEXT=gemma4:31b MODEL_VISION=qwen3-vl:latest npm run app
+
+# Gated integration tests:
+RUN_OLLAMA_INTEGRATION=1 npm test     # also RUN_BROWSER_INTEGRATION=1 / RUN_DOCLING_INTEGRATION=1
+
+# Live GUI drivers (Playwright _electron):
+scripts/drive-app.mjs · scripts/drive-remediate.mjs · scripts/check-bridge.mjs · scripts/probe-runtime.mjs
 ```
+
+**Note `npm test` globs must stay quoted** (`'src/**/*.test.ts'`) or `sh` flattens `**` and silently skips nested tests.
 
 ---
 
 ## 3. Architecture invariants (DO NOT VIOLATE)
 
-These are hard constraints from the PRD + user decisions. Every new module must honor them.
+Hard constraints from the PRD + user decisions. Every change must honor them.
 
-1. **No cloud models. No external network calls by default.** All inference is local (Ollama → Gemma 4 12B). No Anthropic/OpenAI/any hosted API, no cloud key, no fallback. The *only* opt-in external touches are the **read-only Canvas import** (PRD §17) and the **opt-in WAVE engine**. No telemetry, no cloud export, no image-fetch service (Pexels/Unsplash were removed). See memory `no-cloud-models-constraint`.
-2. **The output gate is unconditional and server-side.** `src/orchestrator/gate.ts::enforceGate()` runs the allowlist + audit on *every* emitted HTML fragment regardless of what the model produced; a residual **blocker withholds the "passed checks" badge** (`A11Y_FAIL_OPEN=false`). The model is never trusted to self-certify. Removing a *semantic* element during allowlist repair is itself a blocker.
-3. **Single-user Apple-Silicon desktop app.** SQLite + local files (not Postgres/pgvector); no app-level auth/SSO; Canvas token in macOS Keychain; the device is the security boundary. (PRD v1.6 right-sizing.)
-4. **No embeddings in v1.** KB retrieval = intent-scoped pack loading + lexical/structured selection (BM25 / SQLite FTS5 / rubric-ID routing). Semantic/vector search is deferred to Phase 3.
-5. **Read-only ingestion.** Docling converts/extracts only; never tag or remediate the source document.
-6. **Sidecar pattern for non-JS runtimes.** Both the Ollama model and the Python `docling-serve` run as bundled local HTTP sidecars (attach-if-running / spawn-if-not / health-check / graceful stop). Same lifecycle shape in `src/llm/process.ts` and `src/ingest/process.ts`.
-7. **Engineering conventions.** TypeScript ESM (NodeNext), strict tsconfig, `node:test` + `tsx` (no Jest/Vitest), **zero runtime dependencies**, dependency injection everywhere so everything is unit-testable offline. New code should match this.
-
----
-
-## 4. Repo map (what exists)
-
-```
-src/
-  llm/          ✅ Local LLM sidecar (Ollama / Gemma 4 12B) — text, vision, JSON, tool-calling
-  ingest/       ✅ Docling ingestion sidecar — read-only DOCX/PPTX/XLSX/PDF/image → structured
-  orchestrator/ ✅ Tool registry + bounded tool loop + the unconditional output gate
-PRD_…md (v1.6)  ✅ Spec
-package.json · tsconfig.json · .gitignore
-```
-
-### `src/llm/` — local inference (transport only)
-Public surface (`src/llm/index.ts`): `createOllamaSidecar`, `OllamaSidecar`, `OllamaClient`, `OllamaProcess`, `Mutex`, `loadLLMConfig`, plus payload helpers and types (`ChatMessage`, `ChatOptions`, `ChatResult`, `ToolDefinition`, `ToolCall`, `LLMConfig`, `MODEL_ROLES`, …).
-- Uses Ollama's **native `/api/chat`** internally (not the OpenAI-compat shim) to access `num_ctx`, `keep_alive`, structured `format`, `think`, `images[]`, and tool-calling. The same server still exposes `/v1` for any external tooling.
-- `OllamaSidecar`: `start/stop/chat/chatStream/chatJSON/describeImage`. `OllamaProcess`: attach-or-spawn, health via `/api/version`, warm-load via empty `/api/generate`, SIGTERM→SIGKILL stop. `Mutex` serializes calls (single-user).
-- Config defaults: baseUrl `http://localhost:11434/v1`, every model role → `gemma4:12b-mlx`, keepAlive `24h`, numCtx 32768, temp 0.3.
-- Tests: `config` (6), `payload` (~11, incl. tool mapping), `ndjson` (5), `integration` (4, **gated** behind `RUN_OLLAMA_INTEGRATION=1` + reachability).
-
-### `src/ingest/` — Docling ingestion sidecar
-Public surface (`src/ingest/index.ts`): `createDoclingSidecar`, `DoclingSidecar`, `DoclingClient`, `DoclingProcess`, `loadIngestConfig`, payload helpers, types.
-- Targets the **verified** `POST /v1/convert/source` API: `file_sources` (base64) / `http_sources`, `to_formats`, `do_ocr`/`force_ocr`; response `document.{md,html,text,json,doctags}_content` → normalized to `ConvertedDocument`.
-- `DoclingSidecar`: `convert/convertPath/convertUrl`. `DoclingProcess`: spawns `docling-serve run --host --port` (default 5001), health = any HTTP response.
-- Tests: `config` (5), `payload` (5). **No live integration test yet** (TODO — needs `docling-serve` installed).
-
-### `src/orchestrator/` — turn handling, tool dispatch, the gate
-Public surface (`src/orchestrator/index.ts`): `Orchestrator`, `OrchestratorError`, `ToolRegistry`, `createCanonicalTools`, `NotImplementedError`, `EngineDeps`, `enforceGate`, gate types.
-- `Orchestrator.handleTurn()` — prompt assembly + **bounded** tool loop (`maxToolIterations`, default 5; throws rather than looping forever). Unknown/throwing tools are reported to the model, not fatal.
-- `createCanonicalTools(deps)` builds the **8 canonical PRD §15.3 tools** via DI: `audit_html`, `validate_allowlist`, `check_contrast`, `resolve_theme`, `render_template`, `ingest_document`, `describe_image`, `retrieve_kb`. With no injected dep, a tool rejects with `NotImplementedError` (engine TODO). `describe_image`/`ingest_document` can already be wired to the two sidecars **today**.
-- `enforceGate(html, deps)` — the real, tested gate logic (badge withholding). Takes `validateAllowlist` + `audit` as injected deps (the engine supplies them later).
-- Tests: `registry` (5), `gate` (5), `orchestrator` (5, scripted-runner mock).
+1. **No cloud models; no external network calls by default.** All inference is local via Ollama. No Anthropic/OpenAI/hosted API, no cloud key, no telemetry, no cloud export, no image-fetch service (Pexels/Unsplash removed). Only opt-in external touch: the **read-only Canvas import** (GET-only, PRD §17) and the opt-in WAVE engine. See memory `no-cloud-models-constraint`. (`claude` was the dev tool only — never a runtime dependency.)
+2. **The output gate is unconditional and server-side.** `src/orchestrator/gate.ts::enforceGate()` runs allowlist + audit on *every* emitted HTML fragment regardless of model output; a residual **blocker withholds the badge** (`A11Y_FAIL_OPEN=false`). Removing a *semantic* element during allowlist repair is itself a blocker. The model never self-certifies. **`createAppApi` is the enforcement locus** — it calls `enforceGate` directly (see §4); the orchestrator does not.
+3. **Single-user Apple-Silicon desktop app.** `node:sqlite` + local files (Electron 42 bundles Node 24.15 — works with NO flag); no app-level auth/SSO; Canvas token in macOS Keychain (via `execFile` arg-array, never a shell string); the device is the security boundary.
+4. **No embeddings in v1.** KB retrieval = intent-scoped pack loading + lexical/structured selection (FTS5/BM25/rubric-ID routing). Vectors deferred to Phase 3.
+5. **Read-only ingestion.** Docling converts/extracts only; never tags or remediates the source.
+6. **Sidecar pattern.** Ollama + Python `docling-serve` run as local HTTP sidecars (attach-if-running / spawn-if-not / health / SIGTERM→SIGKILL). Same shape in `src/llm/process.ts` and `src/ingest/process.ts`.
+7. **Conventions.** TypeScript ESM (NodeNext), strict tsconfig (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`), `node:test` + `tsx` (no Jest/Vitest), zero runtime deps, **parameterized SQL only**, dependency injection everywhere for offline tests. Match this in new code.
 
 ---
 
-## 5. What's NOT built (the real work)
+## 4. This session's work — the knowledge graph + the open correction
 
-| Module (proposed) | Purpose | PRD | Depends on |
-|---|---|---|---|
-| **`src/engine`** | Deterministic accessibility engine: **allowlist gate** + **contrast math** (pure) and **render-and-scan** (Playwright/Chromium + axe/Pa11y/rulepack, computed contrast, optional WAVE). Supplies `audit_html`, `validate_allowlist`, `check_contrast` and the gate's `audit`/`validateAllowlist`. | §8, Appendix B/K | — (pure parts); Chromium (render parts) |
-| **`src/theme`** | ThemeResolver: accessible foregrounds for a brand palette + warnings/variants. Supplies `resolve_theme`. | §15.3 | contrast math (shared w/ engine) |
-| **`src/templates`** | The 8 Canvas templates filled from slots + resolved theme. Supplies `render_template`. | §15.3 | theme, allowlist |
-| **`src/knowledge`** | Knowledge Packs + **lexical/structured** retrieval (SQLite FTS5 / BM25 / rubric-ID routing; **no embeddings**). Supplies `retrieve_kb`. | §9.2, §13.1 | storage |
-| **`src/storage`** | SQLite schema, local file layout, Keychain token. | v1.6 | — (foundation) |
-| **`src/canvas`** | Opt-in **read-only** Canvas import (via canvas-lms MCP / REST). | §17 | storage |
-| **App shell** | Electron/Tauri over localhost; bundles + code-signs the two sidecars (Ollama + Python docling-serve); maps `TurnResult`+`GateResult` to UI payloads (§19). Packaging is its own track (notarization, sidecar signing). | §19–§22 | all of the above |
+**Graph:** `graphify-out/` holds a knowledge graph of `src/` (132 files) → **784 nodes / 2,139 edges / 23 communities** (`graph.json`, interactive `graph.html`, `GRAPH_REPORT.md`). Built from AST (711 nodes, deterministic) + a 6-subagent semantic layer (Gemini's API was down → fell back to Claude subagents). `graphify-out/` is **untracked / not gitignored** — decide whether to commit it or add to `.gitignore` (generated artifact, ~1.7 MB).
 
----
+**Verification done:** the two INFERRED edges touching the runtime keystone `createAppApi()` were traced and put through an adversarial panel (evidence-gatherer + 3 refutation lenses per edge, 8 agents). **Both edges are correct — 0/6 refutations.** Saved Q&A: `graphify-out/memory/query_20260605_060842_*.md`.
 
-## 6. Recommended parallel build plan
+**The headline finding:** the AST layer has **zero** `createAppApi → enforceGate` edges (the `enforceGate()` node exists but nothing structural links to it) because the gate calls live inside the nested closures `runStandardTurn`/`runRemediate` that the AST never promoted to nodes. So the two INFERRED semantic edges are the **only** record in the graph of the runtime's most safety-critical relationship (the unconditional gate). Also: the gate *code* lives in the orchestrator package (`orchestrator/gate.ts`) but is *invoked* from the runtime (`app-api.ts`) — `Orchestrator.handleTurn` never calls `enforceGate`; `createAppApi` gates *after* it returns. (Crosses the C0 Orchestrator ↔ C1 Runtime community boundary.)
 
-**Build order is engine-first (PRD §26.3): prove the deterministic engine with no LLM before wiring the model.** These tracks can run concurrently:
+**PROPOSED graph corrections — NOT yet applied** (next session's decision):
 
-- **Track A — Engine core (pure, TDD, START HERE).** `src/engine`: the **allowlist gate** (Canvas Appendix B allowlist + safe repair, surfacing `removedSemantic`) and **WCAG contrast math** (relative luminance + ratio, AA thresholds). Zero deps, fully unit-testable, and it **unblocks** the orchestrator's gate + 3 engine tools. Make `validateAllowlist`/`checkContrast` conform to the existing `GateDeps`/`EngineDeps` signatures in `orchestrator/gate.ts` + `orchestrator/tools.ts`.
-- **Track B — Engine render-and-scan.** Playwright/Chromium render + axe-core/Pa11y + rulepack + computed contrast + optional WAVE. Heavier (adds a real runtime dep + browser); produces `audit()` → `IssueSet`. Separable from A behind the same types.
-- **Track C — Theme + Templates.** ThemeResolver then the 8 templates; consumes contrast math from A and the allowlist from A.
-- **Track D — Knowledge.** Pack format + SQLite FTS5 retrieval. Independent; can start immediately.
-- **Track E — Storage foundation.** SQLite + Keychain + local file layout. Independent, foundational (D and others build on it).
-- **Track F — App shell + packaging.** Electron/Tauri, sidecar bundling/signing/notarization. Integrates last.
-- **Track G — Canvas read-only import.** Opt-in; independent.
+| Edge | Stored | Verdict | Proposed fix |
+|------|--------|---------|--------------|
+| "Remediate before-after re-audit loop" → `createAppApi()` | `rationale_for` / 0.85 | real, but mislabeled + under-confident | relabel → **`implements`** (direction: `createAppApi` *implements* the loop); bump **0.85 → 0.95** |
+| `createAppApi()` → "Unconditional output gate" | `references` / 0.95 | real, correctly calibrated | keep 0.95; optionally tighten `references` → **`calls`/`implements`** |
 
-**Quickest early win that needs no engine:** wire `describe_image` → `llm.describeImage` and `ingest_document` → `docling.convertPath` in `createCanonicalTools(...)` — both sidecars already exist. (Requires `ollama pull gemma4:12b-mlx` and `pip install docling-serve` to run live.)
+To apply: hand-edit `graphify-out/graph.json` + regenerate report/html, or (cleaner) re-run extraction so the semantic layer re-derives them. **Caveats to preserve if editing:** Edge-A's loop runs only on the remediate-WITH-`remediateInput` path (`runTurn` dispatch); `issueDiffs` is one-directional (before-keyed, misses post-edit regressions); Edge-B's concept is sourced to `engine/render/README.md` which only mentions the gate in passing (canonical def is `orchestrator/gate.ts:1-12`).
 
-**Suggested kickoff:** start **A + D + E** in parallel (all independent, all pure/foundational), then layer B/C, integrate F.
+**Other graph threads offered (not started):** why `ChatResult` bridges 6 communities; the 168 weakly-connected nodes (`TURN_VIEW`/`SESSION`/`SESSION_STATE`). Query the existing graph directly with `/graphify query "<question>"` (fast path — no rebuild). Re-run `/graphify update` after any code change to refresh.
 
 ---
 
-## 7. Per-module open TODOs (from the READMEs)
+## 5. Prioritized next tasks
 
-- **llm:** real-model integration runs are gated/skipped — exercise them once `gemma4:12b-mlx` is pulled. Consider a streaming turn helper for the chat UI.
-- **ingest:** add a live integration test (needs `docling-serve`); map an `ocr_preset` → Docling options; consider the async convert endpoints for large files.
-- **orchestrator:** wire the 5 engine tools to `src/engine`/`src/theme`/`src/templates`/`src/knowledge` as built; prompt assembly from Knowledge Packs (currently a passthrough); streaming turn variant; map `TurnResult`+`GateResult` into the §19 API payloads.
+**Canvas Agent (product):**
+1. **Drive-test the un-driven panels** (rendered + wired, not yet exercised live): Guidance Q&A, brand-kit save/reload, alignment panel, session persist→reload. Extend the `scripts/drive-*.mjs` pattern.
+2. **electron-builder mac packaging** — config present, **not executed**. Needs an Apple Developer cert (signing/notarization) and must bundle `dist/knowledge/packs` + the venv/sidecar binaries. See the 4 GUI/packaging gotchas in memory `build-status-and-conventions` (asset copy, `sandbox:false`, stub-fallback masking "ready", `ensureAppDirs` before `openDatabase`).
+3. **Model default nuance:** code keeps the PRD default `gemma4:12b-mlx` (so the "matches PRD Appendix H" test passes); live verification used `gemma4:31b` via `MODEL_TEXT`. Decide whether to change the code default (would need the test updated) — user has not asked to.
+
+**Knowledge graph (this session's thread):**
+4. Decide on the §4 edge corrections (apply or leave as honest INFERRED).
+5. Decide commit-vs-gitignore for `graphify-out/`.
+
+**Housekeeping:**
+6. **Prune the 6 merged worktrees** under `/Users/laccd/code/canvas-agent-trees/` — `w1-canvas-fetch`, `w1-orchestrator-modes`, `w1-runtime-spine`, `w1-storage-sessions`, `w2-app-ipc-streaming`, `w2-app-ui` — all merged to `main`. `git worktree remove <path>` then `git branch -d track/<name>`.
 
 ---
 
-## 8. Decision log (the "why", so it isn't relitigated)
+## 6. Decision log (the "why", so it isn't relitigated)
 
-- **Ollama over mlx-vlm / vLLM** — company-backed & mature vs single-maintainer; MLX engine serves Gemma 4 12B with vision on Apple Silicon. (vLLM *can* run on Apple Silicon via vllm-metal — that earlier claim was corrected — but Ollama was chosen for robustness/packaging.)
-- **Single Gemma 4 12B for everything** — text + vision + audio in one resident model; rejected a separate vision model (memory weight) and LiteRT-LM (its 12B build is text+audio only, 32K cap).
+- **Ollama over mlx-vlm / vLLM** — company-backed & mature vs single-maintainer; serves Gemma-class models with vision on Apple Silicon. (vLLM can run on Apple Silicon via vllm-metal, but Ollama was chosen for robustness/packaging.)
+- **Single resident model for everything** — text + vision in one model; rejected a separate vision model (memory weight) and LiteRT-LM (text+audio only, 32K cap). Code default is `gemma4:12b-mlx` (PRD Appendix H); live runs used `gemma4:31b` + `qwen3-vl` via env.
 - **Native Ollama `/api/chat` internally** — needed `num_ctx`/`keep_alive`/`format`/`think`/`images`/tools the OpenAI-compat shim omits.
-- **Docling + Granite-Docling-258M** — only evaluated tool that natively parses Office Open XML (DOCX/PPTX/XLSX), preserving headings/reading order without a render→OCR round-trip; Granite-Docling (258M, MLX ~631MB) only for hard scanned pages; OcrMac (native Vision) as default OCR. Rejected OpenDataLoader (PDF-only) and Gemma-as-parser.
+- **Docling + Granite-Docling-258M** — only evaluated tool that natively parses Office Open XML (DOCX/PPTX/XLSX), preserving headings/reading order without a render→OCR round-trip; Granite-Docling only for hard scanned pages; OcrMac (native Vision) default OCR. Rejected OpenDataLoader (PDF-only) and Gemma-as-parser. See memory `document-ingestion-stack`.
 - **No embeddings v1** — lexical/FTS5 is enough for intent-scoped packs; vector search deferred to Phase 3.
-- **Removed Pexels/Unsplash + cloud export** — images are user-supplied only (alt text drafted on-device); exports go to local filesystem → zero external calls by default.
+- **Removed Pexels/Unsplash + cloud export** — images are user-supplied only (alt text drafted on-device); exports go to the local filesystem → zero external calls by default.
+- **Frozen additive contract** — `src/contracts/index.ts` is the cross-track coordination backbone; the product layer extended it additively (`ProductMode`, `RemediateResult`, `Session*`, `BrandKit`, `CanvasPage`, `TurnChunk`/`OnTurnChunk`; `AppApi` grew to 13 methods). Keep additions additive.
 
 ---
 
-## 9. Pointers
+## 7. Pointers
 
-- **PRD sections that matter most for the build:** §8 (engine), §9.2 + §13.1 (retrieval), §15 (tools/orchestration), §16 (ingestion), §17 (read-only Canvas), §19–§22 (API/UI/preview), §26.3 (build order), Appendix B (allowlist), Appendix H (env vars), Appendix K (WAVE).
-- **Memories** (`~/.claude/projects/-Users-laccd-code-canvas-agent/memory/`): `no-cloud-models-constraint`, `document-ingestion-stack`, `build-status-and-conventions`.
-- **Canvas tooling available in-session:** the `canvas-lms` MCP (646 tools incl. `get_canvas_html_allowlist`, `validate_html_accessibility`, `sanitize_html_for_canvas`) — useful as a *reference oracle* when building the engine's allowlist/audit, though the shipped app must run those checks **locally** (no external calls).
+- **Specs:** `docs/superpowers/specs/2026-06-04-product-layer-design.md` (product layer), `2026-06-04-parallel-agent-build-design.md` (engine build runbook).
+- **Memories** (`~/.claude/projects/-Users-laccd-code-canvas-agent/memory/`): `build-status-and-conventions` (fullest build record + the 4 packaging gotchas), `no-cloud-models-constraint`, `document-ingestion-stack`.
+- **Graph:** `graphify-out/graph.html` (open in browser), `GRAPH_REPORT.md` (God Nodes / Surprising Connections / Suggested Questions), saved query in `graphify-out/memory/`.
+- **Git:** `main` @ `ccaff9f`; product-layer history is the Wave 1/Wave 2 merges + the four live-bug fixes (`69ffd10` sandbox:false, `9b8504c` copy:assets, `20d85ef` ensureAppDirs, `f9ea33c` router split).
+- **PRD sections that matter most:** §8 (engine), §9.2 + §13.1 (retrieval), §15 (tools/orchestration), §16 (ingestion), §17 (read-only Canvas), §19–§22 (API/UI/preview), §26.3 (build order), Appendix B (allowlist), Appendix H (env vars), Appendix K (WAVE).
+- **Canvas tooling in-session:** the `canvas-lms` MCP (646 tools incl. `get_canvas_html_allowlist`, `validate_html_accessibility`, `sanitize_html_for_canvas`) — useful as a *reference oracle* when evolving the engine's allowlist/audit, though the shipped app runs those checks **locally** (no external calls).
