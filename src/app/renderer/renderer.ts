@@ -1,157 +1,173 @@
 /**
- * Renderer — the minimal vanilla-TS UI. Runs in the sandboxed browser context.
+ * Renderer shell — the vanilla-TS UI that wires the three-mode product surface.
  *
- * All decision logic is delegated to the PURE, unit-tested `turnViewToVm`
- * (`../view.ts`); this file only does DOM work: read the prompt, call
- * `window.canvasAgent.runTurn`, and paint the transcript. It is NOT unit-tested
- * (no DOM under `node:test`); it's covered by the manual `npm run app` smoke.
+ * Pure decision logic lives in `../view.ts` (unit-tested); all the DOM work is
+ * split across small modules under this directory: `ui.ts` (DOM facade + helpers,
+ * the ONLY module touching `document`/`window`), `conversation.ts` (streaming
+ * transcript + gated fragment cards + remediate diff), `sessions.ts`,
+ * `brandkit.ts`, `alignment.ts`, and `preview.ts` (Canvas-fidelity preview +
+ * export). This shell owns app state — selected mode and active session — and
+ * threads it into every `runTurn`.
  *
- * DOM typing: we deliberately do NOT pull in the full `dom` lib. A global
- * `/// <reference lib="dom" />` would redefine shared globals (e.g.
- * `ReadableStream`) for the WHOLE program and break sibling modules typed
- * against Node's lib. Instead this file declares a small, module-scoped DOM
- * facade covering exactly the surface the renderer touches — isolated, with no
- * effect on any other track's types.
- *
- * Safety: assistant/user text is written via `textContent` (never interpolated
- * as HTML). The ONLY `innerHTML` sink is each fragment's `gate.html`, which has
- * already passed the unconditional allowlist + audit gate and is therefore
- * Canvas-safe to render.
+ * Not unit-tested (no DOM under `node:test`); covered by the manual `npm run app`
+ * smoke. Safety invariants live in the modules: the only `innerHTML` sink is
+ * gated HTML; everything else is `textContent`; the preview iframe is
+ * script-disabled `srcdoc`.
  */
-import type { AppApi } from '../../contracts/index.js';
-import { turnViewToVm, type FragmentVm, type TurnVm } from '../view.js';
+import { api, byId, el, errorMessage, onReady, setHidden, type El } from './ui.js';
+import { createConversation, type Conversation } from './conversation.js';
+import { createSessions } from './sessions.js';
+import { createBrandKit } from './brandkit.js';
+import { composeAlignmentPrompt, createAlignment } from './alignment.js';
+import type { ProductMode, TurnRequest } from '../../contracts/index.js';
 
-// ── Module-local DOM facade (see header) ─────────────────────────────────────
-interface DomEvent {
-  readonly metaKey: boolean;
-  readonly ctrlKey: boolean;
-  readonly key: string;
-}
-interface El {
-  className: string;
-  textContent: string | null;
-  innerHTML: string;
-  value: string;
-  disabled: boolean;
-  scrollTop: number;
-  readonly scrollHeight: number;
-  setAttribute(name: string, value: string): void;
-  append(...nodes: (El | string)[]): void;
-  addEventListener(type: string, handler: (event: DomEvent) => void): void;
-}
-interface Doc {
-  readonly readyState: string;
-  createElement(tag: string): El;
-  getElementById(id: string): El | null;
-  addEventListener(type: string, handler: () => void): void;
-}
-declare const document: Doc;
-declare const window: { canvasAgent: AppApi };
+type ModeChoice = 'auto' | ProductMode;
 
-// ── DOM helpers ──────────────────────────────────────────────────────────────
-function el(tag: string, attrs: Record<string, string> = {}, ...children: (El | string)[]): El {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === 'class') node.className = v;
-    else node.setAttribute(k, v);
-  }
-  node.append(...children);
-  return node;
-}
-
-function renderFragment(fragment: FragmentVm): El {
-  const badge = el(
-    'span',
-    { class: `badge badge--${fragment.badge.kind}`, role: 'status' },
-    fragment.badge.label,
-  );
-
-  const card = el('article', { class: 'fragment' }, badge);
-
-  // The gated HTML is the trusted output of `enforceGate` — safe to inject.
-  const body = el('div', { class: 'fragment__html' });
-  body.innerHTML = fragment.html;
-  card.append(body);
-
-  if (fragment.blockers.length > 0) {
-    const list = el('ul', { class: 'fragment__blockers' });
-    for (const message of fragment.blockers) list.append(el('li', {}, message));
-    card.append(el('p', { class: 'fragment__blockers-label' }, 'Blocking issues:'), list);
-  }
-
-  if (fragment.needsReview.length > 0) {
-    const list = el('ul', { class: 'fragment__review' });
-    for (const message of fragment.needsReview) list.append(el('li', {}, message));
-    card.append(el('p', { class: 'fragment__review-label' }, 'Needs human review:'), list);
-  }
-
-  return card;
-}
-
-function renderTurn(vm: TurnVm): El {
-  const turn = el('section', { class: 'turn turn--assistant' });
-
-  if (vm.text) turn.append(el('p', { class: 'turn__text' }, vm.text));
-
-  for (const fragment of vm.fragments) turn.append(renderFragment(fragment));
-
-  if (vm.toolsUsed.length > 0) {
-    turn.append(
-      el(
-        'p',
-        { class: 'turn__tools' },
-        `Tools used: ${vm.toolsUsed.join(', ')} · ${vm.iterations} iteration(s)`,
-      ),
-    );
-  }
-
-  return turn;
-}
-
-function renderUserMessage(text: string): El {
-  return el('section', { class: 'turn turn--user' }, el('p', { class: 'turn__text' }, text));
-}
+const MODES: ReadonlyArray<{ id: ModeChoice; label: string }> = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'guidance', label: 'Guidance' },
+  { id: 'build', label: 'Build' },
+  { id: 'remediate', label: 'Remediate' },
+];
 
 function mount(): void {
-  const promptEl = document.getElementById('prompt');
-  const submitEl = document.getElementById('submit');
-  const transcriptEl = document.getElementById('transcript');
-  const healthEl = document.getElementById('health');
-  if (!promptEl || !submitEl || !transcriptEl || !healthEl) return;
+  const modeBar = byId('mode-bar');
+  const sidebar = byId('sidebar');
+  const transcript = byId('transcript');
+  const remediateWrap = byId('remediate-wrap');
+  const remediateSource = byId('remediate-source');
+  const promptEl = byId('prompt');
+  const submitEl = byId('submit');
+  const panelHost = byId('panel-host');
+  const toggleBrand = byId('toggle-brand');
+  const toggleAlign = byId('toggle-align');
+  const healthEl = byId('health');
+  if (
+    !modeBar || !sidebar || !transcript || !remediateWrap || !remediateSource ||
+    !promptEl || !submitEl || !panelHost || !toggleBrand || !toggleAlign || !healthEl
+  ) {
+    return;
+  }
+
+  // ── App state ──
+  let currentMode: ModeChoice = 'auto';
+  let currentSessionId: string | undefined;
+  let inFlight = false;
 
   void refreshHealth(healthEl);
 
-  async function submit(): Promise<void> {
-    const user = promptEl!.value.trim();
-    if (!user) return;
+  // ── Conversation (transcript) ──
+  const conversation: Conversation = createConversation({
+    transcript,
+    onCheckAlignment: (html) => runGuidance(composeAlignmentPrompt({ content: html })),
+  });
 
-    transcriptEl!.append(renderUserMessage(user));
-    promptEl!.value = '';
+  // ── Mode selector (§1) ──
+  const modeButtons: El[] = MODES.map((m) => {
+    const btn = el('button', { type: 'button', class: 'mode', 'data-mode': m.id }, m.label);
+    btn.addEventListener('click', () => setMode(m.id));
+    return btn;
+  });
+  modeBar.replaceChildren(...modeButtons);
+
+  function setMode(mode: ModeChoice): void {
+    currentMode = mode;
+    MODES.forEach((m, i) => {
+      const btn = modeButtons[i];
+      if (btn) btn.className = m.id === mode ? 'mode mode--on' : 'mode';
+    });
+    setHidden(remediateWrap!, mode !== 'remediate');
+  }
+  setMode('auto');
+
+  // ── Sessions (§2) ──
+  const sessions = createSessions({
+    getMode: () => (currentMode === 'auto' ? 'guidance' : currentMode),
+    onActivate: (state) => {
+      currentSessionId = state.session.id;
+      conversation.repaint(state.messages);
+      sessions.setActive(currentSessionId);
+    },
+    onDeleted: (id) => {
+      if (currentSessionId === id) {
+        currentSessionId = undefined;
+        conversation.clear();
+      }
+    },
+    onError: (m) => conversation.appendError(m),
+  });
+  sidebar.replaceChildren(sessions.element);
+  void sessions.refresh();
+
+  // ── Panels: brand kit (§6) + alignment coach (§7) ──
+  const brand = createBrandKit({ onError: (m) => conversation.appendError(m) });
+  const alignment = createAlignment({ onCheck: (prompt) => runGuidance(prompt) });
+  panelHost.append(brand.element, alignment.element);
+  setHidden(brand.element, true);
+  setHidden(alignment.element, true);
+  setHidden(panelHost, true);
+
+  type PanelName = 'brand' | 'align' | null;
+  let openPanel: PanelName = null;
+  function showPanel(name: PanelName): void {
+    openPanel = name;
+    setHidden(brand.element, name !== 'brand');
+    setHidden(alignment.element, name !== 'align');
+    setHidden(panelHost!, name === null);
+    toggleBrand!.className = name === 'brand' ? 'toggle toggle--on' : 'toggle';
+    toggleAlign!.className = name === 'align' ? 'toggle toggle--on' : 'toggle';
+    if (name === 'brand') void brand.refresh();
+  }
+  toggleBrand.addEventListener('click', () => showPanel(openPanel === 'brand' ? null : 'brand'));
+  toggleAlign.addEventListener('click', () => showPanel(openPanel === 'align' ? null : 'align'));
+
+  // ── Turn execution (streaming, shared by submit + composed guidance) ──
+  async function runTurnReq(req: TurnRequest): Promise<void> {
+    if (inFlight) return;
+    inFlight = true;
     submitEl!.disabled = true;
-
+    conversation.appendUser(req.user);
+    const turn = conversation.beginAssistantTurn();
     try {
-      const view = await window.canvasAgent.runTurn({ user });
-      transcriptEl!.append(renderTurn(turnViewToVm(view)));
+      const view = await api().runTurn(req, (chunk) => turn.onChunk(chunk));
+      turn.finalize(view);
+      if (currentSessionId) void sessions.refresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      transcriptEl!.append(
-        el('section', { class: 'turn turn--error' }, el('p', {}, `Error: ${message}`)),
-      );
+      turn.fail(errorMessage(err));
     } finally {
+      inFlight = false;
       submitEl!.disabled = false;
-      transcriptEl!.scrollTop = transcriptEl!.scrollHeight;
     }
   }
 
-  submitEl.addEventListener('click', () => void submit());
+  function submit(): void {
+    const user = promptEl!.value.trim();
+    if (!user) return;
+    const req: TurnRequest = { user };
+    if (currentMode !== 'auto') req.mode = currentMode;
+    if (currentSessionId) req.sessionId = currentSessionId;
+    if (currentMode === 'remediate') {
+      req.remediateInput = { sourceHtml: remediateSource!.value };
+    }
+    promptEl!.value = '';
+    void runTurnReq(req);
+  }
+
+  function runGuidance(prompt: string): void {
+    const req: TurnRequest = { user: prompt, mode: 'guidance' };
+    if (currentSessionId) req.sessionId = currentSessionId;
+    void runTurnReq(req);
+  }
+
+  submitEl.addEventListener('click', () => submit());
   promptEl.addEventListener('keydown', (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void submit();
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submit();
   });
 }
 
 async function refreshHealth(healthEl: El): Promise<void> {
   try {
-    const health = await window.canvasAgent.health();
+    const health = await api().health();
     const ok = health.llm && health.ingest;
     healthEl.textContent = ok
       ? 'Local runtime: ready'
@@ -163,8 +179,4 @@ async function refreshHealth(healthEl: El): Promise<void> {
   }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', mount);
-} else {
-  mount();
-}
+onReady(mount);
