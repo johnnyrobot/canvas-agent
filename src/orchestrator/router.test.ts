@@ -54,9 +54,20 @@ test('ambiguous input falls back to guidance', () => {
   assert.equal(d.confidence, 0.5);
 });
 
-test('remediation signal beats build signal (precedence)', () => {
-  // "create" is a build word, but the remediation intent should dominate.
+test('strong remediation signal beats build signal (precedence)', () => {
+  // "create" is a build word, but the strong repair intent should dominate.
   assert.equal(routeIntent('fix this page I want to create').mode, 'remediate');
+});
+
+test('an authoring verb beats weak a11y words (create an accessible page ⇒ build)', () => {
+  // Regression: "accessible"/"contrast" alone must not hijack an authoring request.
+  for (const msg of [
+    'Create an accessible Canvas module-overview page titled "Photosynthesis"',
+    'make an accessible syllabus with good contrast',
+    'build a high-contrast quiz',
+  ]) {
+    assert.equal(routeIntent(msg).mode, 'build', msg);
+  }
 });
 
 test('confidence rises with more matched signals', () => {
