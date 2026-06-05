@@ -9,12 +9,32 @@ accessibility gate**. The gate — not the model — guarantees safety (PRD §13
 
 | File | Responsibility |
 |---|---|
-| `types.ts` | `Tool`, `ChatRunner`, `TurnInput/TurnResult` |
-| `registry.ts` | `ToolRegistry` (register / advertise definitions) |
+| `types.ts` | `Tool`, `ChatRunner` (+ optional `chatStream`), `TurnInput/TurnResult`, `ToolContext`, `OrchestratorEvent` |
+| `router.ts` | `routeIntent()` — deterministic intent → `ProductMode` (override / build / remediate / guidance) |
+| `modes.ts` | Per-mode system prompts, allowed tool names, KB packs + `toolsForMode` / `packsForMode` helpers |
+| `registry.ts` | `ToolRegistry` (register / advertise definitions; stays mode-agnostic) |
 | `tools.ts` | Canonical tools (PRD §15.3) via DI — engine tools stub until `/src/engine` exists |
 | `gate.ts` | `enforceGate()` — allowlist + audit; a blocker withholds the badge (`A11Y_FAIL_OPEN=false`) |
-| `orchestrator.ts` | `Orchestrator.handleTurn()` — prompt + bounded tool loop |
+| `orchestrator.ts` | `Orchestrator.handleTurn()` — prompt + bounded tool loop + mode filtering + streaming |
 | `*.test.ts` | Unit tests (mock runner + mock tools; fully offline) |
+
+## Modes
+
+`handleTurn` is mode-aware via `TurnInput.mode` (set by the runtime from
+`routeIntent`, which honours an explicit user override). When a mode is set the
+turn advertises only that mode's tools (`toolsForMode`) and scopes KB retrieval
+to that mode's packs (`packsForMode`); with no mode it behaves exactly as before.
+The runtime — not the orchestrator — chooses the system prompt (`input.system`);
+`modes.ts` only supplies the catalog (`SYSTEM_PROMPT_BY_MODE`).
+
+## Streaming
+
+When `ToolContext.onEvent` is provided **and** the runner implements
+`chatStream`, each model call is streamed: text deltas are emitted as
+`{ type: 'text', delta }` and accumulated into the turn text. A `{ type: 'tool',
+name }` event fires as each tool begins executing. Without `onEvent`, or without
+`chatStream`, the non-streaming `chat` path runs unchanged (it emits a single
+terminal text event when `onEvent` is set). The output gate stays in the runtime.
 
 ## Usage
 
@@ -59,9 +79,10 @@ if (gated.badgeWithheld) { /* show blockers, withhold "passed checks" */ }
 ## Scaffold status / TODO
 
 - ✅ Registry, gate logic, and the tool loop are unit-tested with mocks.
+- ✅ Intent router + per-mode prompts/tools/packs (`router.ts`, `modes.ts`).
+- ✅ Streaming turn variant (token stream + tool events via `ToolContext.onEvent`).
+- ✅ Knowledge-Pack prompt grounding (`prompt.ts`); mode-scoped retrieval in `handleTurn`.
 - ⬜ Engine tools (`audit_html`, `validate_allowlist`, `check_contrast`,
   `resolve_theme`, `render_template`, `retrieve_kb`) — wire to `/src/engine`,
   `/src/theme`, `/src/templates`, `/src/knowledge` as they're built.
-- ⬜ Prompt assembly from Knowledge Packs (PRD §15.2) — currently a passthrough.
-- ⬜ Streaming turn variant (token stream to the chat UI).
 - ⬜ Map `TurnResult` + `GateResult` into the API payloads (PRD §19).

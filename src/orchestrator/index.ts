@@ -13,6 +13,16 @@ export type { EngineDeps } from './tools.js';
 export { enforceGate } from './gate.js';
 export { groundSystemPrompt, DEFAULT_MAX_CITATIONS } from './prompt.js';
 export type { GroundingOptions } from './prompt.js';
+export { routeIntent } from './router.js';
+export type { IntentDecision } from './router.js';
+export {
+  SYSTEM_PROMPT_BY_MODE,
+  TOOLS_BY_MODE,
+  KB_PACKS_BY_MODE,
+  systemPromptForMode,
+  toolsForMode,
+  packsForMode,
+} from './modes.js';
 export type {
   GateDeps,
   GateResult,
@@ -29,4 +39,5 @@ export type {
   TurnInput,
   TurnResult,
   ToolInvocation,
+  OrchestratorEvent,
 } from './types.js';
