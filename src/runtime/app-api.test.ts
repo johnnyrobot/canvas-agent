@@ -1,22 +1,67 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ChatMessage, ChatOptions, ChatResult } from '../llm/index.js';
-import type { Auditor, CanvasImportResult, KbResult } from '../contracts/index.js';
+import type {
+  AllowlistResult,
+  AuditIssue,
+  Auditor,
+  CanvasImportResult,
+  GateDeps,
+  IssueSet,
+  KbResult,
+  TurnChunk,
+} from '../contracts/index.js';
 import { validateAllowlist } from '../engine/index.js';
 import type { ChatRunner } from '../orchestrator/index.js';
+import { migrate, openDatabase } from '../storage/index.js';
+import type { SessionStore } from '../storage/index.js';
 import { createAppApi } from './app-api.js';
 
-/** A scripted model: returns queued responses, records the system prompt it saw. */
+/** A scripted model: returns queued responses, records what each call saw. */
 class ScriptedRunner implements ChatRunner {
   systems: Array<string | undefined> = [];
+  messagesSeen: ChatMessage[][] = [];
   constructor(private readonly script: ChatResult[]) {}
   async chat(opts: ChatOptions): Promise<ChatResult> {
     const sys = opts.messages.find((m: ChatMessage) => m.role === 'system');
     this.systems.push(typeof sys?.content === 'string' ? sys.content : undefined);
+    this.messagesSeen.push(opts.messages);
     const next = this.script.shift();
     if (!next) throw new Error('ScriptedRunner exhausted');
     return next;
   }
+}
+
+/** Open a migrated in-memory DB (real stores, no file). */
+async function freshDb() {
+  const db = await openDatabase(':memory:');
+  await migrate(db);
+  return db;
+}
+
+/** A gate that flags issues by sentinel markers in the HTML (offline, deterministic). */
+function markerGate(): GateDeps {
+  return {
+    validateAllowlist: async (html: string): Promise<AllowlistResult> => ({ html, removedSemantic: [] }),
+    audit: async (html: string): Promise<IssueSet> => {
+      const issues: AuditIssue[] = [];
+      if (html.includes('LOWCONTRAST')) issues.push({ id: 'contrast', severity: 'blocker', message: 'low contrast' });
+      if (html.includes('NOALT')) issues.push({ id: 'alt-text', severity: 'error', message: 'missing alt' });
+      return { issues };
+    },
+  };
+}
+
+/** A gate that emits one blocker per 'X' in the HTML (drives the re-audit loop). */
+function xGate(): GateDeps {
+  return {
+    validateAllowlist: async (html: string): Promise<AllowlistResult> => ({ html, removedSemantic: [] }),
+    audit: async (html: string): Promise<IssueSet> => ({
+      issues: [...html]
+        .filter((ch) => ch === 'X')
+        .map((_, i): AuditIssue => ({ id: `blk-${i}`, severity: 'blocker', message: 'residual issue' })),
+    }),
+  };
 }
 
 const cleanAudit: Auditor = async () => ({ issues: [] });
@@ -129,4 +174,218 @@ test('importCanvas delegates to the injected importer', async () => {
   const res = await view.importCanvas({ baseUrl: 'https://canvas.test', token: 't' }, '42');
   assert.deepEqual(res, expected);
   assert.deepEqual(seen, { baseUrl: 'https://canvas.test', courseId: '42' });
+});
+
+// ── Mode routing + streaming ─────────────────────────────────────────────────
+
+test('runTurn echoes the routed mode (build keywords → build; default → guidance; override wins)', async () => {
+  const build = await api(new ScriptedRunner([text('ok')])).runTurn({ user: 'create a syllabus page' });
+  assert.equal(build.mode, 'build');
+
+  const guidance = await api(new ScriptedRunner([text('ok')])).runTurn({ user: 'tell me about headings' });
+  assert.equal(guidance.mode, 'guidance');
+
+  const overridden = await api(new ScriptedRunner([text('ok')])).runTurn({ user: 'create a page', mode: 'guidance' });
+  assert.equal(overridden.mode, 'guidance');
+});
+
+test('runTurn uses the per-mode system prompt by default', async () => {
+  const runner = new ScriptedRunner([text('ok')]);
+  await api(runner).runTurn({ user: 'create a syllabus page' }); // → build
+  assert.ok(runner.systems[0]?.includes('Mode: BUILD'), 'build mode prompt assembled');
+});
+
+test('runTurn streams tool, text, and fragment chunks to onChunk', async () => {
+  const runner = new ScriptedRunner([
+    callTool('render_template', { type: 'page-content', slots: { title: 'Welcome', sections: [{ heading: 'Intro', body: 'Hello' }] } }),
+    text('done'),
+  ]);
+  const chunks: TurnChunk[] = [];
+  const view = await api(runner).runTurn({ user: 'build a page' }, (c) => chunks.push(c));
+
+  assert.ok(chunks.some((c) => c.type === 'tool' && c.name === 'render_template'), 'tool chunk streamed');
+  assert.ok(chunks.some((c) => c.type === 'text' && c.delta === 'done'), 'text chunk streamed');
+  assert.ok(chunks.some((c) => c.type === 'fragment'), 'fragment chunk streamed');
+  assert.equal(view.fragments.length, 1);
+});
+
+// ── Sessions (real in-memory store + persistence) ────────────────────────────
+
+test('sessions: create / list / load / delete round-trip', async () => {
+  const db = await freshDb();
+  const app = api(new ScriptedRunner([]), { db });
+
+  const s = await app.createSession({ title: 'My chat', mode: 'build' });
+  assert.equal(s.title, 'My chat');
+  assert.equal(s.mode, 'build');
+
+  const list = await app.listSessions();
+  assert.equal(list.length, 1);
+  assert.equal(list[0]?.id, s.id);
+
+  const loaded = await app.loadSession(s.id);
+  assert.equal(loaded?.session.id, s.id);
+  assert.deepEqual(loaded?.messages, []);
+
+  await app.deleteSession(s.id);
+  assert.equal((await app.listSessions()).length, 0);
+  assert.equal(await app.loadSession(s.id), null);
+});
+
+test('a turn with sessionId persists user+assistant and replays them as history', async () => {
+  const db = await freshDb();
+  const runner = new ScriptedRunner([text('first answer'), text('second answer')]);
+  const app = api(runner, { db });
+  const s = await app.createSession({ title: 'chat', mode: 'guidance' });
+
+  await app.runTurn({ user: 'hello', sessionId: s.id });
+  const after1 = await app.loadSession(s.id);
+  assert.deepEqual(after1?.messages, [
+    { role: 'user', content: 'hello' },
+    { role: 'assistant', content: 'first answer' },
+  ]);
+
+  await app.runTurn({ user: 'again', sessionId: s.id });
+  // The second model call must have seen the prior turn replayed as history.
+  const seen = runner.messagesSeen[1] ?? [];
+  assert.ok(seen.some((m) => m.role === 'user' && m.content === 'hello'), 'prior user replayed');
+  assert.ok(seen.some((m) => m.role === 'assistant' && m.content === 'first answer'), 'prior assistant replayed');
+
+  const after2 = await app.loadSession(s.id);
+  assert.equal(after2?.messages.length, 4);
+});
+
+test('session methods honor an injected sessionStore (override seam)', async () => {
+  let createdWith: { title: string; mode: string } | undefined;
+  const store: SessionStore = {
+    createSession: async (init) => { createdWith = init; return { id: 'sx', title: init.title, mode: init.mode, createdAt: 't', updatedAt: 't' }; },
+    listSessions: async () => [],
+    loadSession: async () => null,
+    appendMessages: async () => {},
+    deleteSession: async () => {},
+  };
+  const app = api(new ScriptedRunner([]), { sessionStore: store });
+  const s = await app.createSession({ title: 'x', mode: 'build' });
+  assert.equal(s.id, 'sx');
+  assert.deepEqual(createdWith, { title: 'x', mode: 'build' });
+});
+
+// ── Brand kits + theme (pure engine math; no LLM) ────────────────────────────
+
+test('brand kits: save / list / delete round-trip', async () => {
+  const db = await freshDb();
+  const app = api(new ScriptedRunner([]), { db });
+
+  const saved = await app.saveBrandKit({ name: 'Brand', palette: { primary: '#0a0a0a', secondary: '#ffffff' } });
+  assert.ok(saved.id);
+  assert.ok(saved.createdAt);
+  assert.equal(saved.name, 'Brand');
+
+  const list = await app.listBrandKits();
+  assert.equal(list.length, 1);
+  assert.equal(list[0]?.id, saved.id);
+
+  await app.deleteBrandKit(saved.id);
+  assert.equal((await app.listBrandKits()).length, 0);
+});
+
+test('resolveBrandTheme uses the real theme resolver (AA-safe; no model call)', async () => {
+  const runner = new ScriptedRunner([]); // never called
+  const theme = await api(runner).resolveBrandTheme('#0a0a0a', '#ffffff');
+  assert.ok(theme.colors.length > 0);
+  for (const c of theme.colors) assert.equal(c.contrast.passesAA, true);
+});
+
+test('resolveBrandTheme honors an injected resolver (override seam)', async () => {
+  let seen: { p: string; s: string } | undefined;
+  const app = api(new ScriptedRunner([]), {
+    resolveTheme: async (p, s) => { seen = { p, s }; return { colors: [], warnings: ['stub'] }; },
+  });
+  const t = await app.resolveBrandTheme('#111111', '#222222');
+  assert.deepEqual(seen, { p: '#111111', s: '#222222' });
+  assert.deepEqual(t.warnings, ['stub']);
+});
+
+// ── Read-only Canvas page access ─────────────────────────────────────────────
+
+test('fetchCanvasPage / listCanvasPages delegate to the injected readers', async () => {
+  const app = api(new ScriptedRunner([]), {
+    fetchPageBody: async (cfg, courseId, pageId) => `body:${cfg.baseUrl}:${courseId}:${pageId}`,
+    listPages: async () => [{ id: 'p1', title: 'Page 1' }],
+  });
+  const cfg = { baseUrl: 'https://canvas.test', token: 't' };
+  assert.equal(await app.fetchCanvasPage(cfg, '7', 'intro'), 'body:https://canvas.test:7:intro');
+  assert.deepEqual(await app.listCanvasPages(cfg, '7'), [{ id: 'p1', title: 'Page 1' }]);
+});
+
+// ── Remediate flow ───────────────────────────────────────────────────────────
+
+test('remediate diffs issues by id (fixed = gone after), emits one fragment, never touches Canvas', async () => {
+  const source = '<p class="LOWCONTRAST"><img alt="" data-x="NOALT"></p>';
+  const fixed = '<p data-x="NOALT">repaired, but alt still missing</p>';
+  const runner = new ScriptedRunner([text('```html\n' + fixed + '\n```')]);
+  let canvasCalls = 0;
+  const chunks: TurnChunk[] = [];
+
+  const view = await api(runner, {
+    gate: markerGate(),
+    fetchPageBody: async () => { canvasCalls++; return ''; },
+    listPages: async () => { canvasCalls++; return []; },
+  }).runTurn(
+    { user: 'fix my page', mode: 'remediate', remediateInput: { sourceHtml: source } },
+    (c) => chunks.push(c),
+  );
+
+  assert.equal(view.mode, 'remediate');
+  assert.equal(view.fragments.length, 1);
+  const frag = view.fragments[0]!;
+  const rr = frag.remediateResult;
+  assert.ok(rr, 'fragment carries a RemediateResult');
+  assert.equal(rr!.before, source);
+  assert.equal(rr!.after, fixed);
+  assert.equal(rr!.gate.badgeWithheld, false, 'the blocker is gone → badge granted');
+
+  const fixedById = Object.fromEntries(rr!.issueDiffs.map((d) => [d.issue.id, d.fixed]));
+  assert.equal(fixedById['contrast'], true, 'contrast blocker fixed');
+  assert.equal(fixedById['alt-text'], false, 'alt-text issue still present');
+
+  assert.ok(chunks.some((c) => c.type === 'fragment'), 'one fragment chunk streamed');
+  assert.equal(canvasCalls, 0, 'remediate is GET-only; it never reads/writes Canvas');
+});
+
+test("remediate's re-audit loop is bounded to 3 passes and stops at the cap", async () => {
+  // xGate emits one blocker per 'X'; the model strips one X per turn but never
+  // reaches zero, so the loop must stop at the cap (initial + 3 re-audits).
+  const runner = new ScriptedRunner([
+    text('```html\n<p>XXXXXX</p>\n```'), // initial repair: 6
+    text('```html\n<p>XXXXX</p>\n```'), // re-audit 1: 5
+    text('```html\n<p>XXXX</p>\n```'), // re-audit 2: 4
+    text('```html\n<p>XXX</p>\n```'), // re-audit 3: 3 (a 5th call would throw "exhausted")
+  ]);
+  const view = await api(runner, { gate: xGate() }).runTurn({
+    user: 'repair this',
+    mode: 'remediate',
+    remediateInput: { sourceHtml: '<p>XXXXXXX</p>' }, // 7 issues
+  });
+
+  assert.equal(view.iterations, 4, 'initial repair + 3 capped re-audits');
+  const frag = view.fragments[0]!;
+  assert.equal(frag.gate.badgeWithheld, true, 'still has blockers after the cap');
+  assert.equal(frag.remediateResult!.after, '<p>XXX</p>', 'stopped at the 3-pass cap');
+});
+
+test('a residual blocker still withholds the badge in remediate mode (gate stays unconditional)', async () => {
+  // The model returns HTML that still trips the blocker; the gate withholds.
+  const runner = new ScriptedRunner([
+    text('```html\n<p>XX</p>\n```'),
+    text('```html\n<p>XX</p>\n```'), // re-audit returns no improvement → loop stops
+  ]);
+  const view = await api(runner, { gate: xGate() }).runTurn({
+    user: 'repair this',
+    mode: 'remediate',
+    remediateInput: { sourceHtml: '<p>XXX</p>' },
+  });
+  const frag = view.fragments[0]!;
+  assert.equal(frag.gate.badgeWithheld, true);
+  assert.equal(frag.gate.conformance.passedChecks, false);
 });
