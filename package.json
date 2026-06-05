@@ -10,10 +10,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
+    "build": "tsc && npm run copy:assets",
+    "copy:assets": "mkdir -p dist/knowledge/packs dist/app/renderer && cp src/knowledge/packs/*.json dist/knowledge/packs/ && cp src/app/renderer/index.html dist/app/renderer/index.html",
     "test": "tsx --test 'src/**/*.test.ts' 'e2e/**/*.test.ts'",
     "e2e": "tsx --test 'e2e/**/*.test.ts'",
-    "app": "tsc && cp src/app/renderer/index.html dist/app/renderer/index.html && electron .",
+    "app": "npm run build && electron .",
     "llm:smoke": "tsx src/llm/example.ts"
   },
   "devDependencies": {
