@@ -1,12 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importCourse, createImporter, createCanvasGet, parseLinkNext } from './index.js';
+import {
+  importCourse,
+  createImporter,
+  createPageReader,
+  fetchPageBody,
+  listPages,
+  createCanvasGet,
+  parseLinkNext,
+} from './index.js';
 import type { CanvasImporter } from '../contracts/index.js';
 import { fakeCanvas } from './fake-canvas.js';
 
 test('index exposes the public surface', () => {
   assert.equal(typeof importCourse, 'function');
   assert.equal(typeof createImporter, 'function');
+  assert.equal(typeof createPageReader, 'function');
+  assert.equal(typeof fetchPageBody, 'function');
+  assert.equal(typeof listPages, 'function');
   assert.equal(typeof createCanvasGet, 'function');
   assert.equal(typeof parseLinkNext, 'function');
 });
