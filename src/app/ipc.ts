@@ -10,9 +10,36 @@
  * an error escape. The matching `bridge.ts` unwraps it on the renderer side, so
  * a runtime failure surfaces as a rejected promise in the UI — never a silent
  * `undefined` or an unhandled `ipcRenderer.invoke` rejection.
+ *
+ * Streaming: `runTurn` may carry a `turnId`. When present, the handler forwards
+ * each `TurnChunk` back to the requesting renderer over the one-way `CHUNK`
+ * event (`event.sender.send`), tagged with that `turnId` so `bridge.ts` can
+ * route it to the right `onChunk` callback. The final `TurnView` still comes
+ * back through the normal `IpcResult` reply.
  */
-import type { AppApi, CanvasConfig, TurnRequest } from '../contracts/index.js';
-import { RUN_TURN, IMPORT_CANVAS, HEALTH } from './channels.js';
+import type {
+  AppApi,
+  BrandKit,
+  CanvasConfig,
+  ProductMode,
+  TurnRequest,
+} from '../contracts/index.js';
+import {
+  RUN_TURN,
+  IMPORT_CANVAS,
+  HEALTH,
+  CREATE_SESSION,
+  LIST_SESSIONS,
+  LOAD_SESSION,
+  DELETE_SESSION,
+  RESOLVE_BRAND_THEME,
+  LIST_BRAND_KITS,
+  SAVE_BRAND_KIT,
+  DELETE_BRAND_KIT,
+  FETCH_CANVAS_PAGE,
+  LIST_CANVAS_PAGES,
+  CHUNK,
+} from './channels.js';
 
 /** Serialisable error shape carried back over IPC (Error instances don't survive structured clone cleanly). */
 export interface IpcError {
@@ -34,6 +61,16 @@ export interface IpcMainLike {
   ): void;
 }
 
+/**
+ * The slice of an Electron IPC event we depend on for streaming: the ability to
+ * `send` a one-way event back to the requesting renderer. Electron's real
+ * `IpcMainInvokeEvent` is structurally assignable to this; tests pass a fake
+ * event that records the sends.
+ */
+export interface IpcEventLike {
+  sender: { send(channel: string, payload: unknown): void };
+}
+
 function toIpcError(err: unknown): IpcError {
   if (err instanceof Error) return { name: err.name, message: err.message };
   return { name: 'Error', message: String(err) };
@@ -53,13 +90,62 @@ async function envelope<T>(fn: () => Promise<T>): Promise<IpcResult<T>> {
  * global state — everything it needs is injected.
  */
 export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
-  ipcMain.handle(RUN_TURN, (_event, req) =>
-    envelope(() => api.runTurn(req as TurnRequest)),
-  );
+  // Streaming turn: payload is `{ req, turnId? }`. With a `turnId`, stream each
+  // chunk back over the CHUNK event tagged with that id; always reply with the
+  // final TurnView through the envelope.
+  ipcMain.handle(RUN_TURN, (event, payload) => {
+    const { req, turnId } = (payload ?? {}) as { req: TurnRequest; turnId?: string };
+    return envelope(() => {
+      if (turnId === undefined) return api.runTurn(req);
+      const sender = (event as IpcEventLike).sender;
+      return api.runTurn(req, (chunk) => sender.send(CHUNK, { turnId, chunk }));
+    });
+  });
 
   ipcMain.handle(IMPORT_CANVAS, (_event, config, courseId) =>
     envelope(() => api.importCanvas(config as CanvasConfig, courseId as string)),
   );
 
   ipcMain.handle(HEALTH, () => envelope(() => api.health()));
+
+  // ── Sessions ───────────────────────────────────────────────────────────────
+  ipcMain.handle(CREATE_SESSION, (_event, init) =>
+    envelope(() => api.createSession(init as { title: string; mode: ProductMode })),
+  );
+
+  ipcMain.handle(LIST_SESSIONS, () => envelope(() => api.listSessions()));
+
+  ipcMain.handle(LOAD_SESSION, (_event, sessionId) =>
+    envelope(() => api.loadSession(sessionId as string)),
+  );
+
+  ipcMain.handle(DELETE_SESSION, (_event, sessionId) =>
+    envelope(() => api.deleteSession(sessionId as string)),
+  );
+
+  // ── Brand kits ───────────────────────────────────────────────────────────────
+  ipcMain.handle(RESOLVE_BRAND_THEME, (_event, primary, secondary) =>
+    envelope(() => api.resolveBrandTheme(primary as string, secondary as string)),
+  );
+
+  ipcMain.handle(LIST_BRAND_KITS, () => envelope(() => api.listBrandKits()));
+
+  ipcMain.handle(SAVE_BRAND_KIT, (_event, kit) =>
+    envelope(() => api.saveBrandKit(kit as Omit<BrandKit, 'id' | 'createdAt'>)),
+  );
+
+  ipcMain.handle(DELETE_BRAND_KIT, (_event, id) =>
+    envelope(() => api.deleteBrandKit(id as string)),
+  );
+
+  // ── Read-only Canvas page access ─────────────────────────────────────────────
+  ipcMain.handle(FETCH_CANVAS_PAGE, (_event, config, courseId, pageId) =>
+    envelope(() =>
+      api.fetchCanvasPage(config as CanvasConfig, courseId as string, pageId as string),
+    ),
+  );
+
+  ipcMain.handle(LIST_CANVAS_PAGES, (_event, config, courseId) =>
+    envelope(() => api.listCanvasPages(config as CanvasConfig, courseId as string)),
+  );
 }
