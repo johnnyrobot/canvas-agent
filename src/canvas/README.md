@@ -8,10 +8,33 @@ and returns a summary. It implements the frozen `CanvasImporter` port from
 | --- | --- | --- |
 | `importCourse` | default importer (global `fetch` + system clock) | `CanvasImporter` |
 | `createImporter({ fetch?, now? })` | DI factory | → `CanvasImporter` |
+| `fetchPageBody(config, courseId, pageId)` | read-only page-body read (global `fetch`) | → `Promise<string>` |
+| `listPages(config, courseId)` | read-only page list (global `fetch`) | → `Promise<CanvasPage[]>` |
+| `createPageReader({ fetch? })` | DI factory for the page readers | → `PageReader` |
 | `createCanvasGet({ token, fetch? })` | read-only transport | `CanvasGet` |
 | `parseLinkNext(header)` | RFC-5988 `Link` parser | `string \| null` |
 
-All four are re-exported from `src/canvas/index.ts` — the single public surface.
+All are re-exported from `src/canvas/index.ts` — the single public surface.
+
+## Read-only page access (Remediate import source, PRD §17)
+
+So Remediate mode (runtime track T4) can import existing Canvas content to repair,
+two **GET-only** reads sit on the same transport as the importer:
+
+- `fetchPageBody(config, courseId, pageId)` → `GET /api/v1/courses/:id/pages/:pageId`,
+  returning the response's `body` string, or `''` when the page has no body. A
+  non-2xx page (e.g. 404) **throws** a clear error.
+- `listPages(config, courseId)` → `GET /api/v1/courses/:id/pages` with the same
+  `per_page=100` + `Link: rel="next"` pagination and `MAX_PAGES` cap as the
+  importer, mapping each Canvas page to `CanvasPage { id, title, url?, updatedAt? }`
+  (`page_id`→`id` stringified, `html_url`/`url`→`url`, `updated_at`→`updatedAt`).
+  A forbidden/failed list **degrades gracefully** (returns whatever was collected,
+  `[]` on a first-page error) rather than throwing — consistent with the importer.
+
+Returned HTML is **untrusted**: the runtime gates it before render. This module
+neither sanitizes nor trusts it. `createPageReader({ fetch })` is the DI factory
+the tests use to inject a recording fake; the top-level functions are wired to the
+global `fetch`.
 
 ## `importCourse(config, courseId)` → `CanvasImportResult`
 
