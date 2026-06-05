@@ -5,6 +5,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 const REPO = '/Users/laccd/code/canvas-agent';
 const app = await electron.launch({ args: ['.'], cwd: REPO, env: { ...process.env } });
+const mainLogs = [];
+app.process().stderr.on('data', (d) => mainLogs.push('STDERR ' + d.toString()));
+app.process().stdout.on('data', (d) => mainLogs.push('STDOUT ' + d.toString()));
 const win = await app.firstWindow();
 await win.waitForSelector('#prompt', { timeout: 30_000 });
 await sleep(3000); // let the health probe resolve
@@ -21,4 +24,6 @@ console.log('METHODS:', methods);
 console.log('HEALTH:', health);
 await win.screenshot({ path: '/tmp/canvas-agent-bridge-check.png' });
 await app.close();
+console.log('--- MAIN PROCESS LOGS ---');
+for (const line of mainLogs) process.stdout.write(line);
 console.log('OK');
