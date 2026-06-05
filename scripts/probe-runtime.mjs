@@ -4,6 +4,10 @@ import { createAppApi } from '../dist/runtime/index.js';
 try {
   const api = createAppApi();
   console.log('CONSTRUCT OK — methods:', Object.keys(api).length);
+  const sessions = await api.listSessions(); // exercises the lazy DB open + migrate
+  console.log('listSessions OK — count:', sessions.length);
+  const kits = await api.listBrandKits();
+  console.log('listBrandKits OK — count:', kits.length);
 } catch (e) {
-  console.error('CONSTRUCT THREW:\n', (e && e.stack) || e);
+  console.error('THREW:\n', (e && e.stack) || e);
 }
