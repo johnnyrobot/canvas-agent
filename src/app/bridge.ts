@@ -26,6 +26,11 @@ function unwrap<T>(result: unknown): T {
   throw err;
 }
 
+/** Throwing scaffold for product-layer methods not yet bridged over IPC. */
+function notWired(method: string): never {
+  throw new Error(`bridge AppApi.${method} is not wired yet (contract-freeze scaffold).`);
+}
+
 /** Build the `window.canvasAgent` object that mirrors `AppApi` over IPC. */
 export function createBridge(invoke: Invoke): AppApi {
   return {
@@ -37,6 +42,35 @@ export function createBridge(invoke: Invoke): AppApi {
     },
     async health() {
       return unwrap(await invoke(HEALTH));
+    },
+
+    // ── Product-layer surface (scaffolded; Wave 2 app track adds channels + invokes) ──
+    async listSessions() {
+      return notWired('listSessions');
+    },
+    async loadSession() {
+      return notWired('loadSession');
+    },
+    async deleteSession() {
+      return notWired('deleteSession');
+    },
+    async resolveBrandTheme() {
+      return notWired('resolveBrandTheme');
+    },
+    async listBrandKits() {
+      return notWired('listBrandKits');
+    },
+    async saveBrandKit() {
+      return notWired('saveBrandKit');
+    },
+    async deleteBrandKit() {
+      return notWired('deleteBrandKit');
+    },
+    async fetchCanvasPage() {
+      return notWired('fetchCanvasPage');
+    },
+    async listCanvasPages() {
+      return notWired('listCanvasPages');
     },
   };
 }

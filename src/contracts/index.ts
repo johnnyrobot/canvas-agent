@@ -230,7 +230,83 @@ export interface EngineCapabilities {
 // over Electron IPC and builds its UI against these types — it uses a fake
 // `AppApi` in its own tests so it never needs the real runtime to build.
 
-import type { GateResult } from '../orchestrator/gate.js';
+import type { GateResult, AuditIssue } from '../orchestrator/gate.js';
+
+// ── Product layer (modes, router, remediate, sessions, brand-kit) ────────────
+// Everything below is ADDITIVE: new optional fields, new types, and new AppApi
+// methods. No existing field or signature changes shape, so every current caller
+// and test keeps compiling. Design: docs/superpowers/specs/2026-06-04-product-layer-design.md.
+
+/** The three product modes. Omitted on a request ⇒ the intent router decides. */
+export type ProductMode = 'guidance' | 'build' | 'remediate';
+
+/** Remediate input: HTML to repair (+ optional read-only Canvas provenance). */
+export interface RemediateInput {
+  sourceHtml: string;
+  /** Provenance only; never used to write back (Canvas stays GET-only). */
+  canvasPageRef?: { courseId: string; pageId: string };
+}
+
+/** One issue's before→after resolution in a remediate pass. */
+export interface IssueFix {
+  issue: AuditIssue;
+  fixed: boolean;
+}
+
+/** Structured remediate output: before/after HTML + per-issue diff + the gate. */
+export interface RemediateResult {
+  before: string;
+  after: string;
+  issueDiffs: IssueFix[];
+  gate: GateResult;
+}
+
+/** A persisted chat message (decoupled from llm's ChatMessage). */
+export interface SessionMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+}
+
+/** A saved working session. */
+export interface Session {
+  id: string;
+  title: string;
+  mode: ProductMode;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A session plus its resumable transcript. */
+export interface SessionState {
+  session: Session;
+  messages: SessionMessage[];
+}
+
+/** A persisted brand kit: a two-colour palette (+ optional fonts) for theming. */
+export interface BrandKit {
+  id: string;
+  name: string;
+  palette: { primary: string; secondary: string };
+  fonts?: { heading?: string; body?: string; mono?: string };
+  createdAt: string;
+}
+
+/** A read-only Canvas page descriptor (Remediate import source). */
+export interface CanvasPage {
+  id: string;
+  title: string;
+  url?: string;
+  updatedAt?: string;
+}
+
+/** A streamed turn event. Bridged to the renderer over IPC (design §4.4). */
+export type TurnChunk =
+  | { type: 'text'; delta: string }
+  | { type: 'tool'; name: string }
+  | { type: 'fragment'; fragment: TurnFragment };
+
+/** In-process streaming callback passed to AppApi.runTurn. */
+export type OnTurnChunk = (chunk: TurnChunk) => void;
 
 export interface TurnRequest {
   /** The user's message for this turn. */
@@ -239,12 +315,18 @@ export interface TurnRequest {
   system?: string;
   /** Session to continue (the runtime persists/loads via the storage track). */
   sessionId?: string;
+  /** Explicit mode override; when absent the intent router classifies. */
+  mode?: ProductMode;
+  /** Remediate input; honored only when the resolved mode is 'remediate'. */
+  remediateInput?: RemediateInput;
 }
 
 /** A gated, safe-to-render HTML fragment produced during a turn. */
 export interface TurnFragment {
   html: string;
   gate: GateResult;
+  /** Populated only in remediate mode: before/after + per-issue diff. */
+  remediateResult?: RemediateResult;
 }
 
 /** What the UI renders after a turn (a view over the orchestrator's TurnResult). */
@@ -255,6 +337,8 @@ export interface TurnView {
   /** Canonical tool names the model invoked. */
   toolsUsed: string[];
   iterations: number;
+  /** The mode the router/override resolved to for this turn. */
+  mode?: ProductMode;
 }
 
 /** Health of the local sidecars (for a UI status indicator). */
@@ -265,7 +349,23 @@ export interface RuntimeHealth {
 
 /** The single surface the Electron main process exposes to the renderer via IPC. */
 export interface AppApi {
-  runTurn(req: TurnRequest): Promise<TurnView>;
+  /** Run a turn; `onChunk` (optional) receives streamed text/tool/fragment events. */
+  runTurn(req: TurnRequest, onChunk?: OnTurnChunk): Promise<TurnView>;
   importCanvas(config: CanvasConfig, courseId: string): Promise<CanvasImportResult>;
   health(): Promise<RuntimeHealth>;
+
+  // ── Sessions (storage-backed; the runtime persists each turn) ──
+  listSessions(): Promise<Session[]>;
+  loadSession(sessionId: string): Promise<SessionState | null>;
+  deleteSession(sessionId: string): Promise<void>;
+
+  // ── Brand kits (resolveBrandTheme is pure engine math — no LLM) ──
+  resolveBrandTheme(primary: string, secondary: string): Promise<ThemeResult>;
+  listBrandKits(): Promise<BrandKit[]>;
+  saveBrandKit(kit: Omit<BrandKit, 'id' | 'createdAt'>): Promise<BrandKit>;
+  deleteBrandKit(id: string): Promise<void>;
+
+  // ── Read-only Canvas page access (Remediate import; GET-only) ──
+  fetchCanvasPage(config: CanvasConfig, courseId: string, pageId: string): Promise<string>;
+  listCanvasPages(config: CanvasConfig, courseId: string): Promise<CanvasPage[]>;
 }

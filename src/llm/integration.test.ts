@@ -4,6 +4,11 @@
  * Skipped by default so `npm test` stays green in CI / dev without Ollama.
  * To run:  RUN_OLLAMA_INTEGRATION=1 ollama serve & ; ollama pull gemma4:12b-mlx
  *          RUN_OLLAMA_INTEGRATION=1 npm test
+ *
+ * Token budgets below are sized for a *reasoning* model (e.g. gemma4:31b via
+ * MODEL_TEXT): a thinking model spends hidden tokens before emitting visible
+ * content, so tiny caps (16/32/64) yielded empty content. 512 is comfortably
+ * above the thinking overhead while staying fast for non-thinking models too.
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -48,7 +53,7 @@ test('chat() returns non-empty text', { skip }, async () => {
   const res = await llm.chat({
     role: 'fast',
     messages: [{ role: 'user', content: 'Reply with the single word: ready.' }],
-    maxTokens: 16,
+    maxTokens: 512,
   });
   assert.ok(res.content.trim().length > 0, 'expected non-empty content');
   assert.ok(res.model.length > 0);
@@ -60,7 +65,7 @@ test('chatStream() yields deltas and a terminal done', { skip }, async () => {
   for await (const chunk of llm.chatStream({
     role: 'fast',
     messages: [{ role: 'user', content: 'Count: one two three.' }],
-    maxTokens: 32,
+    maxTokens: 512,
   })) {
     text += chunk.delta;
     sawDone ||= chunk.done;
@@ -73,7 +78,7 @@ test('chatJSON() returns a parsed object', { skip }, async () => {
   const obj = await llm.chatJSON<{ ok: boolean }>({
     role: 'deep',
     messages: [{ role: 'user', content: 'Return {"ok": true} as JSON, nothing else.' }],
-    maxTokens: 64,
+    maxTokens: 512,
   });
   assert.equal(typeof obj, 'object');
 });

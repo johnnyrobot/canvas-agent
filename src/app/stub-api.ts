@@ -90,6 +90,11 @@ const STUB_FRAGMENTS: TurnFragment[] = [
   ),
 ];
 
+/** Throwing scaffold for product-layer methods not yet wired into the stub. */
+function notWired(method: string): never {
+  throw new Error(`stub AppApi.${method} is not implemented (contract-freeze scaffold).`);
+}
+
 export function createStubApi(): AppApi {
   return {
     async runTurn(req): Promise<TurnView> {
@@ -117,6 +122,35 @@ export function createStubApi(): AppApi {
 
     async health(): Promise<RuntimeHealth> {
       return { llm: true, ingest: true };
+    },
+
+    // ── Product-layer surface (scaffolded; Wave 2 app track enriches) ──
+    async listSessions() {
+      return notWired('listSessions');
+    },
+    async loadSession() {
+      return notWired('loadSession');
+    },
+    async deleteSession() {
+      return notWired('deleteSession');
+    },
+    async resolveBrandTheme() {
+      return notWired('resolveBrandTheme');
+    },
+    async listBrandKits() {
+      return notWired('listBrandKits');
+    },
+    async saveBrandKit() {
+      return notWired('saveBrandKit');
+    },
+    async deleteBrandKit() {
+      return notWired('deleteBrandKit');
+    },
+    async fetchCanvasPage() {
+      return notWired('fetchCanvasPage');
+    },
+    async listCanvasPages() {
+      return notWired('listCanvasPages');
     },
   };
 }

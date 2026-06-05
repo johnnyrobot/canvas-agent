@@ -68,6 +68,35 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
       calls.push({ method: 'health', args: [] });
       return HEALTH_RESULT;
     },
+    // Product-layer methods are not exercised by these IPC tests; throwing
+    // stubs keep the fake assignable to the expanded AppApi.
+    async listSessions() {
+      throw new Error('not used in ipc tests');
+    },
+    async loadSession() {
+      throw new Error('not used in ipc tests');
+    },
+    async deleteSession() {
+      throw new Error('not used in ipc tests');
+    },
+    async resolveBrandTheme() {
+      throw new Error('not used in ipc tests');
+    },
+    async listBrandKits() {
+      throw new Error('not used in ipc tests');
+    },
+    async saveBrandKit() {
+      throw new Error('not used in ipc tests');
+    },
+    async deleteBrandKit() {
+      throw new Error('not used in ipc tests');
+    },
+    async fetchCanvasPage() {
+      throw new Error('not used in ipc tests');
+    },
+    async listCanvasPages() {
+      throw new Error('not used in ipc tests');
+    },
     ...overrides,
   };
   return { api, calls };

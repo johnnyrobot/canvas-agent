@@ -141,6 +141,15 @@ async function reachable(probe: () => Promise<boolean>): Promise<boolean> {
   }
 }
 
+/**
+ * Throwing scaffold for the product-layer AppApi methods introduced by the
+ * contract freeze. The runtime-spine (Wave 1) track replaces each with a real
+ * implementation; until then no caller — tests included — invokes these.
+ */
+function notWired(method: string): never {
+  throw new Error(`AppApi.${method} is not wired yet (contract-freeze scaffold).`);
+}
+
 /** Build the frozen `AppApi` from real (or injected) parts. */
 export function createAppApi(opts: AppApiOptions = {}): AppApi {
   // A single real Ollama sidecar backs both the chat runner and vision/health
@@ -196,6 +205,35 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
         llm: await reachable(() => llm.isHealthy()),
         ingest: await reachable(() => ingest.isHealthy()),
       };
+    },
+
+    // ── Product-layer surface (scaffolded; Wave 1 runtime-spine implements) ──
+    async listSessions() {
+      return notWired('listSessions');
+    },
+    async loadSession() {
+      return notWired('loadSession');
+    },
+    async deleteSession() {
+      return notWired('deleteSession');
+    },
+    async resolveBrandTheme() {
+      return notWired('resolveBrandTheme');
+    },
+    async listBrandKits() {
+      return notWired('listBrandKits');
+    },
+    async saveBrandKit() {
+      return notWired('saveBrandKit');
+    },
+    async deleteBrandKit() {
+      return notWired('deleteBrandKit');
+    },
+    async fetchCanvasPage() {
+      return notWired('fetchCanvasPage');
+    },
+    async listCanvasPages() {
+      return notWired('listCanvasPages');
     },
   };
 }
