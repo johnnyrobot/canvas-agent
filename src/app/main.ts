@@ -31,7 +31,15 @@ function createWindow(): void {
       preload: path.join(here, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      // `sandbox: false` is REQUIRED here: this is an ESM codebase ("type":
+      // "module"), and Electron only supports ESM preload scripts when the
+      // sandbox is disabled (sandboxed preloads must be CommonJS). With a
+      // sandboxed ESM preload the bridge silently fails to load and
+      // `window.canvasAgent` is undefined. Isolation is still enforced by
+      // contextIsolation + nodeIntegration:false + the strict CSP, so the
+      // renderer has no Node access and only ever sees the typed bridge — and
+      // it only renders gate-approved HTML and loads no remote content.
+      sandbox: false,
     },
   });
 
