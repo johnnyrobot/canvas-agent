@@ -7,12 +7,14 @@
  * on the ports declared in `src/contracts` and receive these implementations by
  * injection — never by importing this module's internals.
  *
- * The five contract functions:
+ * The core contract functions:
  *  - `openDatabase`               — node:sqlite-backed `Database`
  *  - `createKeychainSecretStore`  — real macOS `security`-backed `SecretStore`
  *  - `createInMemorySecretStore`  — Map-backed `SecretStore` (tests/other tracks)
  *  - `resolveAppPaths`            — pure local-file-layout resolver
  *  - `migrate`                    — idempotent core schema
+ *  - `createSessionStore`         — session + transcript persistence
+ *  - `createBrandKitStore`        — saved brand-kit palettes (+ fonts)
  */
 export { openDatabase } from './database.js';
 export { migrate, SCHEMA_VERSION } from './schema.js';
@@ -24,3 +26,5 @@ export {
   type CommandResult,
   type KeychainOptions,
 } from './keychain.js';
+export { createSessionStore, type SessionStore } from './sessions.js';
+export { createBrandKitStore, type BrandKitStore } from './brand-kits.js';
