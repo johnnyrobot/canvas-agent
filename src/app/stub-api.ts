@@ -125,6 +125,9 @@ export function createStubApi(): AppApi {
     },
 
     // ── Product-layer surface (scaffolded; Wave 2 app track enriches) ──
+    async createSession() {
+      return notWired('createSession');
+    },
     async listSessions() {
       return notWired('listSessions');
     },

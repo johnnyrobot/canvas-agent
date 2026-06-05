@@ -355,6 +355,7 @@ export interface AppApi {
   health(): Promise<RuntimeHealth>;
 
   // ── Sessions (storage-backed; the runtime persists each turn) ──
+  createSession(init: { title: string; mode: ProductMode }): Promise<Session>;
   listSessions(): Promise<Session[]>;
   loadSession(sessionId: string): Promise<SessionState | null>;
   deleteSession(sessionId: string): Promise<void>;

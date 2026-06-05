@@ -70,6 +70,9 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
     },
     // Product-layer methods are not exercised by these IPC tests; throwing
     // stubs keep the fake assignable to the expanded AppApi.
+    async createSession() {
+      throw new Error('not used in ipc tests');
+    },
     async listSessions() {
       throw new Error('not used in ipc tests');
     },

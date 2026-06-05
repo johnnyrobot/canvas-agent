@@ -208,6 +208,9 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     },
 
     // ── Product-layer surface (scaffolded; Wave 1 runtime-spine implements) ──
+    async createSession() {
+      return notWired('createSession');
+    },
     async listSessions() {
       return notWired('listSessions');
     },
