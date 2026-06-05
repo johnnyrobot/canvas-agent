@@ -40,6 +40,7 @@ import type {
 import {
   createBrandKitStore,
   createSessionStore,
+  ensureAppDirs,
   migrate,
   openDatabase,
   resolveAppPaths,
@@ -265,7 +266,9 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const database = (): Promise<Database> => {
     if (opts.db) return Promise.resolve(opts.db);
     return (dbPromise ??= (async () => {
-      const db = await openDatabase(resolveAppPaths().dbPath);
+      const paths = resolveAppPaths();
+      await ensureAppDirs(paths); // create the app-data dir before SQLite opens the file
+      const db = await openDatabase(paths.dbPath);
       await migrate(db);
       return db;
     })());
