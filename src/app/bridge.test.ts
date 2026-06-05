@@ -23,6 +23,7 @@ test('createBridge exposes exactly the AppApi methods', () => {
   const { invoke } = fakeInvoke({});
   const bridge = createBridge(invoke);
   assert.deepEqual(Object.keys(bridge).sort(), [
+    'createSession',
     'deleteBrandKit',
     'deleteSession',
     'fetchCanvasPage',

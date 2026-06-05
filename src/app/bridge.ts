@@ -45,6 +45,9 @@ export function createBridge(invoke: Invoke): AppApi {
     },
 
     // ── Product-layer surface (scaffolded; Wave 2 app track adds channels + invokes) ──
+    async createSession() {
+      return notWired('createSession');
+    },
     async listSessions() {
       return notWired('listSessions');
     },
