@@ -22,7 +22,20 @@ const TURN_VIEW: TurnView = { text: 'hi', fragments: [], toolsUsed: [], iteratio
 test('createBridge exposes exactly the AppApi methods', () => {
   const { invoke } = fakeInvoke({});
   const bridge = createBridge(invoke);
-  assert.deepEqual(Object.keys(bridge).sort(), ['health', 'importCanvas', 'runTurn']);
+  assert.deepEqual(Object.keys(bridge).sort(), [
+    'deleteBrandKit',
+    'deleteSession',
+    'fetchCanvasPage',
+    'health',
+    'importCanvas',
+    'listBrandKits',
+    'listCanvasPages',
+    'listSessions',
+    'loadSession',
+    'resolveBrandTheme',
+    'runTurn',
+    'saveBrandKit',
+  ]);
 });
 
 test('runTurn invokes the RUN_TURN channel and returns the unwrapped value', async () => {
