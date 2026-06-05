@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { AuditIssue, GateResult, TurnFragment, TurnView } from '../contracts/index.js';
+import type {
+  AuditIssue,
+  GateResult,
+  RemediateResult,
+  TurnFragment,
+  TurnView,
+} from '../contracts/index.js';
 import { turnViewToVm } from './view.js';
 
 function gate(
@@ -102,4 +108,65 @@ test('preserves fragment order and renders one VM per fragment', () => {
   assert.equal(vm.fragments.length, 2);
   assert.equal(vm.fragments[0]?.html, '<h2>One</h2>');
   assert.equal(vm.fragments[1]?.html, '<h2>Two</h2>');
+});
+
+test('surfaces the resolved turn mode when present', () => {
+  const view: TurnView = {
+    text: '',
+    fragments: [],
+    toolsUsed: [],
+    iterations: 1,
+    mode: 'build',
+  };
+  assert.equal(turnViewToVm(view).mode, 'build');
+});
+
+test('omits mode when the turn did not resolve one (Auto with no fragments yet)', () => {
+  const view: TurnView = { text: '', fragments: [], toolsUsed: [], iterations: 1 };
+  const vm = turnViewToVm(view);
+  assert.equal(vm.mode, undefined);
+  assert.ok(!('mode' in vm), 'mode key is omitted, not set to undefined');
+});
+
+test('a fragment without a remediateResult omits the remediate view-model', () => {
+  const view: TurnView = {
+    text: '',
+    fragments: [fragment('<h2>Plain</h2>')],
+    toolsUsed: [],
+    iterations: 1,
+  };
+  const [vm] = turnViewToVm(view).fragments;
+  assert.ok(vm);
+  assert.equal(vm.remediateResult, undefined);
+  assert.ok(!('remediateResult' in vm), 'remediateResult key is omitted');
+});
+
+test('maps a remediateResult to before/after + per-issue fixed flags', () => {
+  const after = '<img src="x.png" alt="A labelled diagram">';
+  const remediateResult: RemediateResult = {
+    before: '<img src="x.png">',
+    after,
+    issueDiffs: [
+      { issue: { id: 'img-alt-missing', severity: 'blocker', message: 'Image missing alt text' }, fixed: true },
+      { issue: { id: 'contrast-low', severity: 'warning', message: 'Low contrast heading' }, fixed: false },
+    ],
+    gate: gate(after),
+  };
+  const frag: TurnFragment = { html: after, gate: gate(after), remediateResult };
+  const view: TurnView = {
+    text: 'Remediated.',
+    fragments: [frag],
+    toolsUsed: ['remediate_html'],
+    iterations: 1,
+    mode: 'remediate',
+  };
+  const [vm] = turnViewToVm(view).fragments;
+  assert.ok(vm);
+  assert.ok(vm.remediateResult);
+  assert.equal(vm.remediateResult.before, '<img src="x.png">');
+  assert.equal(vm.remediateResult.after, after);
+  assert.deepEqual(vm.remediateResult.issueDiffs, [
+    { message: 'Image missing alt text', fixed: true },
+    { message: 'Low contrast heading', fixed: false },
+  ]);
 });
