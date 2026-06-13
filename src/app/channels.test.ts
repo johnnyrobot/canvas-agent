@@ -4,6 +4,7 @@ import {
   CHANNELS,
   CHUNK,
   RUN_TURN,
+  SAVE_CANVAS_AUTH,
   IMPORT_CANVAS,
   HEALTH,
   CREATE_SESSION,
@@ -27,6 +28,7 @@ test('exposes the original three IPC channel names', () => {
 test('CHANNELS bundles every request/response channel, keyed by AppApi method', () => {
   assert.deepEqual(CHANNELS, {
     runTurn: RUN_TURN,
+    saveCanvasAuth: SAVE_CANVAS_AUTH,
     importCanvas: IMPORT_CANVAS,
     health: HEALTH,
     createSession: CREATE_SESSION,

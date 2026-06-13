@@ -16,6 +16,7 @@ import { createBridge, type Invoke, type Subscribe } from './bridge.js';
 import type { IpcResult } from './ipc.js';
 import {
   RUN_TURN,
+  SAVE_CANVAS_AUTH,
   IMPORT_CANVAS,
   HEALTH,
   CREATE_SESSION,
@@ -83,6 +84,7 @@ test('createBridge exposes exactly the AppApi methods', () => {
     'resolveBrandTheme',
     'runTurn',
     'saveBrandKit',
+    'saveCanvasAuth',
   ]);
 });
 
@@ -150,13 +152,22 @@ test('runTurn unsubscribes even when the turn reply is an error envelope', async
   assert.equal(unsubscribed, true, 'subscription must be torn down on failure too');
 });
 
-test('importCanvas forwards (config, courseId) over the IMPORT_CANVAS channel', async () => {
+test('importCanvas forwards (baseUrl, courseId) over the IMPORT_CANVAS channel', async () => {
   const { invoke, calls } = fakeInvoke({ [IMPORT_CANVAS]: { ok: true, value: 'import' } });
   const bridge = createBridge(invoke, noSub);
 
-  await bridge.importCanvas(CONFIG, '7');
+  await bridge.importCanvas(CONFIG.baseUrl, '7');
 
-  assert.deepEqual(calls, [{ channel: IMPORT_CANVAS, args: [CONFIG, '7'] }]);
+  assert.deepEqual(calls, [{ channel: IMPORT_CANVAS, args: [CONFIG.baseUrl, '7'] }]);
+});
+
+test('saveCanvasAuth forwards the full config (token) over the SAVE_CANVAS_AUTH channel', async () => {
+  const { invoke, calls } = fakeInvoke({ [SAVE_CANVAS_AUTH]: { ok: true, value: undefined } });
+  const bridge = createBridge(invoke, noSub);
+
+  await bridge.saveCanvasAuth(CONFIG);
+
+  assert.deepEqual(calls, [{ channel: SAVE_CANVAS_AUTH, args: [CONFIG] }]);
 });
 
 test('health invokes the HEALTH channel with no args', async () => {
@@ -185,8 +196,8 @@ test('each new method invokes its channel with the right args and unwraps the va
     { channel: LIST_BRAND_KITS, value: [BRAND_KIT], args: [], run: (b) => b.listBrandKits() },
     { channel: SAVE_BRAND_KIT, value: BRAND_KIT, args: [kit], run: (b) => b.saveBrandKit(kit) },
     { channel: DELETE_BRAND_KIT, value: undefined, args: ['kit-1'], run: (b) => b.deleteBrandKit('kit-1') },
-    { channel: FETCH_CANVAS_PAGE, value: '<p>page</p>', args: [CONFIG, '123', 'syllabus'], run: (b) => b.fetchCanvasPage(CONFIG, '123', 'syllabus') },
-    { channel: LIST_CANVAS_PAGES, value: CANVAS_PAGES, args: [CONFIG, '123'], run: (b) => b.listCanvasPages(CONFIG, '123') },
+    { channel: FETCH_CANVAS_PAGE, value: '<p>page</p>', args: [CONFIG.baseUrl, '123', 'syllabus'], run: (b) => b.fetchCanvasPage(CONFIG.baseUrl, '123', 'syllabus') },
+    { channel: LIST_CANVAS_PAGES, value: CANVAS_PAGES, args: [CONFIG.baseUrl, '123'], run: (b) => b.listCanvasPages(CONFIG.baseUrl, '123') },
   ];
 
   for (const { channel, value, args, run } of cases) {

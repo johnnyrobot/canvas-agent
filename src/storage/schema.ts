@@ -10,7 +10,7 @@
 import type { Database } from '../contracts/index.js';
 
 /** Bump when the core schema changes; recorded in `meta.schema_version`. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * The implicit single-user "home" project (PRD v1: single-user). Every session
@@ -37,11 +37,14 @@ const STATEMENTS: readonly string[] = [
     updated_at TEXT
   )`,
 
+  // `fragments` (JSON of the turn's gated HTML fragments) was added after v1.
+  // Fresh DBs get it here; pre-existing DBs are upgraded by the guarded ALTER below.
   `CREATE TABLE IF NOT EXISTS turns (
     id         TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     role       TEXT NOT NULL,
     content    TEXT NOT NULL,
+    fragments  TEXT,
     created_at TEXT NOT NULL
   )`,
 
@@ -74,15 +77,17 @@ const STATEMENTS: readonly string[] = [
 ];
 
 /**
- * Columns added to `sessions` after v1. Each is applied as a guarded
- * `ALTER TABLE … ADD COLUMN` so an already-upgraded table (where the column
- * exists, including every fresh DB) is a harmless no-op. The column name and
- * type are compile-time constants — never user input — so this DDL is safe.
+ * Columns added after v1. Each is applied as a guarded `ALTER TABLE … ADD COLUMN`
+ * so an already-upgraded table (where the column exists, including every fresh DB)
+ * is a harmless no-op. The table/column/type are compile-time constants — never
+ * user input — so this DDL is safe.
  */
-const SESSION_COLUMN_ADDITIONS: ReadonlyArray<readonly [name: string, type: string]> = [
-  ['title', 'TEXT'],
-  ['mode', 'TEXT'],
-  ['updated_at', 'TEXT'],
+const COLUMN_ADDITIONS: ReadonlyArray<readonly [table: string, name: string, type: string]> = [
+  ['sessions', 'title', 'TEXT'],
+  ['sessions', 'mode', 'TEXT'],
+  ['sessions', 'updated_at', 'TEXT'],
+  // v3: persist a turn's gated HTML fragments so resume restores the work product.
+  ['turns', 'fragments', 'TEXT'],
 ];
 
 /** SQLite raises "duplicate column name: X" when the column already exists. */
@@ -92,9 +97,14 @@ function isDuplicateColumnError(err: unknown): boolean {
 }
 
 /** Add a column, treating an already-present column as a no-op. */
-async function addColumnIfMissing(db: Database, column: string, type: string): Promise<void> {
+async function addColumnIfMissing(
+  db: Database,
+  table: string,
+  column: string,
+  type: string,
+): Promise<void> {
   try {
-    await db.exec(`ALTER TABLE sessions ADD COLUMN ${column} ${type}`);
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   } catch (err) {
     if (!isDuplicateColumnError(err)) throw err;
   }
@@ -109,9 +119,9 @@ export async function migrate(db: Database): Promise<void> {
   for (const sql of STATEMENTS) {
     await db.exec(sql);
   }
-  // Upgrade a pre-existing v1 `sessions` table in place (no-op on fresh DBs).
-  for (const [column, type] of SESSION_COLUMN_ADDITIONS) {
-    await addColumnIfMissing(db, column, type);
+  // Upgrade pre-existing tables in place (no-op on fresh DBs / already-upgraded ones).
+  for (const [table, column, type] of COLUMN_ADDITIONS) {
+    await addColumnIfMissing(db, table, column, type);
   }
   // Ensure the implicit single-user default project exists (insert-if-missing).
   await db.run(

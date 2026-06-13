@@ -9,6 +9,7 @@
  */
 
 export const RUN_TURN = 'canvasAgent:runTurn';
+export const SAVE_CANVAS_AUTH = 'canvasAgent:saveCanvasAuth';
 export const IMPORT_CANVAS = 'canvasAgent:importCanvas';
 export const HEALTH = 'canvasAgent:health';
 
@@ -38,6 +39,7 @@ export const CHUNK = 'canvasAgent:chunk';
 /** All request/response IPC channels, keyed by the `AppApi` method they back. */
 export const CHANNELS = {
   runTurn: RUN_TURN,
+  saveCanvasAuth: SAVE_CANVAS_AUTH,
   importCanvas: IMPORT_CANVAS,
   health: HEALTH,
   createSession: CREATE_SESSION,

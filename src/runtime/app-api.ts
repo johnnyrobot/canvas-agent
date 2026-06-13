@@ -39,6 +39,7 @@ import type {
 } from '../orchestrator/index.js';
 import {
   createBrandKitStore,
+  createKeychainSecretStore,
   createSessionStore,
   ensureAppDirs,
   migrate,
@@ -57,8 +58,10 @@ import type {
   AppApi,
   AuditIssue,
   Auditor,
+  CanvasConfig,
   CanvasImporter,
   Database,
+  SecretStore,
   GateDeps,
   GateResult,
   IssueFix,
@@ -127,6 +130,8 @@ export interface AppApiOptions {
   fetchPageBody?: PageReader['fetchPageBody'];
   /** Read-only course page list. Default: real `listPages`. */
   listPages?: PageReader['listPages'];
+  /** Secret store for the Canvas token. Default: the macOS Keychain-backed store. */
+  secrets?: SecretStore;
 }
 
 /**
@@ -190,6 +195,11 @@ async function reachable(probe: () => Promise<boolean>): Promise<boolean> {
 }
 
 /** Every issue a gate surfaced (blockers + warnings + items needing review). */
+/** Keychain account key for a Canvas instance's token (namespaced by base URL). */
+function canvasSecretKey(baseUrl: string): string {
+  return `canvas-token:${baseUrl}`;
+}
+
 function gateIssues(gate: GateResult): AuditIssue[] {
   const c = gate.conformance;
   return [...c.blockers, ...c.warnings, ...c.needsHumanReview];
@@ -259,6 +269,20 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const resolveThemeFn: ThemeResolver = opts.resolveTheme ?? defaultResolveTheme;
   const fetchPageBodyFn: PageReader['fetchPageBody'] = opts.fetchPageBody ?? defaultFetchPageBody;
   const listPagesFn: PageReader['listPages'] = opts.listPages ?? defaultListPages;
+  const secrets: SecretStore = opts.secrets ?? createKeychainSecretStore();
+
+  // Resolve the saved Canvas token for `baseUrl` from the OS Keychain and build the
+  // full config the read-only canvas readers expect. The token never reaches (or
+  // returns through) the renderer — only the baseUrl crosses IPC for read calls.
+  const canvasConfigFor = async (baseUrl: string): Promise<CanvasConfig> => {
+    const token = await secrets.get(canvasSecretKey(baseUrl));
+    if (token == null) {
+      throw new Error(
+        `No saved Canvas credentials for ${baseUrl}. Call saveCanvasAuth({ baseUrl, token }) first.`,
+      );
+    }
+    return { baseUrl, token };
+  };
 
   // Lazily-opened on-device DB + stores. Never touched by offline tests that
   // inject `db`/stores or never call a session/brand-kit method.
@@ -310,13 +334,15 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const baseSystemFor = (req: TurnRequest, mode: ProductMode): string =>
     req.system ?? systemPromptOverride ?? systemPromptForMode(mode);
 
-  // Persist a turn's user+assistant messages when a session is in play.
-  const persistTurn = async (sessionId: string, user: string, assistant: string): Promise<void> => {
+  // Persist a turn's user+assistant messages when a session is in play. The
+  // assistant message carries its gated fragments (HTML + badge/conformance +
+  // remediate diff) so resuming the session restores the work product, not just
+  // the prose (the fragments are never replayed into LLM history — see toChatMessage).
+  const persistTurn = async (sessionId: string, user: string, view: TurnView): Promise<void> => {
     const store = await sessions();
-    await store.appendMessages(sessionId, [
-      { role: 'user', content: user },
-      { role: 'assistant', content: assistant },
-    ]);
+    const assistant: SessionMessage = { role: 'assistant', content: view.text };
+    if (view.fragments.length > 0) assistant.fragments = view.fragments;
+    await store.appendMessages(sessionId, [{ role: 'user', content: user }, assistant]);
   };
 
   // ── Standard turn: guidance / build (and remediate without remediateInput) ──
@@ -356,7 +382,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       mode,
     };
 
-    if (req.sessionId) await persistTurn(req.sessionId, req.user, view.text);
+    if (req.sessionId) await persistTurn(req.sessionId, req.user, view);
     return view;
   };
 
@@ -426,7 +452,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       mode: 'remediate',
     };
 
-    if (req.sessionId) await persistTurn(req.sessionId, req.user, view.text);
+    if (req.sessionId) await persistTurn(req.sessionId, req.user, view);
     return view;
   };
 
@@ -437,8 +463,13 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       return runStandardTurn(req, mode, onChunk);
     },
 
-    importCanvas(config, courseId) {
-      return importer(config, courseId);
+    async saveCanvasAuth(auth) {
+      // The token's one and only trip across the boundary → straight into the Keychain.
+      await secrets.set(canvasSecretKey(auth.baseUrl), auth.token);
+    },
+
+    async importCanvas(baseUrl, courseId) {
+      return importer(await canvasConfigFor(baseUrl), courseId);
     },
 
     async health(): Promise<RuntimeHealth> {
@@ -477,11 +508,11 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     },
 
     // ── Read-only Canvas page access (Remediate import; GET-only) ──
-    fetchCanvasPage(config, courseId, pageId) {
-      return fetchPageBodyFn(config, courseId, pageId);
+    async fetchCanvasPage(baseUrl, courseId, pageId) {
+      return fetchPageBodyFn(await canvasConfigFor(baseUrl), courseId, pageId);
     },
-    listCanvasPages(config, courseId) {
-      return listPagesFn(config, courseId);
+    async listCanvasPages(baseUrl, courseId) {
+      return listPagesFn(await canvasConfigFor(baseUrl), courseId);
     },
   };
 }

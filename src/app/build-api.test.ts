@@ -16,8 +16,9 @@ test('createUnavailableApi never fabricates a turn result — runTurn rejects (C
 
 test('createUnavailableApi refuses runtime actions rather than faking success (C3)', async () => {
   const api = createUnavailableApi('down');
-  await assert.rejects(() => api.importCanvas({ baseUrl: 'https://x', token: 't' }, '1'));
-  await assert.rejects(() => api.fetchCanvasPage({ baseUrl: 'https://x', token: 't' }, '1', 'p'));
+  await assert.rejects(() => api.saveCanvasAuth({ baseUrl: 'https://x', token: 't' }));
+  await assert.rejects(() => api.importCanvas('https://x', '1'));
+  await assert.rejects(() => api.fetchCanvasPage('https://x', '1', 'p'));
   await assert.rejects(() => api.resolveBrandTheme('#111111', '#222222'));
 });
 

@@ -265,6 +265,14 @@ export interface RemediateResult {
 export interface SessionMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  /**
+   * Gated HTML fragments produced on this turn (assistant messages only).
+   * Persisted so resuming a session restores the actual work product — the
+   * Canvas-safe HTML, its badge/conformance, and (in remediate) the before/after
+   * diff — not just the prose. NEVER replayed into LLM history (that is
+   * role+content only), so it can't pollute the model context.
+   */
+  fragments?: TurnFragment[];
 }
 
 /** A saved working session. */
@@ -351,7 +359,14 @@ export interface RuntimeHealth {
 export interface AppApi {
   /** Run a turn; `onChunk` (optional) receives streamed text/tool/fragment events. */
   runTurn(req: TurnRequest, onChunk?: OnTurnChunk): Promise<TurnView>;
-  importCanvas(config: CanvasConfig, courseId: string): Promise<CanvasImportResult>;
+  /**
+   * Store Canvas credentials in the OS secret store (macOS Keychain). The token
+   * crosses the IPC boundary HERE and only here; it is never persisted in the DB
+   * and never returned to or re-sent by the renderer. Read calls below take only
+   * the `baseUrl` — the runtime resolves the token from the Keychain.
+   */
+  saveCanvasAuth(auth: CanvasConfig): Promise<void>;
+  importCanvas(baseUrl: string, courseId: string): Promise<CanvasImportResult>;
   health(): Promise<RuntimeHealth>;
 
   // ── Sessions (storage-backed; the runtime persists each turn) ──
@@ -367,6 +382,8 @@ export interface AppApi {
   deleteBrandKit(id: string): Promise<void>;
 
   // ── Read-only Canvas page access (Remediate import; GET-only) ──
-  fetchCanvasPage(config: CanvasConfig, courseId: string, pageId: string): Promise<string>;
-  listCanvasPages(config: CanvasConfig, courseId: string): Promise<CanvasPage[]>;
+  // Token-free: pass only the Canvas base URL; the runtime reads the saved token
+  // from the Keychain (see `saveCanvasAuth`), so no secret transits the renderer.
+  fetchCanvasPage(baseUrl: string, courseId: string, pageId: string): Promise<string>;
+  listCanvasPages(baseUrl: string, courseId: string): Promise<CanvasPage[]>;
 }

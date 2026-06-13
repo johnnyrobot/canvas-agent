@@ -185,7 +185,11 @@ export function createStubApi(): AppApi {
       };
     },
 
-    async importCanvas(_config, courseId): Promise<CanvasImportResult> {
+    async saveCanvasAuth(): Promise<void> {
+      // Canned stub: pretend the credentials were stored.
+    },
+
+    async importCanvas(_baseUrl, courseId): Promise<CanvasImportResult> {
       return {
         courseId,
         name: `Imported course ${courseId}`,
@@ -266,7 +270,7 @@ export function createStubApi(): AppApi {
     },
 
     // ── Read-only Canvas page access ─────────────────────────────────────────────
-    async fetchCanvasPage(_config, _courseId, pageId): Promise<string> {
+    async fetchCanvasPage(_baseUrl, _courseId, pageId): Promise<string> {
       return (
         `<h2>${pageId}</h2>` +
         '<p>This is a sample Canvas page body, imported read-only for remediation. ' +
@@ -277,7 +281,7 @@ export function createStubApi(): AppApi {
       );
     },
 
-    async listCanvasPages(_config, _courseId): Promise<CanvasPage[]> {
+    async listCanvasPages(_baseUrl, _courseId): Promise<CanvasPage[]> {
       return CANNED_CANVAS_PAGES.map((p) => ({ ...p }));
     },
   };
