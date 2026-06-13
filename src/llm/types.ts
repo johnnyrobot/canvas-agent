@@ -90,6 +90,13 @@ export interface ChatChunk {
    * non-streaming `chat` path. Absent when the model is only emitting text.
    */
   toolCalls?: ToolCall[];
+  /**
+   * Ollama's `done_reason` for this generation, present only on the terminal
+   * chunk (e.g. `'stop'` for a normal stop, `'length'` for a `num_predict`
+   * truncation). Lets downstream tell a *finished* draft from a cut-off one —
+   * a truncated alt-text/JSON draft must never be surfaced as complete (C11).
+   */
+  doneReason?: string;
 }
 
 export interface DescribeImageOptions {

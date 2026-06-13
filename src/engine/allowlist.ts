@@ -143,7 +143,17 @@ const SEMANTIC_TAGS = new Set<string>([
   'nav', 'header', 'footer', 'section', 'article', 'aside', 'address',
   'details', 'summary',
   'abbr', 'acronym', 'dfn', 'time', 'del', 'ins', 'ruby', 'rp', 'rt', 'mark', 'legend',
+  // Interactive form controls. Canvas's Appendix B strips all of these, so they are
+  // unwrapped here — but losing a control is genuine semantic/interactive loss, so
+  // their removal must be flagged as a blocker, not silently flattened (C15).
+  // (`legend` above is on the allowlist and is therefore never removed.)
+  'form', 'fieldset', 'label', 'button', 'input', 'select', 'textarea', 'optgroup', 'option', 'output', 'datalist',
 ]);
+
+/** Heading tag -> its level (1..6). Used by the structure-preserving heading shift (C15). */
+const HEADING_LEVELS: Readonly<Record<string, number>> = {
+  h1: 1, h2: 2, h3: 3, h4: 4, h5: 5, h6: 6,
+};
 
 // --- Entity decoding / escaping ----------------------------------------------
 
@@ -439,41 +449,103 @@ function filterAttrs(tag: string, attrs: Attr[]): Attr[] {
   return out;
 }
 
-function transform(nodes: Node[], removed: string[], removedSet: Set<string>): Node[] {
-  const out: Node[] = [];
-  for (const node of nodes) {
-    if (node.type === 'text') {
-      out.push(node);
-      continue;
-    }
-    const tag = node.tag;
-    if (DROP_SUBTREE_TAGS.has(tag)) continue; // discard element + contents
-
-    const kids = transform(node.children, removed, removedSet);
-
-    if (tag === 'h1') {
-      out.push({ type: 'element', tag: 'h2', attrs: filterAttrs('h2', node.attrs), children: kids });
-      continue;
-    }
-    if (ALLOWED_TAGS.has(tag)) {
-      out.push({ type: 'element', tag, attrs: filterAttrs(tag, node.attrs), children: kids });
-      continue;
-    }
-    // Disallowed -> unwrap (keep children); flag if it was semantic.
-    if (SEMANTIC_TAGS.has(tag) && !removedSet.has(tag)) {
-      removedSet.add(tag);
-      removed.push(tag);
-    }
-    out.push(...kids);
+/**
+ * Finalize one element into its parent's output list, given its already-transformed
+ * children. Split out from the traversal so the walk can be iterative (explicit
+ * stack) instead of recursive — deeply nested HTML must not overflow the call
+ * stack (C13). Allowed tags are kept (attrs filtered); headings are shifted down a
+ * level when the document has a content <h1> (`shiftHeadings`, see C15); and a
+ * disallowed tag is unwrapped, flagged as semantic loss the first time it is seen.
+ */
+function finalizeElement(
+  node: ElementNode,
+  kids: Node[],
+  out: Node[],
+  removed: string[],
+  removedSet: Set<string>,
+  shiftHeadings: boolean,
+): void {
+  const tag = node.tag;
+  // When the document has a content <h1>, demote EVERY heading by one level
+  // (clamped at h6) so the relative hierarchy — and thus heading order — is
+  // preserved. Demoting only <h1> would orphan subsections and could manufacture
+  // the very heading-order violations the auditor then blocks (C15).
+  const headingLevel = HEADING_LEVELS[tag];
+  if (headingLevel !== undefined && shiftHeadings) {
+    const shiftedTag = `h${Math.min(6, headingLevel + 1)}`;
+    out.push({ type: 'element', tag: shiftedTag, attrs: filterAttrs(shiftedTag, node.attrs), children: kids });
+    return;
   }
-  return out;
+  if (ALLOWED_TAGS.has(tag)) {
+    out.push({ type: 'element', tag, attrs: filterAttrs(tag, node.attrs), children: kids });
+    return;
+  }
+  // Disallowed -> unwrap (keep children); flag if it was semantic.
+  if (SEMANTIC_TAGS.has(tag) && !removedSet.has(tag)) {
+    removedSet.add(tag);
+    removed.push(tag);
+  }
+  for (const k of kids) out.push(k);
+}
+
+interface TransformFrame {
+  nodes: Node[];
+  index: number;
+  /** Output list this frame's own children accumulate into. */
+  kids: Node[];
+  /** The element being transformed (null only for the synthetic root frame). */
+  node: ElementNode | null;
+  /** Where this element's finalized output is appended (its parent's `kids`). */
+  parentOut: Node[];
+}
+
+/**
+ * Iterative, allowlist-driven repair of the parsed tree. Uses an explicit stack
+ * (not recursion) so arbitrarily deep documents are handled without a stack
+ * overflow. Each element is finalized AFTER its children (post-order), so
+ * `removedSemantic` records inner tags before outer — identical to the recursion
+ * it replaced.
+ */
+function transform(nodes: Node[], removed: string[], removedSet: Set<string>, shiftHeadings: boolean): Node[] {
+  const result: Node[] = [];
+  const stack: TransformFrame[] = [{ nodes, index: 0, kids: result, node: null, parentOut: result }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (frame.index >= frame.nodes.length) {
+      stack.pop();
+      if (frame.node !== null) {
+        finalizeElement(frame.node, frame.kids, frame.parentOut, removed, removedSet, shiftHeadings);
+      }
+      continue;
+    }
+    const node = frame.nodes[frame.index]!;
+    frame.index += 1;
+    if (node.type === 'text') {
+      frame.kids.push(node);
+      continue;
+    }
+    if (DROP_SUBTREE_TAGS.has(node.tag)) continue; // discard element + contents
+    stack.push({ nodes: node.children, index: 0, kids: [], node, parentOut: frame.kids });
+  }
+  return result;
 }
 
 // --- Serializer --------------------------------------------------------------
 
+type SerItem = { str: string } | { node: Node };
+
+/** Iterative serializer (explicit stack) — no per-depth recursion (C13). */
 function serialize(nodes: Node[]): string {
   let out = '';
-  for (const node of nodes) {
+  const stack: SerItem[] = [];
+  for (let k = nodes.length - 1; k >= 0; k -= 1) stack.push({ node: nodes[k]! });
+  while (stack.length > 0) {
+    const item = stack.pop()!;
+    if ('str' in item) {
+      out += item.str;
+      continue;
+    }
+    const node = item.node;
     if (node.type === 'text') {
       out += escapeText(node.text);
       continue;
@@ -484,9 +556,13 @@ function serialize(nodes: Node[]): string {
     }
     if (VOID_TAGS.has(node.tag)) {
       out += `<${node.tag}${attrsStr}>`;
-    } else {
-      out += `<${node.tag}${attrsStr}>${serialize(node.children)}</${node.tag}>`;
+      continue;
     }
+    // Emit `<tag …>` then children (in order) then `</tag>`: push close first,
+    // children reversed, open last, so they pop in document order.
+    stack.push({ str: `</${node.tag}>` });
+    for (let k = node.children.length - 1; k >= 0; k -= 1) stack.push({ node: node.children[k]! });
+    stack.push({ str: `<${node.tag}${attrsStr}>` });
   }
   return out;
 }
@@ -495,9 +571,15 @@ function serialize(nodes: Node[]): string {
 
 /** Synchronous core of the gate; `validateAllowlist` is the contract's async port. */
 export function repairAllowlist(html: string): AllowlistResult {
-  const tree = buildTree(tokenize(html));
+  const tokens = tokenize(html);
+  // A content <h1> would duplicate the Canvas page-title <h1>. When one is present,
+  // the whole heading hierarchy is shifted down a level (clamped at h6) — computed
+  // here from the flat token stream so the decision is document-global and does not
+  // depend on traversal/sibling state (C15).
+  const shiftHeadings = tokens.some((t) => t.kind === 'open' && t.tag === 'h1');
+  const tree = buildTree(tokens);
   const removed: string[] = [];
-  const repaired = transform(tree, removed, new Set<string>());
+  const repaired = transform(tree, removed, new Set<string>(), shiftHeadings);
   return { html: serialize(repaired), removedSemantic: removed };
 }
 

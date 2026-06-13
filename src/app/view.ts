@@ -44,6 +44,12 @@ export interface FragmentVm {
   badge: BadgeVm;
   /** Blocker messages to surface when the badge is withheld. */
   blockers: string[];
+  /**
+   * Moderate (warning-severity) findings the auditor produced. Surfaced even on a
+   * passing fragment — never dropped — so a "passed" badge is never shown while
+   * real issues stay hidden (C14). They do not withhold the badge.
+   */
+  warnings: string[];
   /** Items flagged for human review (alerts / advisories). */
   needsReview: string[];
   /** Present only for remediate-mode fragments: the before→after resolution. */
@@ -77,6 +83,7 @@ export function turnViewToVm(view: TurnView): TurnVm {
           ? { kind: 'passed', label: PASSED_LABEL }
           : { kind: 'withheld', label: WITHHELD_LABEL },
         blockers: gate.conformance.blockers.map((b) => b.message),
+        warnings: gate.conformance.warnings.map((w) => w.message),
         needsReview: gate.conformance.needsHumanReview.map((b) => b.message),
       };
       if (fragment.remediateResult) {

@@ -61,6 +61,26 @@ test('a passing fragment maps to a "passed" badge', () => {
   assert.deepEqual(vm.blockers, []);
 });
 
+test('a fragment surfaces auditor warnings even when the badge passes (C14)', () => {
+  // The auditor computes conformance.warnings (moderate WCAG issues); they must
+  // reach the UI. Previously the view dropped them, so a "passed" fragment hid
+  // real findings — the view-boundary version of badging-while-failing.
+  const view: TurnView = {
+    text: '',
+    fragments: [
+      fragment('<table></table>', {
+        warnings: [{ id: 'table-caption', severity: 'warning', message: 'Table has no caption' }],
+      }),
+    ],
+    toolsUsed: [],
+    iterations: 1,
+  };
+  const [vm] = turnViewToVm(view).fragments;
+  assert.ok(vm);
+  assert.equal(vm.passed, true); // a moderate warning does not withhold the badge…
+  assert.deepEqual(vm.warnings, ['Table has no caption']); // …but it is still surfaced
+});
+
 test('a badgeWithheld fragment maps to a "checks withheld" badge and surfaces blockers', () => {
   const view: TurnView = {
     text: '',
