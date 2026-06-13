@@ -111,13 +111,18 @@ export function createRetriever(opts?: RetrieverOptions): KbRetriever {
   const limit = opts?.limit ?? DEFAULT_LIMIT;
 
   const db = new DatabaseSync(':memory:');
+  // `tokenize = 'porter unicode61'`: unicode-aware tokenizing + Porter stemming so
+  //   morphological queries match (e.g. "images" ↔ "image", "headings" ↔ "heading").
+  // `citation` is INDEXED (not UNINDEXED) so a WCAG criterion number that lives only
+  //   in the citation (e.g. "§1.3.1") is searchable — faculty routinely search by SC.
   db.exec(`CREATE VIRTUAL TABLE units USING fts5(
     heading,
     text,
     pack_id UNINDEXED,
     unit_id UNINDEXED,
     title UNINDEXED,
-    citation UNINDEXED
+    citation,
+    tokenize = 'porter unicode61'
   );`);
 
   const insert = db.prepare(

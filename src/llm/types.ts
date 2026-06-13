@@ -83,6 +83,13 @@ export interface ChatChunk {
   delta: string;
   /** True on the final chunk. */
   done: boolean;
+  /**
+   * Tools the model asked to call this turn. Native Ollama streaming emits
+   * `message.tool_calls` (usually on the final chunk); surfacing them here lets
+   * the orchestrator's tool loop run under streaming exactly as it does for the
+   * non-streaming `chat` path. Absent when the model is only emitting text.
+   */
+  toolCalls?: ToolCall[];
 }
 
 export interface DescribeImageOptions {

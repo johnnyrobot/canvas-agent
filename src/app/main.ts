@@ -14,9 +14,8 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
-import { createStubApi } from './stub-api.js';
+import { buildApi } from './build-api.js';
 import { createAppApi } from '../runtime/index.js';
-import type { AppApi } from '../contracts/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -46,18 +45,12 @@ function createWindow(): void {
   void win.loadFile(path.join(here, 'renderer', 'index.html'));
 }
 
-// Wire the IPC boundary once, before any window exists. ⟵ integration seam.
-// Use the real local runtime; fall back to the stub if it can't be constructed
-// (e.g. before the Ollama/docling sidecars are installed) so the app still opens.
-function buildApi(): AppApi {
-  try {
-    return createAppApi();
-  } catch (err) {
-    console.warn('[canvas-agent] real runtime unavailable; using stub API:', err);
-    return createStubApi();
-  }
-}
-registerIpc(ipcMain, buildApi());
+// Wire the IPC boundary once, before any window exists. Use the real local
+// runtime; if it can't be constructed (e.g. before the Ollama/docling sidecars
+// are installed) fall back to an HONEST degraded API that reports the runtime as
+// down and refuses to fabricate results — never the demo stub, which would
+// report healthy and emit passing accessibility badges (C3).
+registerIpc(ipcMain, buildApi(createAppApi));
 
 void app.whenReady().then(() => {
   createWindow();

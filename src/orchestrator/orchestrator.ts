@@ -6,7 +6,7 @@
  * (bounded — never infinite, PRD §13.3). Returns the final text plus the full
  * transcript and a trace of every tool invocation.
  */
-import type { ChatMessage, ChatOptions, ChatResult } from '../llm/index.js';
+import type { ChatMessage, ChatOptions, ChatResult, ToolCall } from '../llm/index.js';
 import type { KbRetriever } from '../contracts/index.js';
 import type { ChatRunner, OrchestratorEvent, ToolContext, ToolInvocation, TurnInput, TurnResult } from './types.js';
 import type { ToolRegistry } from './registry.js';
@@ -102,27 +102,28 @@ export class Orchestrator {
   }
 
   /**
-   * Consume `chatStream` for one model call: accumulate the full text, emitting a
-   * `{ type: 'text', delta }` event per chunk. Returns a `ChatResult`-shaped
-   * value so the tool loop is otherwise unchanged.
-   *
-   * NOTE: the streaming transport (`ChatChunk`) carries text only, so a streamed
-   * call surfaces no tool calls — streaming therefore yields the assistant's text
-   * answer directly. Tool-driven turns use the non-streaming `chat` path, which is
-   * never altered. (This is a property of the frozen `ChatChunk` contract.)
+   * Consume `chatStream` for one model call: accumulate the full text (emitting a
+   * `{ type: 'text', delta }` event per chunk) AND any tool calls the model
+   * surfaces mid-stream. Returns a `ChatResult`-shaped value so the tool-dispatch
+   * loop runs identically whether the turn streamed or not — a tool-driven turn
+   * under streaming executes its tools instead of returning an empty answer.
    */
   private async streamChat(
     opts: ChatOptions,
     onEvent: (e: OrchestratorEvent) => void,
   ): Promise<ChatResult> {
     let content = '';
+    const toolCalls: ToolCall[] = [];
     for await (const chunk of this.runner.chatStream!(opts)) {
       if (chunk.delta) {
         content += chunk.delta;
         onEvent({ type: 'text', delta: chunk.delta });
       }
+      if (chunk.toolCalls) toolCalls.push(...chunk.toolCalls);
     }
-    return { content, model: '', raw: undefined };
+    const result: ChatResult = { content, model: '', raw: undefined };
+    if (toolCalls.length > 0) result.toolCalls = toolCalls;
+    return result;
   }
 
   private async runTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolInvocation> {

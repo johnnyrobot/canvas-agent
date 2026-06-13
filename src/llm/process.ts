@@ -9,7 +9,7 @@
  *  - On `start()` we warm-load the model(s) so the first user request doesn't pay
  *    the multi-second cold load (PRD §15.1/§21).
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { LLMConfig } from './types.js';
 import { uniqueModels } from './config.js';
@@ -26,13 +26,19 @@ const noopLogger: OllamaProcessLogger = {
   error: () => {},
 };
 
+/** Injection seam for `child_process.spawn` so the lifecycle is unit-testable. */
+export type SpawnLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+
 export class OllamaProcess {
   private child: ChildProcess | undefined;
   private owned = false;
+  /** Set by the child's `error` event (e.g. ENOENT when the binary isn't on PATH). */
+  private spawnError: Error | undefined;
 
   constructor(
     private readonly config: LLMConfig,
     private readonly log: OllamaProcessLogger = noopLogger,
+    private readonly spawnImpl: SpawnLike = spawn,
   ) {}
 
   /** Whether this manager spawned (and therefore owns) the daemon. */
@@ -71,7 +77,8 @@ export class OllamaProcess {
 
   private spawn(): void {
     this.log.info('Spawning `ollama serve`…');
-    this.child = spawn('ollama', ['serve'], {
+    this.spawnError = undefined;
+    this.child = this.spawnImpl('ollama', ['serve'], {
       env: {
         ...process.env,
         OLLAMA_HOST: this.config.ollamaHost,
@@ -81,6 +88,15 @@ export class OllamaProcess {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.child.stderr?.on('data', (d: Buffer) => this.log.warn(`[ollama] ${d.toString().trim()}`));
+    // A spawn failure (ENOENT — the binary isn't on PATH, e.g. a Finder-launched
+    // .app) emits an `error` event; WITHOUT this listener it is an *uncaught*
+    // exception that crashes the Electron main process. Record it so the readiness
+    // wait can reject cleanly and the caller can degrade gracefully.
+    this.child.on('error', (err: Error) => {
+      this.spawnError = err;
+      this.child = undefined;
+      this.log.error(`Failed to spawn ollama serve: ${err.message}`);
+    });
     this.child.on('exit', (code) => {
       if (this.owned) this.log.error(`ollama serve exited (code ${code ?? 'null'}).`);
       this.child = undefined;
@@ -90,6 +106,7 @@ export class OllamaProcess {
   private async waitUntilReady(timeoutMs = 30_000, intervalMs = 500): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (this.spawnError) throw new Error(`Failed to spawn ollama serve: ${this.spawnError.message}`);
       if (await this.isHealthy()) {
         this.log.info('Ollama is ready.');
         return;

@@ -23,8 +23,15 @@ export interface PlaywrightRunnerOptions {
   launchOptions?: LaunchOptions;
 }
 
-/** axe tags scanned (PRD §8.2): WCAG 2.0/2.1 A + AA. */
-const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa'];
+/**
+ * axe tags scanned (PRD §8.2): WCAG Level A + AA across 2.0, 2.1 AND 2.2 — the
+ * product targets WCAG 2.2 AA. Adding `wcag21a` (2.1 Level A, e.g. status messages)
+ * and `wcag22aa` (2.2 AA, e.g. 2.5.8 target-size) closes a coverage gap where rules
+ * tagged only for those versions were never run. axe-core 4.12 has no `wcag22a`
+ * tag (2.2 added no automatable Level A rules). `best-practice`/AAA are deliberately
+ * excluded — they are not WCAG 2.2 AA failures and would manufacture false blockers.
+ */
+export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];

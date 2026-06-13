@@ -21,7 +21,11 @@ export class OllamaError extends Error {
 }
 
 interface NativeChatStreamChunk {
-  message?: { content?: string; thinking?: string };
+  message?: {
+    content?: string;
+    thinking?: string;
+    tool_calls?: { function?: { name?: string; arguments?: Record<string, unknown> } }[];
+  };
   done?: boolean;
 }
 
@@ -66,14 +70,21 @@ export class OllamaClient {
     return result;
   }
 
-  /** Streaming chat completion — yields text deltas as they arrive. */
+  /** Streaming chat completion — yields text deltas (and any tool calls) as they arrive. */
   async *chatStream(opts: ChatOptions): AsyncGenerator<ChatChunk> {
     const body = buildChatRequest(opts, this.config, true);
     const res = await this.post('/api/chat', body, opts.signal);
     for await (const obj of parseNdjson<NativeChatStreamChunk>(res.body)) {
       const delta = obj.message?.content ?? '';
       const done = obj.done === true;
-      if (delta || done) yield { delta, done };
+      const toolCalls = (obj.message?.tool_calls ?? [])
+        .filter((c) => c.function?.name)
+        .map((c) => ({ name: c.function!.name!, arguments: c.function!.arguments ?? {} }));
+      if (delta || done || toolCalls.length > 0) {
+        const chunk: ChatChunk = { delta, done };
+        if (toolCalls.length > 0) chunk.toolCalls = toolCalls;
+        yield chunk;
+      }
       if (done) return;
     }
   }
