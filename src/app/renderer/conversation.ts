@@ -125,6 +125,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
     const blockers = issueList(fragment.blockers, 'fragment__blockers', 'Blocking issues:');
     if (blockers) card.append(blockers);
+    const warnings = issueList(fragment.warnings, 'fragment__warnings', 'Warnings:');
+    if (warnings) card.append(warnings);
     const review = issueList(fragment.needsReview, 'fragment__review', 'Needs human review:');
     if (review) card.append(review);
 
