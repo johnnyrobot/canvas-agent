@@ -100,7 +100,7 @@ test('a deliberately bad fragment makes the gate withhold the badge', async () =
   assert.equal(frag.gate.badgeWithheld, true, 'badge withheld for a blocking fragment');
   assert.equal(frag.gate.conformance.passedChecks, false);
   assert.ok(
-    frag.gate.conformance.blockers.some((b) => b.id === 'allowlist-removed-semantic'),
+    frag.gate.conformance.blockers.some((b) => b.id.startsWith('allowlist-removed-semantic')),
     'semantic-loss blocker present',
   );
   // The gated HTML is still safe to show (allowlist-repaired), just badge-less.

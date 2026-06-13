@@ -73,8 +73,11 @@ export async function enforceGate(html: string, deps: GateDeps): Promise<GateRes
 
   const blockers = issues.filter((i) => BLOCKING.has(i.severity));
   // Removing a *semantic* element during allowlist repair is itself a blocker.
+  // The id is scoped by tag so each removed tag is a DISTINCT issue — a constant id
+  // collapses multiple removed tags into one row downstream (uniqueById/afterIds key
+  // on id), under-counting the loss and mis-attributing "fixed" (C12).
   for (const tag of allow.removedSemantic) {
-    blockers.push({ id: 'allowlist-removed-semantic', severity: 'blocker', message: `Removed semantic <${tag}>` });
+    blockers.push({ id: `allowlist-removed-semantic:${tag}`, severity: 'blocker', message: `Removed semantic <${tag}>` });
   }
   // `error` now blocks (above), so it is no longer a non-blocking warning.
   const warnings = issues.filter((i) => i.severity === 'warning');

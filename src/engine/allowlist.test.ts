@@ -177,3 +177,62 @@ test('text entities round-trip without double-escaping', async () => {
   assert.ok(r.html.includes('&amp;'));
   assert.ok(r.html.includes('&lt;'));
 });
+
+// ── C13: deep nesting must not overflow the stack (iterative traversal) ───────
+
+test('deeply nested HTML does not overflow the stack and round-trips (C13)', async () => {
+  // Remediate feeds arbitrary external HTML (converted PDFs/Office docs, pastes)
+  // through the gate synchronously; per-depth recursion in transform()/serialize()
+  // threw RangeError on legitimately deep documents, so the gate could never
+  // process them. Traversal must be iterative.
+  const depth = 20000;
+  const html = '<div>'.repeat(depth) + 'x' + '</div>'.repeat(depth);
+  const r = await validateAllowlist(html);
+  assert.equal(r.html, html); // byte-for-byte round-trip
+  assert.deepEqual(r.removedSemantic, []); // div is not semantic
+});
+
+test('iterative transform preserves post-order removedSemantic for nested semantic tags (C13)', async () => {
+  // The recursive baseline records inner-tag-before-outer (children transformed
+  // first). The iterative rewrite must keep that exact order — a pre-order rewrite
+  // would silently change output and the diff semantics downstream.
+  assert.deepEqual(
+    (await validateAllowlist('<main><figure>x</figure></main>')).removedSemantic,
+    ['figure', 'main'],
+  );
+  assert.deepEqual(
+    (await validateAllowlist('<figure><figcaption>x</figcaption></figure>')).removedSemantic,
+    ['figcaption', 'figure'],
+  );
+});
+
+// ── C15: repair must not degrade structure ───────────────────────────────────
+
+test('demoting a content h1 shifts the WHOLE heading hierarchy, preserving subordination (C15)', async () => {
+  // Canvas renders the page title as the <h1>, so a content <h1> is demoted. Demoting
+  // ONLY <h1> (h1,h2 -> h2,h2) orphaned subsections and could manufacture heading-order
+  // violations the auditor then blocks; the whole hierarchy must shift together.
+  const r = await validateAllowlist('<h1>Title</h1><h2>Section</h2><h3>Sub</h3>');
+  assert.equal(r.html, '<h2>Title</h2><h3>Section</h3><h4>Sub</h4>');
+});
+
+test('heading levels are left unchanged when the document has no h1 (C15)', async () => {
+  const r = await validateAllowlist('<h2>A</h2><h3>B</h3>');
+  assert.equal(r.html, '<h2>A</h2><h3>B</h3>');
+});
+
+test('heading shift clamps at h6, never emitting an illegal h7 (C15)', async () => {
+  const r = await validateAllowlist('<h1>A</h1><h5>B</h5><h6>C</h6>');
+  assert.equal(r.html, '<h2>A</h2><h6>B</h6><h6>C</h6>');
+});
+
+test('flattening a form control is reported as semantic loss (a blocker) (C15)', async () => {
+  // Canvas strips form controls; unwrapping them silently dropped the
+  // "removing a semantic element is a blocker" guarantee. They must be flagged.
+  const r = await validateAllowlist(
+    '<form><fieldset><label>Name <input></label><button>Go</button></fieldset></form>',
+  );
+  for (const tag of ['form', 'fieldset', 'label', 'input', 'button']) {
+    assert.ok(r.removedSemantic.includes(tag), `expected ${tag} in removedSemantic`);
+  }
+});

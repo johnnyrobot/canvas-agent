@@ -40,3 +40,46 @@ test('chatStream surfaces native tool_calls from the stream (C1 transport)', asy
   // Text deltas still stream through alongside the tool call.
   assert.equal(chunks.map((c) => c.delta).join(''), 'one moment');
 });
+
+test('chatStream throws on a mid-stream Ollama error line instead of swallowing it (C11)', async () => {
+  // A standalone {"error":...} NDJSON line has no message/done/tool_calls, so the
+  // old guard dropped it silently and the stream ended as if the draft completed.
+  const client = new OllamaClient(
+    config,
+    ndjsonFetch([
+      { message: { content: 'partial draft' }, done: false },
+      { error: 'model runner has crashed' },
+    ]),
+  );
+
+  await assert.rejects(
+    async () => {
+      const drained: ChatChunk[] = [];
+      for await (const c of client.chatStream({ messages: [{ role: 'user', content: 'x' }] })) {
+        drained.push(c);
+      }
+    },
+    /model runner has crashed/,
+  );
+});
+
+test('chatStream surfaces done_reason so truncation is detectable (C11)', async () => {
+  // done_reason='length' = the model was cut off. Downstream must be able to tell a
+  // truncated draft from a complete one (it was previously dropped entirely).
+  const client = new OllamaClient(
+    config,
+    ndjsonFetch([
+      { message: { content: 'this draft was cut o' }, done: false },
+      { message: { content: '' }, done: true, done_reason: 'length' },
+    ]),
+  );
+
+  const chunks: ChatChunk[] = [];
+  for await (const c of client.chatStream({ messages: [{ role: 'user', content: 'x' }] })) {
+    chunks.push(c);
+  }
+
+  const terminal = chunks.find((c) => c.done);
+  assert.ok(terminal, 'expected a terminal chunk');
+  assert.equal(terminal.doneReason, 'length');
+});
