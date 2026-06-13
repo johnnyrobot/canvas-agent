@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ChatOptions, ChatResult } from '../llm/index.js';
+import type { ChatChunk, ChatOptions, ChatResult } from '../llm/index.js';
 import { Orchestrator, OrchestratorError } from './orchestrator.js';
 import { ToolRegistry } from './registry.js';
-import type { ChatRunner, Tool } from './types.js';
+import type { ChatRunner, OrchestratorEvent, Tool } from './types.js';
 
 /**
  * A scripted ChatRunner that returns queued responses and records each call.
@@ -97,4 +97,56 @@ test('the tool loop is bounded (never infinite)', async () => {
   const registry = new ToolRegistry().register(echoTool('t', () => ({ ok: true })));
   const orch = new Orchestrator(runner, registry, { maxToolIterations: 2 });
   await assert.rejects(() => orch.handleTurn({ user: 'x' }), OrchestratorError);
+});
+
+/**
+ * A streaming ChatRunner whose `chatStream` replays a scripted list of chunk
+ * arrays (one array per model round-trip). `chat` throws so any test asserting
+ * the streaming path proves the non-streaming path was NOT used.
+ */
+class StreamingRunner implements ChatRunner {
+  calls = 0;
+  constructor(private readonly streams: ChatChunk[][]) {}
+  async chat(): Promise<ChatResult> {
+    throw new Error('chat() must not be called when the streaming path is active');
+  }
+  async *chatStream(): AsyncGenerator<ChatChunk> {
+    const script = this.streams[this.calls++];
+    if (!script) throw new Error('StreamingRunner ran out of scripted streams');
+    for (const chunk of script) yield chunk;
+  }
+}
+
+test('streaming path executes a tool call surfaced mid-stream, then finalizes (C1)', async () => {
+  const runner = new StreamingRunner([
+    // round 1 (streamed): the model requests a tool instead of answering
+    [{ delta: '', done: true, toolCalls: [{ name: 'audit_html', arguments: { html: '<img>' } }] }],
+    // round 2 (streamed): the final text answer, delivered as two deltas
+    [
+      { delta: 'Found ', done: false },
+      { delta: '1 issue.', done: true },
+    ],
+  ]);
+  const registry = new ToolRegistry().register(
+    echoTool('audit_html', (a) => ({ issues: [{ id: 'img-alt-missing', html: a['html'] }] })),
+  );
+  const orch = new Orchestrator(runner, registry);
+
+  const events: OrchestratorEvent[] = [];
+  const res = await orch.handleTurn({ user: 'check this' }, { onEvent: (e) => events.push(e) });
+
+  // The tool actually ran and the model finalized off its result.
+  assert.equal(res.text, 'Found 1 issue.');
+  assert.equal(res.iterations, 2);
+  assert.equal(res.toolInvocations.length, 1);
+  assert.equal(res.toolInvocations[0]?.call.name, 'audit_html');
+  // A tool event was surfaced to the stream, and the final text streamed as deltas.
+  assert.ok(events.some((e) => e.type === 'tool' && e.name === 'audit_html'));
+  assert.equal(
+    events
+      .filter((e): e is { type: 'text'; delta: string } => e.type === 'text')
+      .map((e) => e.delta)
+      .join(''),
+    'Found 1 issue.',
+  );
 });

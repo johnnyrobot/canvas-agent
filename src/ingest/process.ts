@@ -3,7 +3,7 @@
  * stop pattern as the Ollama process manager. docling-serve is Python; it ships
  * as a local subprocess (PRD §16.4).
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { IngestConfig } from './types.js';
 
@@ -15,13 +15,19 @@ export interface IngestProcessLogger {
 
 const noopLogger: IngestProcessLogger = { info: () => {}, warn: () => {}, error: () => {} };
 
+/** Injection seam for `child_process.spawn` so the lifecycle is unit-testable. */
+export type SpawnLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+
 export class DoclingProcess {
   private child: ChildProcess | undefined;
   private owned = false;
+  /** Set by the child's `error` event (e.g. ENOENT when the binary isn't on PATH). */
+  private spawnError: Error | undefined;
 
   constructor(
     private readonly config: IngestConfig,
     private readonly log: IngestProcessLogger = noopLogger,
+    private readonly spawnImpl: SpawnLike = spawn,
   ) {}
 
   get isOwned(): boolean {
@@ -61,11 +67,19 @@ export class DoclingProcess {
     const { hostname, port } = new URL(this.config.baseUrl);
     this.log.info('Spawning `docling-serve run`…');
     // Assumes `docling-serve` is on PATH (bundled with the app).
-    this.child = spawn('docling-serve', ['run', '--host', hostname, '--port', port || '5001'], {
+    this.child = this.spawnImpl('docling-serve', ['run', '--host', hostname, '--port', port || '5001'], {
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.child.stderr?.on('data', (d: Buffer) => this.log.warn(`[docling] ${d.toString().trim()}`));
+    // A spawn failure (ENOENT — the binary isn't on PATH) emits an `error` event;
+    // WITHOUT this listener it is an *uncaught* exception that crashes the Electron
+    // main process. Record it so the readiness wait can reject cleanly.
+    this.child.on('error', (err: Error) => {
+      this.spawnError = err;
+      this.child = undefined;
+      this.log.error(`Failed to spawn docling-serve: ${err.message}`);
+    });
     this.child.on('exit', (code) => {
       if (this.owned) this.log.error(`docling-serve exited (code ${code ?? 'null'}).`);
       this.child = undefined;
@@ -75,6 +89,7 @@ export class DoclingProcess {
   private async waitUntilReady(timeoutMs = 60_000, intervalMs = 750): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (this.spawnError) throw new Error(`Failed to spawn docling-serve: ${this.spawnError.message}`);
       if (await this.isHealthy()) {
         this.log.info('docling-serve is ready.');
         return;

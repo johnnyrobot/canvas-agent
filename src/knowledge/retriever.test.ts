@@ -58,6 +58,38 @@ test('RUBRIC_ID_PATTERN matches rubric/criterion ids and rejects prose', () => {
   assert.ok(!RUBRIC_ID_PATTERN.test('1.4.3'));
 });
 
+test('morphological queries match via stemming (C9)', async () => {
+  // packA/alt-text says "images" (plural); a singular query must still match.
+  const retrieve = createRetriever({ packs: [packA] });
+  const { hits } = await retrieve('image');
+  assert.ok(
+    hits.some((h) => h.id === 'packA:alt-text'),
+    'singular "image" should match the unit that says "images"',
+  );
+});
+
+test('a WCAG criterion number in a citation is searchable (C9)', async () => {
+  // The criterion digits appear ONLY in the citation; the body has no digits,
+  // so a hit proves the citation column is indexed.
+  const citePack: KnowledgePack = {
+    id: 'cite',
+    title: 'Cite',
+    intents: ['accessibility'],
+    units: [
+      {
+        id: 'auth',
+        heading: 'Accessible authentication',
+        text: 'Do not require a cognitive function memory puzzle to sign in.',
+        citation: 'WCAG 2.2 §3.3.8',
+      },
+    ],
+  };
+  const retrieve = createRetriever({ packs: [citePack] });
+  const { hits } = await retrieve('3.3.8');
+  assert.ok(hits.length > 0, 'criterion-number lookup should hit the unit via its citation');
+  assert.equal(hits[0]?.id, 'cite:auth');
+});
+
 test('a query clearly matching one unit ranks it first', async () => {
   const retrieve = retriever();
   const { hits } = await retrieve('color contrast ratio');

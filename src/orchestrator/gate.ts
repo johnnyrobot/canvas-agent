@@ -56,8 +56,16 @@ export interface GateResult {
   badgeWithheld: boolean;
 }
 
-/** Severities that withhold the conformant badge (cf. `A11Y_GATE_BLOCK_SEVERITIES`). */
-const BLOCKING: ReadonlySet<Severity> = new Set<Severity>(['blocker']);
+/**
+ * Severities that withhold the conformant badge (cf. `A11Y_GATE_BLOCK_SEVERITIES`).
+ * Both are *definite* WCAG failures: `blocker` = axe `critical` (+ contrast +
+ * semantic-removal); `error` = axe `serious` (and any violation whose impact axe
+ * left unset). Surfacing a serious AA failure (e.g. link-name, button-name) as a
+ * mere "warning" while still badging the page "passed checks" would be exactly the
+ * overlay-style dishonesty this gate exists to prevent. `warning` (moderate) and
+ * `advisory` (minor) violations are surfaced but do not withhold the badge.
+ */
+const BLOCKING: ReadonlySet<Severity> = new Set<Severity>(['blocker', 'error']);
 
 export async function enforceGate(html: string, deps: GateDeps): Promise<GateResult> {
   const allow = await deps.validateAllowlist(html);
@@ -68,7 +76,8 @@ export async function enforceGate(html: string, deps: GateDeps): Promise<GateRes
   for (const tag of allow.removedSemantic) {
     blockers.push({ id: 'allowlist-removed-semantic', severity: 'blocker', message: `Removed semantic <${tag}>` });
   }
-  const warnings = issues.filter((i) => i.severity === 'warning' || i.severity === 'error');
+  // `error` now blocks (above), so it is no longer a non-blocking warning.
+  const warnings = issues.filter((i) => i.severity === 'warning');
   const needsHumanReview = issues.filter((i) => i.severity === 'alert' || i.severity === 'advisory');
 
   const badgeWithheld = blockers.length > 0;

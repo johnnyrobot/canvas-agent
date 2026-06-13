@@ -35,6 +35,19 @@ test('warnings/alerts do NOT withhold the badge but are surfaced', async () => {
   assert.equal(res.conformance.needsHumanReview.length, 1);
 });
 
+test('a serious AA failure (error severity) withholds the badge (C2)', async () => {
+  // axe `serious` violations (e.g. link-name, button-name) map to severity `error`.
+  // They are *definite* WCAG AA failures, so the "passed checks" badge must be withheld.
+  const res = await enforceGate('<a href="#"></a>', deps([
+    { id: 'link-name', severity: 'error', message: 'Link has no discernible text' },
+  ]));
+  assert.equal(res.badgeWithheld, true);
+  assert.equal(res.conformance.passedChecks, false);
+  assert.equal(res.conformance.blockers[0]?.id, 'link-name');
+  // A blocker is not also double-counted as a (non-blocking) warning.
+  assert.equal(res.conformance.warnings.length, 0);
+});
+
 test('removing a semantic element during allowlist repair is itself a blocker', async () => {
   const res = await enforceGate('<h2>x</h2>', deps([], ['nav']));
   assert.equal(res.badgeWithheld, true);

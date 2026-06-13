@@ -323,7 +323,12 @@ test('fetchCanvasPage / listCanvasPages delegate to the injected readers', async
 test('remediate diffs issues by id (fixed = gone after), emits one fragment, never touches Canvas', async () => {
   const source = '<p class="LOWCONTRAST"><img alt="" data-x="NOALT"></p>';
   const fixed = '<p data-x="NOALT">repaired, but alt still missing</p>';
-  const runner = new ScriptedRunner([text('```html\n' + fixed + '\n```')]);
+  // The model fixes the contrast blocker but cannot fix the missing alt (a serious
+  // AA failure). Post-C2 that residual `error` keeps the badge withheld, so the
+  // bounded re-audit loop runs one retry (which fails to improve, then breaks) —
+  // hence two scripted repair responses.
+  const repaired = text('```html\n' + fixed + '\n```');
+  const runner = new ScriptedRunner([repaired, repaired]);
   let canvasCalls = 0;
   const chunks: TurnChunk[] = [];
 
@@ -343,7 +348,11 @@ test('remediate diffs issues by id (fixed = gone after), emits one fragment, nev
   assert.ok(rr, 'fragment carries a RemediateResult');
   assert.equal(rr!.before, source);
   assert.equal(rr!.after, fixed);
-  assert.equal(rr!.gate.badgeWithheld, false, 'the blocker is gone → badge granted');
+  assert.equal(
+    rr!.gate.badgeWithheld,
+    true,
+    'contrast fixed, but the residual missing-alt (serious AA failure) still withholds the badge',
+  );
 
   const fixedById = Object.fromEntries(rr!.issueDiffs.map((d) => [d.issue.id, d.fixed]));
   assert.equal(fixedById['contrast'], true, 'contrast blocker fixed');
