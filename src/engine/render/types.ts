@@ -66,3 +66,17 @@ export interface ScanResult {
 export interface ScanRunner {
   run(html: string): Promise<ScanResult>;
 }
+
+/** The resolved background behind a text run, as classified by the runner. */
+export type ResolvedBackground =
+  | { kind: 'layers'; layers: string[] }       // top→bottom CSS colors down to an opaque base
+  | { kind: 'gradient'; css: string }          // raw computed gradient string
+  | { kind: 'image'; swatches: string[] }      // worst-case opaque bg samples (rgb strings)
+  | { kind: 'unresolvable'; reason: string };  // filters / conic / empty box / screenshot failure
+
+/** One visible text run with its resolved background (replaces TextColorPair). */
+export interface TextRun {
+  fg: string;
+  background: ResolvedBackground;
+  size: TextSize;
+}
