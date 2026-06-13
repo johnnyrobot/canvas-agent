@@ -10,11 +10,12 @@
  * Not unit-tested (Electron can't launch headless under `node:test`); exercised
  * via the manual `npm run app` smoke the lead adds after merge.
  */
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { buildApi } from './build-api.js';
+import { isInAppUrl, externalOpenTarget } from './navigation.js';
 import { createAppApi } from '../runtime/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +43,23 @@ function createWindow(): void {
     },
   });
 
-  void win.loadFile(path.join(here, 'renderer', 'index.html'));
+  const indexPath = path.join(here, 'renderer', 'index.html');
+  const appUrl = pathToFileURL(indexPath).toString();
+
+  // C8: never let a link in gated content navigate the privileged, Node-capable
+  // window off-app. Only same-page navigation (in-page anchors / reload) is allowed.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!isInAppUrl(url, appUrl)) event.preventDefault();
+  });
+  // A `target="_blank"` (or window.open) request: open http(s) in the OS browser,
+  // deny everything else, and never spawn an in-app window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    const external = externalOpenTarget(url);
+    if (external) void shell.openExternal(external);
+    return { action: 'deny' };
+  });
+
+  void win.loadFile(indexPath);
 }
 
 // Wire the IPC boundary once, before any window exists. Use the real local

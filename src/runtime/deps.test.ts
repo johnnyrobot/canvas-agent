@@ -9,6 +9,7 @@ const cleanAudit: Auditor = async () => ({ issues: [] });
 
 function makeDeps(over: Partial<Parameters<typeof createEngineDeps>[0]> = {}) {
   return createEngineDeps({
+    uploadsDir: '/app/uploads',
     audit: cleanAudit,
     retriever: async (q): Promise<KbResult> => ({
       hits: [{ id: 'p:1', packId: 'p', title: 't', snippet: `hit:${q}`, score: 1, citation: 'C1' }],
@@ -74,10 +75,26 @@ test('renderTemplate handles an unknown type safely (warning, not a throw)', asy
   assert.ok(res.warnings.some((w) => w.includes('unknown template type')));
 });
 
-test('ingestDocument delegates to the injected Docling sidecar convertPath', async () => {
+test('ingestDocument confines the fileRef to the uploads dir, then delegates (C6)', async () => {
   const d = makeDeps();
-  const res = (await d.ingestDocument!('/tmp/a.docx')) as { markdown?: string };
-  assert.equal(res.markdown, 'md:/tmp/a.docx');
+  const res = (await d.ingestDocument!('a.docx')) as { markdown?: string };
+  // The sidecar receives the path resolved INSIDE the uploads dir, not the raw ref.
+  assert.equal(res.markdown, 'md:/app/uploads/a.docx');
+});
+
+test('ingestDocument refuses an absolute or traversal fileRef without reading (C6)', async () => {
+  let called = false;
+  const d = makeDeps({
+    ingest: {
+      convertPath: async () => {
+        called = true;
+        return { status: 'success', processingTimeMs: 0 };
+      },
+    },
+  });
+  await assert.rejects(() => d.ingestDocument!('/etc/passwd'), /Refusing to ingest/);
+  await assert.rejects(() => d.ingestDocument!('../../etc/passwd'), /Refusing to ingest/);
+  assert.equal(called, false, 'the sidecar convertPath must never run for an escaping ref');
 });
 
 test('describeImage delegates to the LLM sidecar and returns the description text', async () => {

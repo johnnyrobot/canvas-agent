@@ -16,8 +16,9 @@ import { renderTemplate } from '../templates/index.js';
 import { createRetriever } from '../knowledge/index.js';
 import { createOllamaSidecar } from '../llm/index.js';
 import type { ChatResult, DescribeImageOptions } from '../llm/index.js';
-import { createDoclingSidecar } from '../ingest/index.js';
+import { createDoclingSidecar, resolveStagedPath } from '../ingest/index.js';
 import type { ConvertedDocument } from '../ingest/index.js';
+import { resolveAppPaths } from '../storage/index.js';
 import type { EngineDeps } from '../orchestrator/index.js';
 import type {
   Auditor,
@@ -65,6 +66,13 @@ export interface EngineDepsOptions {
   ingest?: DocConverter;
   /** Env override used only when constructing the default LLM sidecar. */
   llmEnv?: RuntimeEnv;
+  /**
+   * Uploads/staging dir that `ingest_document` refs are confined to (C6). The
+   * model-supplied `fileRef` is resolved strictly inside this dir, so a
+   * prompt-injected absolute path or `..` traversal cannot read arbitrary files.
+   * Default: the app's resolved uploads dir.
+   */
+  uploadsDir?: string;
 }
 
 /** The eight canonical Canvas templates (frozen `TemplateType`). */
@@ -91,6 +99,7 @@ export function createEngineDeps(opts: EngineDepsOptions = {}): Partial<EngineDe
   const retriever = opts.retriever ?? createRetriever();
   const llm = opts.llm ?? createOllamaSidecar({ env: runtimeLlmEnv(opts.llmEnv) });
   const ingest = opts.ingest ?? createDoclingSidecar();
+  const uploadsDir = opts.uploadsDir ?? resolveAppPaths().uploadsDir;
 
   return {
     auditHtml: (html) => auditor(html),
@@ -106,7 +115,9 @@ export function createEngineDeps(opts: EngineDepsOptions = {}): Partial<EngineDe
         slots,
         theme == null ? undefined : (theme as ThemeResult),
       ),
-    ingestDocument: (fileRef) => ingest.convertPath(fileRef),
+    // Confine the model-supplied fileRef to the uploads dir before any fs read (C6).
+    // `async` so a containment failure surfaces as a rejection, not a sync throw.
+    ingestDocument: async (fileRef) => ingest.convertPath(resolveStagedPath(uploadsDir, fileRef)),
     describeImage: (args) => llm.describeImage(args).then((r) => r.content),
     retrieveKb: (query, packs) => retriever(query, packs),
   };
