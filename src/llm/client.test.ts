@@ -12,6 +12,11 @@ function ndjsonFetch(lines: object[]): FetchLike {
   return (async () => new Response(body, { status: 200 })) as unknown as FetchLike;
 }
 
+/** A fetch that returns a single JSON object (the non-streaming `/api/chat` shape). */
+function jsonFetch(obj: object): FetchLike {
+  return (async () => new Response(JSON.stringify(obj), { status: 200 })) as unknown as FetchLike;
+}
+
 test('chatStream surfaces native tool_calls from the stream (C1 transport)', async () => {
   const client = new OllamaClient(
     config,
@@ -82,4 +87,23 @@ test('chatStream surfaces done_reason so truncation is detectable (C11)', async 
   const terminal = chunks.find((c) => c.done);
   assert.ok(terminal, 'expected a terminal chunk');
   assert.equal(terminal.doneReason, 'length');
+});
+
+test('chat() throws on a body-level Ollama error instead of returning empty (C11 non-streaming)', async () => {
+  // Mirror the streaming guard: a 200 response carrying {"error":…} must reject,
+  // not surface a silent empty completion.
+  const client = new OllamaClient(config, jsonFetch({ model: 'm', error: 'model runner has crashed' }));
+  await assert.rejects(
+    () => client.chat({ messages: [{ role: 'user', content: 'x' }] }),
+    /model runner has crashed/,
+  );
+});
+
+test('chat() surfaces done_reason so a truncated completion is detectable (C11 non-streaming)', async () => {
+  const client = new OllamaClient(
+    config,
+    jsonFetch({ model: 'm', message: { content: 'truncated' }, done: true, done_reason: 'length' }),
+  );
+  const res = await client.chat({ messages: [{ role: 'user', content: 'x' }] });
+  assert.equal(res.doneReason, 'length');
 });

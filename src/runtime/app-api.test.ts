@@ -169,6 +169,7 @@ test('importCanvas delegates to the injected importer', async () => {
   };
   let seen: { baseUrl: string; token: string; courseId: string } | undefined;
   const view = api(runner, {
+    db: await freshDb(), // importCanvas now records provenance — keep it off the real on-device DB
     secrets: createInMemorySecretStore(),
     importer: async (config, courseId) => {
       seen = { baseUrl: config.baseUrl, token: config.token, courseId };
@@ -180,6 +181,29 @@ test('importCanvas delegates to the injected importer', async () => {
   assert.deepEqual(res, expected);
   // The importer received the token resolved from the keychain, not from the renderer.
   assert.deepEqual(seen, { baseUrl: 'https://canvas.test', token: 't', courseId: '42' });
+});
+
+test('importCanvas records a provenance row in canvas_imports (L6)', async () => {
+  const db = await freshDb();
+  const expected: CanvasImportResult = {
+    courseId: '7', name: 'Chem 200', importedAt: '2026-02-02T00:00:00Z',
+    pages: 5, assignments: 4, files: 2, warnings: ['heads up'],
+  };
+  const view = api(new ScriptedRunner([]), {
+    db,
+    secrets: createInMemorySecretStore(),
+    importer: async () => expected,
+  });
+  await view.saveCanvasAuth({ baseUrl: 'https://canvas.test', token: 't' });
+  await view.importCanvas('https://canvas.test', '7');
+
+  const row = await db.get<{ name: string; imported_at: string; summary_json: string }>(
+    'SELECT name, imported_at, summary_json FROM canvas_imports WHERE course_id = ?',
+    ['7'],
+  );
+  assert.equal(row?.name, 'Chem 200');
+  assert.equal(row?.imported_at, '2026-02-02T00:00:00Z');
+  assert.deepEqual(JSON.parse(row!.summary_json), { pages: 5, assignments: 4, files: 2, warnings: ['heads up'] });
 });
 
 // ── Mode routing + streaming ─────────────────────────────────────────────────

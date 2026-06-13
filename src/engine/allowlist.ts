@@ -91,12 +91,12 @@ const URL_ATTRS: Readonly<Record<string, Readonly<Record<string, ReadonlySet<str
   area: { href: A_HREF_SCHEMES },
   img: { src: HTTP_SCHEMES },
   iframe: { src: HTTP_SCHEMES },
-  embed: { src: HTTP_SCHEMES },
+  embed: { src: HTTP_SCHEMES, pluginspage: HTTP_SCHEMES },
   audio: { src: HTTP_SCHEMES },
   video: { src: HTTP_SCHEMES, poster: HTTP_SCHEMES },
   source: { src: HTTP_SCHEMES, srcset: HTTP_SCHEMES },
   track: { src: HTTP_SCHEMES },
-  object: { data: HTTP_SCHEMES },
+  object: { data: HTTP_SCHEMES, codebase: HTTP_SCHEMES, classid: HTTP_SCHEMES },
   blockquote: { cite: HTTP_SCHEMES },
   q: { cite: HTTP_SCHEMES },
 };
@@ -327,7 +327,11 @@ function tokenize(html: string): Token[] {
 
     // Raw-text elements: consume content verbatim up to the matching close tag.
     if (RAW_TEXT_TAGS.has(tag) && !selfClose) {
-      const closeRe = new RegExp(`</${tag}\\s*>`, 'i');
+      // Match `</tag` followed by an end-tag delimiter (whitespace, `/`, or `>`)
+      // then any bogus attributes up to `>`, so `</script foo>` closes the element
+      // instead of being missed and the rest of the document swallowed to EOF (L1).
+      // The delimiter lookahead means `</scriptfoo>` does NOT close `<script>`.
+      const closeRe = new RegExp(`</${tag}(?=[\\s/>])[^>]*>`, 'i');
       const rest = html.slice(i);
       const m = closeRe.exec(rest);
       if (m) {
@@ -399,17 +403,55 @@ function isSchemeAllowed(value: string, allowed: ReadonlySet<string>): boolean {
   return allowed.has(m[1]!.toLowerCase());
 }
 
+/**
+ * Split an inline-style value into declarations on top-level `;` only — a `;`
+ * inside `url(...)` or a quoted string is part of the value, not a separator, so
+ * a naive `value.split(';')` would truncate e.g. `url(...;...)` (L3).
+ */
+function splitStyleDeclarations(value: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+  let start = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    const c = value[i]!;
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+    } else if (c === '(') {
+      depth += 1;
+    } else if (c === ')') {
+      if (depth > 0) depth -= 1;
+    } else if (c === ';' && depth === 0) {
+      out.push(value.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(value.slice(start));
+  return out;
+}
+
 function filterStyle(value: string): string {
   const kept: string[] = [];
-  for (const decl of value.split(';')) {
+  for (const decl of splitStyleDeclarations(value)) {
     const idx = decl.indexOf(':');
     if (idx === -1) continue;
     const prop = decl.slice(0, idx).trim().toLowerCase();
     const val = decl.slice(idx + 1).trim();
     if (prop === '' || val === '') continue;
     if (!isStylePropAllowed(prop)) continue;
-    const urlMatch = /url\(\s*['"]?\s*([a-zA-Z][a-zA-Z0-9+.-]*):/i.exec(val);
-    if (urlMatch && !HTTP_SCHEMES.has(urlMatch[1]!.toLowerCase())) continue;
+    // Scheme-check EVERY url() in the declaration (a value can hold more than one,
+    // e.g. image-set/cross-fade) — drop the declaration if any scheme is off-list.
+    const urlRe = /url\(\s*['"]?\s*([a-zA-Z][a-zA-Z0-9+.-]*):/gi;
+    let badScheme = false;
+    for (let m = urlRe.exec(val); m !== null; m = urlRe.exec(val)) {
+      if (!HTTP_SCHEMES.has(m[1]!.toLowerCase())) {
+        badScheme = true;
+        break;
+      }
+    }
+    if (badScheme) continue;
     kept.push(`${prop}: ${val}`);
   }
   return kept.join('; ');

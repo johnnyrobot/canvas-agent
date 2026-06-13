@@ -236,3 +236,43 @@ test('flattening a form control is reported as semantic loss (a blocker) (C15)',
     assert.ok(r.removedSemantic.includes(tag), `expected ${tag} in removedSemantic`);
   }
 });
+
+// ── Lower-severity allowlist hardening (L1 / L2 / L3) ────────────────────────
+
+test('raw-text close tag with trailing junk closes the element, not EOF (L1)', async () => {
+  // `</script foo>` is a valid (if bogus) end tag — content after it must survive,
+  // not be swallowed to EOF as raw text.
+  const r = await validateAllowlist('<p>before</p><script>x</script foo><p>after</p>');
+  assert.equal(r.html, '<p>before</p><p>after</p>');
+  // …but a different name like `</scriptfoo>` must NOT close <script> early.
+  const guard = await validateAllowlist('<p>a</p><script>var s="</scriptfoo>"; y</script><p>b</p>');
+  assert.equal(guard.html, '<p>a</p><p>b</p>');
+});
+
+test('object codebase/classid and embed pluginspage are URL-scheme-gated (L2)', async () => {
+  assert.equal(
+    (await validateAllowlist('<embed src="https://x.test" pluginspage="javascript:alert(1)">')).html,
+    '<embed src="https://x.test">',
+  );
+  assert.equal(
+    (await validateAllowlist('<object data="https://x.test" codebase="javascript:alert(1)"></object>')).html,
+    '<object data="https://x.test"></object>',
+  );
+  assert.equal(
+    (await validateAllowlist('<object data="https://x.test" classid="data:text/html,evil"></object>')).html,
+    '<object data="https://x.test"></object>',
+  );
+});
+
+test('a ";" inside a url() style value is preserved, not truncated (L3)', async () => {
+  const r = await validateAllowlist('<div style="background: url(https://x.test/a;v=2.png); color: red">x</div>');
+  assert.ok(r.html.includes('url(https://x.test/a;v=2.png)'), `url truncated: ${r.html}`);
+  assert.ok(r.html.includes('color: red'));
+});
+
+test('a non-http scheme in ANY url() of a declaration drops it (L3 multi-url)', async () => {
+  const r = await validateAllowlist(
+    '<div style="background: image-set(url(https://x.test/a.png), url(javascript:alert(1)))">x</div>',
+  );
+  assert.ok(!r.html.includes('javascript:'), `javascript: leaked: ${r.html}`);
+});

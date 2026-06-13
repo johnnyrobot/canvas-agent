@@ -40,6 +40,11 @@ interface NativeChatResponse {
     thinking?: string;
     tool_calls?: { function?: { name?: string; arguments?: Record<string, unknown> } }[];
   };
+  done?: boolean;
+  /** Why generation stopped: 'stop' | 'length' (truncation) | … */
+  done_reason?: string;
+  /** A 200 response can still carry a body-level error if generation failed. */
+  error?: string;
 }
 
 /** Combine an optional caller signal with a per-request timeout. */
@@ -61,11 +66,21 @@ export class OllamaClient {
     const body = buildChatRequest(opts, this.config, false);
     const res = await this.post('/api/chat', body, opts.signal);
     const data = (await res.json()) as NativeChatResponse;
+    // A body-level error on a 200 response means generation failed — reject rather
+    // than surface a silent empty completion (parity with chatStream; C11).
+    if (typeof data.error === 'string' && data.error !== '') {
+      throw new OllamaError(`Ollama chat error: ${data.error}`);
+    }
     const result: ChatResult = {
       content: data.message?.content ?? '',
       model: data.model,
       raw: data,
     };
+    // Surface `done_reason` so a truncated ('length') completion is detectable
+    // downstream (e.g. the ChangeLog). Set only when non-empty (exactOptionalPropertyTypes).
+    if (typeof data.done_reason === 'string' && data.done_reason !== '') {
+      result.doneReason = data.done_reason;
+    }
     if (data.message?.thinking) result.thinking = data.message.thinking;
     const toolCalls = (data.message?.tool_calls ?? [])
       .filter((c) => c.function?.name)
