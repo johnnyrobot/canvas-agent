@@ -16,6 +16,7 @@ import type { AxeResults, ScanResult, ScanRunner, TextRun, ResolvedBackground } 
 import type { TextSize } from '../../contracts/index.js';
 import { decodePng } from './png.js';
 import { sampleBackground } from './sample.js';
+import { wrapInCanvasShell } from './canvas-shell.js';
 
 export interface PlaywrightRunnerOptions {
   /** Render viewport width in px (Appendix K.5 default: 1200). `RENDER_VIEWPORT_WIDTH`. */
@@ -43,25 +44,6 @@ function envInt(name: string, fallback: number): number {
   if (raw === undefined || raw === '') return fallback;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-
-/**
- * Wrap a Canvas content fragment in a minimal "Canvas-like" shell so computed
- * styles (and thus contrast) approximate what students see, rather than a bare
- * fragment on a default UA sheet (PRD §8.6). Animations are disabled for
- * deterministic, reproducible scans.
- */
-function canvasShell(fragment: string): string {
-  return [
-    '<!DOCTYPE html>',
-    '<html lang="en"><head><meta charset="utf-8">',
-    '<style>',
-    '*,*::before,*::after{animation:none !important;transition:none !important;}',
-    'body{margin:0;padding:16px;background:#ffffff;color:#2d3b45;',
-    'font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;}',
-    '</style></head>',
-    `<body><div id="content">${fragment}</div></body></html>`,
-  ].join('');
 }
 
 /**
@@ -172,7 +154,7 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
       try {
         const context = await browser.newContext({ viewport: { width: viewportWidth, height: viewportHeight } });
         const page = await context.newPage();
-        await page.setContent(canvasShell(html), { waitUntil: 'load' });
+        await page.setContent(wrapInCanvasShell(html), { waitUntil: 'load' });
         if (settleDelayMs > 0) await page.waitForTimeout(settleDelayMs);
 
         await page.addScriptTag({ content: axeSource });
