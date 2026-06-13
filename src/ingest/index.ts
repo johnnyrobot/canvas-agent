@@ -6,6 +6,7 @@
  * API; the app does not tag or remediate the source document.
  */
 export { createDoclingSidecar, DoclingSidecar } from './sidecar.js';
+export { resolveStagedPath, IngestPathError } from './safe-path.js';
 export { DoclingClient, DoclingError } from './client.js';
 export { DoclingProcess } from './process.js';
 export { loadIngestConfig, parseExportFormats } from './config.js';
