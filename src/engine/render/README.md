@@ -34,13 +34,17 @@ audit(html) = createAuditor(playwrightRunner)
        pure mapping (offline)   ScanRunner (Chromium) — injected
 ```
 
-- **`ScanRunner`** (`types.ts`): `run(html) → { axe, textPairs }`. The injection
+- **`ScanRunner`** (`types.ts`): `run(html) → { axe, textRuns }`. The injection
   seam. Production = `playwrightRunner`; unit tests = a fake returning canned data.
+  Each `TextRun` carries a classified `ResolvedBackground` (`layers`, `gradient`,
+  `image` with sampled swatches, or `unresolvable`).
 - **`createAuditor(runner)`** (`auditor.ts`): pure axe-results + contrast-pairs →
   `IssueSet`. **No browser, no network.** This is the bulk of the test coverage.
 - **`playwrightRunner`** (`playwright-runner.ts`): launches Chromium, injects the
   fragment into the Canvas-like shell, injects `axe.source`, runs axe at the
-  WCAG A/AA tags, and extracts computed `{fg,bg,size}` text pairs.
+  WCAG A/AA tags, and for each visible text run resolves the foreground color and
+  classifies the background into a `ResolvedBackground` discriminated union
+  (`layers` | `gradient` | `image` | `unresolvable`).
 
 ## Mapping tables
 
@@ -79,12 +83,16 @@ sentence for contrast findings.
 
 ## Computed-contrast pass (§8.3, Appendix K.5)
 
-For each visible text run the runner resolves the computed foreground and the
-effective background (first ancestor with a non-transparent `background-color`,
-defaulting to the shell's white). `createAuditor` feeds each pair to engine-core's
-`checkContrast` (`../index.js`). A pair that fails WCAG AA at its size class
-becomes a blocking `contrast` issue; a pair whose colors can't be parsed
-(`transparent`, gradients) becomes a needs-review `alert` — never a silent pass.
+For each visible text run the runner resolves the computed foreground and
+classifies the background into a `ResolvedBackground` discriminated union: a solid
+`layers` stack (top→bottom CSS colors composited down to an opaque base, defaulting
+to the shell's white), a raw `gradient` css string, an `image` (the run's box is
+screenshotted, the PNG decoded, and the worst-case opaque background pixels sampled
+into rgb swatches), or `unresolvable` (CSS/backdrop filters and conic gradients are
+deferred). `createAuditor` feeds each run to engine-core's `checkContrast`
+(`../index.js`). A run that fails WCAG AA at its size class becomes a blocking
+`contrast` issue (image-sampled runs are an estimate → a `warning`); an
+`unresolvable` run becomes a needs-review `alert` — never a silent pass.
 
 Render parameters follow Appendix K.5: viewport **1200px**
 (`RENDER_VIEWPORT_WIDTH`), settle delay **1000ms** (`RENDER_SETTLE_DELAY_MS`),

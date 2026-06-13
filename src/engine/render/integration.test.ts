@@ -42,3 +42,37 @@ test('a clean, accessible fragment produces no blockers', { skip }, async () => 
     `expected no blockers, got: ${JSON.stringify(issues)}`,
   );
 });
+
+test('text over a low-contrast gradient is flagged as a contrast blocker', { skip }, async () => {
+  const { issues } = await audit(
+    '<div style="background:linear-gradient(90deg,#ffffff,#f2f2f2);color:#dddddd">faint on gradient</div>',
+  );
+  assert.ok(
+    issues.some((i) => i.category === 'contrast' && i.severity === 'blocker'),
+    `expected a gradient contrast blocker, got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test('text over a translucent overlay is composited and flagged', { skip }, async () => {
+  const { issues } = await audit(
+    '<div style="background:#ffffff"><span style="background:rgba(255,255,255,0.6);color:#bbbbbb">low on overlay</span></div>',
+  );
+  assert.ok(
+    issues.some((i) => i.category === 'contrast'),
+    `expected a contrast issue over the overlay, got: ${JSON.stringify(issues)}`,
+  );
+});
+
+test('text over a background image yields a contrast warning (estimated)', { skip }, async () => {
+  // Solid-black SVG background image; dark-grey text (#333) is COLOR-distant from black
+  // (so the sampler keeps the black bg) yet LOW-contrast against it → estimated warning.
+  const bg =
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='%23000000'/%3E%3C/svg%3E\")";
+  const { issues } = await audit(
+    `<div style="background-image:${bg};background-size:cover;color:#333333;padding:40px">hero text</div>`,
+  );
+  assert.ok(
+    issues.some((i) => i.category === 'contrast' && i.severity === 'warning'),
+    `expected an estimated image contrast warning, got: ${JSON.stringify(issues)}`,
+  );
+});
