@@ -122,22 +122,6 @@ npx playwright install chromium
 RUN_BROWSER_INTEGRATION=1 npx tsx --test src/engine/render/integration.test.ts
 ```
 
-### ⚠️ Heads-up for the lead: test discovery depth
-
-This track's tests live **two** directories deep (`src/engine/render/*.test.ts`).
-The root `npm test` script is `tsx --test src/**/*.test.ts`, and npm runs it under
-`/bin/sh`, where `**` is **not** recursive (no `globstar`) — so the shell expands
-the glob to **one-level-deep** files only and these tests are **silently not
-collected** by `npm test`. (`npm run typecheck` *does* cover them — `tsc` globs
-recursively.) Verified: a probe test placed here did not run under `npm test`.
-
-Per the track contract I did **not** edit `package.json`. To include these in
-`npm test`, the lead can either widen the script to `src/**/**/*.test.ts`, pass a
-recursive directory (`tsx --test --test-name-pattern ... src`), or run npm with a
-`globstar`-enabled shell (`npm config set script-shell bash` + `shopt -s globstar`).
-Until then, run this track's tests directly with the commands above. All 21 unit
-tests + 3 gated browser tests pass.
-
 ## Dependencies
 
 This track is the sanctioned exception to the repo's zero-deps rule: it adds

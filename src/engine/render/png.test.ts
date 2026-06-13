@@ -46,3 +46,26 @@ test('decodePng throws on truncated scanline data instead of corrupting', () => 
   const png = makePng(2, 2, [Buffer.from([0, 1, 2, 3, 4])]);
   assert.throws(() => decodePng(png), /truncat/i);
 });
+
+test('decodePng applies the Sub filter (type 1)', () => {
+  // 2x1 RGBA: px0=(10,20,30,40); px1 stored as deltas from the left pixel (5,5,5,5) → (15,25,35,45).
+  const row = Buffer.from([1, 10, 20, 30, 40, 5, 5, 5, 5]);
+  const img = decodePng(makePng(2, 1, [row]));
+  assert.deepEqual([...img.rgba], [10, 20, 30, 40, 15, 25, 35, 45]);
+});
+
+test('decodePng applies the Average filter (type 3)', () => {
+  // 1x2 RGBA: row0=(10,20,30,40); row1 predictor=floor((0+up)/2)=(5,10,15,20), stored deltas (15,20,25,30) → (20,30,40,50).
+  const row0 = Buffer.from([0, 10, 20, 30, 40]);
+  const row1 = Buffer.from([3, 15, 20, 25, 30]);
+  const img = decodePng(makePng(1, 2, [row0, row1]));
+  assert.deepEqual([...img.rgba], [10, 20, 30, 40, 20, 30, 40, 50]);
+});
+
+test('decodePng applies the Paeth filter (type 4)', () => {
+  // 1x2 RGBA: row0=(10,20,30,40); row1 paeth predictor=up=(10,20,30,40), stored deltas (3,4,5,6) → (13,24,35,46).
+  const row0 = Buffer.from([0, 10, 20, 30, 40]);
+  const row1 = Buffer.from([4, 3, 4, 5, 6]);
+  const img = decodePng(makePng(1, 2, [row0, row1]));
+  assert.deepEqual([...img.rgba], [10, 20, 30, 40, 13, 24, 35, 46]);
+});

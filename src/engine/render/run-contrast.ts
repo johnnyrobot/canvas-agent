@@ -33,15 +33,21 @@ function minFor(size: TextSize): number {
   return size === 'large' ? WCAG.AA_LARGE : WCAG.AA_NORMAL;
 }
 
-/** Lowest-ratio background among candidates (each an opaque CSS color), with fg composited over it. */
+/** Lowest-ratio background among candidates (for the message) + an all-must-pass verdict. */
 function worstAgainst(fg: string, candidates: string[], size: TextSize): { ratio: number; bg: string; passes: boolean } {
-  let worst = { ratio: Infinity, bg: candidates[0] ?? 'rgb(255, 255, 255)', passes: true };
+  let minRatio = Infinity;
+  let worstBg = candidates[0] ?? 'rgb(255, 255, 255)';
+  let passes = true;
   for (const bg of candidates) {
     const fgSolid = compositeLayers([fg, bg]); // composite the (possibly translucent) text over this bg
     const res = checkContrast(fgSolid, bg, size);
-    if (res.ratio < worst.ratio) worst = { ratio: res.ratio, bg, passes: res.passesAA };
+    if (!res.passesAA) passes = false; // passes only if every sampled bg passes (no rounding-tie escape)
+    if (res.ratio < minRatio) {
+      minRatio = res.ratio;
+      worstBg = bg;
+    }
   }
-  return worst;
+  return { ratio: minRatio, bg: worstBg, passes };
 }
 
 /** Parsed stop colors + interpolated samples; null when no stop parses (e.g. conic). */
