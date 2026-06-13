@@ -100,3 +100,12 @@ test('invalid colors throw a clear Error', () => {
 test('transparent is rejected fail-safe (no defined contrast)', () => {
   assert.throws(() => checkContrast('transparent', '#fff'), /transparent|color/i);
 });
+
+test('a pair whose raw ratio is just below 4.5 fails AA even though it displays as 4.5', () => {
+  // #767776 on white computes to ~4.496:1 (verified): displays as 4.5 after rounding,
+  // but must FAIL the 4.5 threshold — the old round-before-compare wrongly passed it.
+  const r = checkContrast('#767776', '#ffffff');
+  assert.equal(r.ratio, 4.5);      // display value is rounded to 2dp
+  assert.equal(r.passesAA, false); // raw 4.496 < 4.5 → fail
+  assert.equal(r.level, 'fail');
+});

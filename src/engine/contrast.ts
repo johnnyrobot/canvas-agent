@@ -154,14 +154,15 @@ export const checkContrast: ContrastChecker = (fg, bg, size: TextSize = 'normal'
   const l2 = relativeLuminance(parseColor(bg));
   const lighter = Math.max(l1, l2);
   const darker = Math.min(l1, l2);
-  const ratio = round2((lighter + 0.05) / (darker + 0.05));
+  const rawRatio = (lighter + 0.05) / (darker + 0.05);
 
   const aa = size === 'large' ? WCAG.AA_LARGE : WCAG.AA_NORMAL;
   const aaa = size === 'large' ? WCAG.AAA_LARGE : WCAG.AAA_NORMAL;
 
-  const passesAA = ratio >= aa;
-  const passesAAA = ratio >= aaa;
+  // Compare the RAW ratio to the thresholds (WCAG: do not round before comparing).
+  const passesAA = rawRatio >= aa;
+  const passesAAA = rawRatio >= aaa;
   const level: ContrastResult['level'] = passesAAA ? 'AAA' : passesAA ? 'AA' : 'fail';
 
-  return { ratio, level, passesAA, passesAAA, size };
+  return { ratio: round2(rawRatio), level, passesAA, passesAAA, size };
 };
