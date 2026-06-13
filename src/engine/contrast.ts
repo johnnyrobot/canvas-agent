@@ -166,3 +166,50 @@ export const checkContrast: ContrastChecker = (fg, bg, size: TextSize = 'normal'
 
   return { ratio: round2(rawRatio), level, passesAA, passesAAA, size };
 };
+
+/** Split on top-level commas, respecting parentheses (so rgb(...) stays intact). */
+function splitTopLevel(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s[i];
+    if (c === '(') depth += 1;
+    else if (c === ')') depth -= 1;
+    else if (c === ',' && depth === 0) {
+      out.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(s.slice(start));
+  return out.map((x) => x.trim()).filter((x) => x.length > 0);
+}
+
+/** Leading CSS color token of a gradient color-stop segment (drops a trailing position). */
+function leadingColorToken(segment: string): string | null {
+  const s = segment.trim();
+  const fn = /^(rgba?|hsla?)\(/i.exec(s);
+  if (fn) {
+    const close = s.indexOf(')');
+    return close === -1 ? null : s.slice(0, close + 1);
+  }
+  const tok = s.split(/\s+/)[0];
+  return tok && tok.length > 0 ? tok : null;
+}
+
+/**
+ * Parse the color stops of a linear/radial gradient as CSS color strings. Returns
+ * [] when `css` is not a parseable linear/radial gradient (conic, url(), none, …).
+ * A leading direction/angle/shape segment is returned as its raw token; callers
+ * parse each token and skip the ones that don't resolve to a color.
+ */
+export function parseGradientStops(css: string): string[] {
+  const m = /^(?:repeating-)?(?:linear|radial)-gradient\((.*)\)$/is.exec(css.trim());
+  if (!m) return [];
+  const stops: string[] = [];
+  for (const part of splitTopLevel(m[1]!)) {
+    const tok = leadingColorToken(part);
+    if (tok) stops.push(tok);
+  }
+  return stops;
+}
