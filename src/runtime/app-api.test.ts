@@ -121,7 +121,7 @@ test('runTurn withholds the badge for a deliberately bad fenced fragment', async
   const frag = view.fragments[0]!;
   assert.equal(frag.gate.badgeWithheld, true);
   assert.equal(frag.gate.conformance.passedChecks, false);
-  assert.ok(frag.gate.conformance.blockers.some((b) => b.id === 'allowlist-removed-semantic'));
+  assert.ok(frag.gate.conformance.blockers.some((b) => b.id.startsWith('allowlist-removed-semantic')));
 });
 
 test('runTurn grounds the system prompt with retrieved Knowledge-Pack citations', async () => {

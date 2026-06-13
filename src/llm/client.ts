@@ -27,6 +27,10 @@ interface NativeChatStreamChunk {
     tool_calls?: { function?: { name?: string; arguments?: Record<string, unknown> } }[];
   };
   done?: boolean;
+  /** Why generation stopped, on the terminal chunk: 'stop' | 'length' | … */
+  done_reason?: string;
+  /** Ollama emits a standalone `{"error":…}` line if generation fails mid-stream. */
+  error?: string;
 }
 
 interface NativeChatResponse {
@@ -75,6 +79,12 @@ export class OllamaClient {
     const body = buildChatRequest(opts, this.config, true);
     const res = await this.post('/api/chat', body, opts.signal);
     for await (const obj of parseNdjson<NativeChatStreamChunk>(res.body)) {
+      // A mid-stream failure arrives as a standalone `{"error":…}` line; surface it
+      // as a thrown rejection instead of silently ending the stream (which would
+      // make a half-generated draft look complete) — C11.
+      if (typeof obj.error === 'string' && obj.error !== '') {
+        throw new OllamaError(`Ollama stream error: ${obj.error}`);
+      }
       const delta = obj.message?.content ?? '';
       const done = obj.done === true;
       const toolCalls = (obj.message?.tool_calls ?? [])
@@ -83,6 +93,11 @@ export class OllamaClient {
       if (delta || done || toolCalls.length > 0) {
         const chunk: ChatChunk = { delta, done };
         if (toolCalls.length > 0) chunk.toolCalls = toolCalls;
+        // Carry `done_reason` on the terminal chunk so a truncation ('length') is
+        // detectable downstream. Only set when non-empty (exactOptionalPropertyTypes).
+        if (done && typeof obj.done_reason === 'string' && obj.done_reason !== '') {
+          chunk.doneReason = obj.done_reason;
+        }
         yield chunk;
       }
       if (done) return;

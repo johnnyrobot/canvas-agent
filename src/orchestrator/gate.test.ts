@@ -51,7 +51,19 @@ test('a serious AA failure (error severity) withholds the badge (C2)', async () 
 test('removing a semantic element during allowlist repair is itself a blocker', async () => {
   const res = await enforceGate('<h2>x</h2>', deps([], ['nav']));
   assert.equal(res.badgeWithheld, true);
-  assert.ok(res.conformance.blockers.some((b) => b.id === 'allowlist-removed-semantic'));
+  assert.ok(res.conformance.blockers.some((b) => b.id.startsWith('allowlist-removed-semantic')));
+});
+
+test('each removed semantic tag gets a UNIQUE blocker id (C12)', async () => {
+  // A constant id collapses multiple removed tags into one row in the downstream
+  // diff (uniqueById/afterIds key on id), under-counting semantic loss and
+  // mis-attributing "fixed". The id must carry the tag identity.
+  const res = await enforceGate('<x>', deps([], ['nav', 'aside']));
+  const semIds = res.conformance.blockers
+    .filter((b) => b.id.startsWith('allowlist-removed-semantic'))
+    .map((b) => b.id);
+  assert.equal(semIds.length, 2);
+  assert.equal(new Set(semIds).size, 2, 'removed-semantic blocker ids must be unique per tag');
 });
 
 test('the returned html is the allowlist-gated (repaired) html', async () => {
