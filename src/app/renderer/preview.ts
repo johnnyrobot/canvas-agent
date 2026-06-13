@@ -3,50 +3,24 @@
  *
  * The preview renders gated HTML inside a SANDBOXED `<iframe>` — `sandbox` with
  * no `allow-scripts`, content delivered via `srcdoc`, never a remote URL. The
- * gated HTML is wrapped in a stylesheet that mirrors the engine's
- * `playwright-runner` `canvasShell` (white bg, #2d3b45 text, Helvetica
- * Neue/Arial 16px/1.5, 16px padding) plus basic heading/list/table/button
- * styling, so what the user sees here matches what the audit saw.
+ * gated HTML is wrapped in the engine's shared `wrapInCanvasShell` — the SAME
+ * document the auditor renders and scans — so what the user sees and exports here
+ * is byte-for-byte what the audit saw (PRD §8.6 / review §9a). There is no
+ * second, hand-maintained copy of the shell CSS to drift from the audit.
  *
  * SAFETY: the iframe is script-disabled and the document is an opaque origin. The
  * ONLY content placed in `srcdoc` is the already-gated HTML (allowlist + audit
  * safe). No model/user HTML is ever passed here ungated.
  */
 import { copyText, el, later, setHidden, type El } from './ui.js';
+import { wrapInCanvasShell } from '../../engine/render/canvas-shell.js';
 
 /**
- * Canvas-fidelity CSS, inlined into the preview `srcdoc`. The first two rules
- * are the engine's `canvasShell`; the rest add the headings/lists/tables/buttons
- * the canonical templates produce so the preview reads like a real Canvas page.
+ * Wrap a Canvas-safe fragment in the shared Canvas shell for `srcdoc` — identical
+ * to the document the auditor scans (see `engine/render/canvas-shell.ts`).
  */
-const CANVAS_CSS = [
-  '*,*::before,*::after{animation:none !important;transition:none !important;}',
-  'body{margin:0;padding:16px;background:#ffffff;color:#2d3b45;',
-  'font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;}',
-  'h1,h2,h3,h4,h5,h6{color:#2d3b45;line-height:1.25;margin:1.2em 0 .4em;font-weight:700;}',
-  'h1{font-size:1.75em;}h2{font-size:1.4em;}h3{font-size:1.2em;}h4{font-size:1.05em;}',
-  'p{margin:0 0 1em;}',
-  'a{color:#0374b5;text-decoration:underline;}',
-  'ul,ol{margin:0 0 1em 1.6em;padding:0;}li{margin:.25em 0;}',
-  'table{border-collapse:collapse;width:100%;margin:0 0 1em;}',
-  'caption{text-align:left;font-weight:700;padding:.25em 0;}',
-  'th,td{border:1px solid #c7cdd1;padding:8px 12px;text-align:left;vertical-align:top;}',
-  'th{background:#f5f5f5;font-weight:600;}',
-  'button,.btn,.Button{background:#0374b5;color:#ffffff;border:0;border-radius:4px;',
-  'padding:8px 14px;font:inherit;cursor:pointer;}',
-  'blockquote{margin:0 0 1em;padding:.5em 1em;border-left:4px solid #c7cdd1;color:#54616a;}',
-  'img{max-width:100%;height:auto;}',
-  'code,pre{font-family:ui-monospace,"SFMono-Regular",Consolas,Menlo,monospace;}',
-  'hr{border:0;border-top:1px solid #c7cdd1;margin:1.5em 0;}',
-].join('');
-
-/** Wrap a Canvas-safe fragment in the fidelity shell for `srcdoc`. */
 export function previewSrcdoc(html: string): string {
-  return (
-    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
-    `<style>${CANVAS_CSS}</style></head>` +
-    `<body><div id="content">${html}</div></body></html>`
-  );
+  return wrapInCanvasShell(html);
 }
 
 /**
