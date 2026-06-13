@@ -70,6 +70,18 @@ test('an authoring verb beats weak a11y words (create an accessible page ⇒ bui
   }
 });
 
+test('"fix" is matched as a whole word, not a substring (L5a)', () => {
+  // "prefixes"/"suffixes" contain the substring "fix" but are not repair requests.
+  assert.equal(routeIntent('create a page explaining prefixes and suffixes').mode, 'build');
+});
+
+test('a lone artifact noun must not outrank a weak a11y word (L5b)', () => {
+  // "syllabus"/"page" are artifact nouns; with a weak a11y word and NO authoring
+  // verb, the request is an audit/remediation, not a build.
+  assert.equal(routeIntent('is my syllabus accessible').mode, 'remediate');
+  assert.equal(routeIntent('check whether this page is accessible').mode, 'remediate');
+});
+
 test('confidence rises with more matched signals', () => {
   const one = routeIntent('build a page');
   const more = routeIntent('build, create, and generate a quiz module');

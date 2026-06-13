@@ -469,7 +469,29 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     },
 
     async importCanvas(baseUrl, courseId) {
-      return importer(await canvasConfigFor(baseUrl), courseId);
+      const result = await importer(await canvasConfigFor(baseUrl), courseId);
+      // Record local provenance of this read-only import (course → last-imported
+      // summary). This writes ONLY to the on-device DB; Canvas is never mutated.
+      // Re-importing the same course updates the row (UPSERT on the course_id PK).
+      const db = await database();
+      await db.run(
+        `INSERT INTO canvas_imports (course_id, name, imported_at, summary_json)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(course_id) DO UPDATE SET
+           name = excluded.name, imported_at = excluded.imported_at, summary_json = excluded.summary_json`,
+        [
+          result.courseId,
+          result.name,
+          result.importedAt,
+          JSON.stringify({
+            pages: result.pages,
+            assignments: result.assignments,
+            files: result.files,
+            warnings: result.warnings,
+          }),
+        ],
+      );
+      return result;
     },
 
     async health(): Promise<RuntimeHealth> {

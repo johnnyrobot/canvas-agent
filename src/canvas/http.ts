@@ -18,7 +18,15 @@ export interface CanvasGetOptions {
   token: string;
   /** Transport. Defaults to the global `fetch`; tests pass a recording fake. */
   fetch?: FetchLike;
+  /**
+   * Per-request timeout (ms). A hung or throttling Canvas instance must not hang
+   * the import indefinitely, so each GET aborts after this budget. Default 30s —
+   * shorter than the LLM client's, since these are small JSON list calls.
+   */
+  timeoutMs?: number;
 }
+
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * A bound GET function. The optional `method` exists ONLY so the read-only
@@ -31,6 +39,7 @@ export type CanvasGet = (url: string, method?: string) => Promise<Response>;
 export function createCanvasGet(opts: CanvasGetOptions): CanvasGet {
   const doFetch: FetchLike = opts.fetch ?? globalThis.fetch;
   const { token } = opts;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return async function get(url: string, method = 'GET'): Promise<Response> {
     if (method !== 'GET') {
@@ -44,6 +53,8 @@ export function createCanvasGet(opts: CanvasGetOptions): CanvasGet {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
       },
+      // Each GET gets its own timeout budget so one stuck page can't wedge the crawl.
+      signal: AbortSignal.timeout(timeoutMs),
     });
   };
 }

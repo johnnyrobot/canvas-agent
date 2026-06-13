@@ -18,6 +18,13 @@ test('createCanvasGet sends Bearer auth + Accept json and uses GET', async () =>
   assert.equal(calls[0]?.accept, 'application/json');
 });
 
+test('createCanvasGet attaches a per-request timeout signal so a hung Canvas cannot hang the import (L4)', async () => {
+  const { fetch, calls } = fakeCanvas(() => ({ body: { ok: true } }));
+  const get = createCanvasGet({ token: 't', fetch });
+  await get('https://school.instructure.com/api/v1/courses/1');
+  assert.equal(calls[0]?.signal, true, 'expected an AbortSignal (timeout) on the request');
+});
+
 test('createCanvasGet refuses any non-GET method and never touches the network', async () => {
   const { fetch, calls } = fakeCanvas(() => ({ body: {} }));
   const get = createCanvasGet({ token: 't', fetch });

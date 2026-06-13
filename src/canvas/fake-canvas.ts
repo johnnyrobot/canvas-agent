@@ -15,6 +15,8 @@ export interface RecordedCall {
   url: string;
   authorization: string | null;
   accept: string | null;
+  /** True when the request carried an AbortSignal (e.g. a per-request timeout). */
+  signal: boolean;
 }
 
 /** What a route handler returns for a given request. */
@@ -46,6 +48,7 @@ export function fakeCanvas(route: RouteHandler): FakeCanvas {
       url,
       authorization: headers.get('authorization'),
       accept: headers.get('accept'),
+      signal: init?.signal instanceof AbortSignal,
     });
     const canned = route(new URL(url));
     const status = canned.status ?? 200;

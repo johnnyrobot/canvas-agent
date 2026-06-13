@@ -74,6 +74,13 @@ export interface ChatResult {
   thinking?: string;
   /** Tools the model asked to call this turn (empty/undefined if none). */
   toolCalls?: ToolCall[];
+  /**
+   * Ollama's `done_reason` (e.g. `'stop'` | `'length'`). `'length'` means the
+   * completion was truncated at `num_predict` — so a structured/ChangeLog draft
+   * may be incomplete and must not be treated as final (C11). Absent when the
+   * provider did not report one.
+   */
+  doneReason?: string;
   /** Raw provider response, for debugging / telemetry. */
   raw: unknown;
 }
