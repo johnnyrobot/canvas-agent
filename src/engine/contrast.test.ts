@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkContrast } from './contrast.js';
+import { parseGradientStops } from './contrast.js';
 
 // ── Anchor ratios (WCAG 2.x relative-luminance formula) ──────────────────────
 
@@ -108,4 +109,21 @@ test('a pair whose raw ratio is just below 4.5 fails AA even though it displays 
   assert.equal(r.ratio, 4.5);      // display value is rounded to 2dp
   assert.equal(r.passesAA, false); // raw 4.496 < 4.5 → fail
   assert.equal(r.level, 'fail');
+});
+
+test('parseGradientStops extracts colors and drops the direction token', () => {
+  assert.deepEqual(
+    parseGradientStops('linear-gradient(90deg, rgb(255, 0, 0) 0%, rgb(0, 0, 255) 100%)'),
+    ['90deg', 'rgb(255, 0, 0)', 'rgb(0, 0, 255)'],
+  );
+});
+
+test('parseGradientStops handles "to <side>", hex, named colors, and radial', () => {
+  assert.deepEqual(parseGradientStops('linear-gradient(to right, #fff, #000)'), ['to', '#fff', '#000']);
+  assert.deepEqual(parseGradientStops('radial-gradient(circle, red, blue 80%)'), ['circle', 'red', 'blue']);
+});
+
+test('parseGradientStops returns [] for non-gradients and conic gradients', () => {
+  assert.deepEqual(parseGradientStops('url("x.png")'), []);
+  assert.deepEqual(parseGradientStops('conic-gradient(red, blue)'), []);
 });
