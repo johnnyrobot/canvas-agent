@@ -32,7 +32,7 @@ const callTool = (name: string, args: Record<string, unknown>): ChatResult => ({
 });
 
 /** A clean render-and-scan: the REAL auditor mapping with no findings, no browser. */
-const cleanScan: ScanRunner = { run: async (): Promise<ScanResult> => ({ axe: { violations: [] }, textPairs: [] }) };
+const cleanScan: ScanRunner = { run: async (): Promise<ScanResult> => ({ axe: { violations: [] }, textRuns: [] }) };
 
 const fakeLlm = { describeImage: async () => text('alt'), isHealthy: async () => true };
 const fakeIngest = { convertPath: async () => ({ status: 'success', processingTimeMs: 1 }), isHealthy: async () => true };

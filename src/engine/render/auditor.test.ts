@@ -7,24 +7,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAuditor } from './auditor.js';
-import type { AxeImpact, AxeResult, AxeResults, ScanRunner, TextColorPair } from './types.js';
+import type { AxeImpact, AxeResult, AxeResults, ScanRunner, TextRun } from './types.js';
 
 // ── Fake runner helpers ──────────────────────────────────────────────────────
 
-function fakeRunner(
-  axe: Partial<AxeResults>,
-  textPairs: TextColorPair[] = [],
-): ScanRunner {
+function fakeRunner(axe: Partial<AxeResults>, textRuns: TextRun[] = []): ScanRunner {
   const base: AxeResults = { violations: [], incomplete: [], passes: [], inapplicable: [] };
-  return { run: async () => ({ axe: { ...base, ...axe }, textPairs }) };
+  return { run: async () => ({ axe: { ...base, ...axe }, textRuns }) };
+}
+
+/** Build a solid-background text run (the common case in these tests). */
+function solid(fg: string, bg: string, size: 'normal' | 'large' = 'normal'): TextRun {
+  return { fg, size, background: { kind: 'layers', layers: [bg] } };
 }
 
 function violation(id: string, impact: AxeImpact, description = `desc:${id}`): AxeResult {
   return { id, impact, description, help: `help:${id}`, nodes: [] };
 }
 
-const audit = (axe: Partial<AxeResults>, pairs?: TextColorPair[]) =>
-  createAuditor(fakeRunner(axe, pairs))('<p>x</p>');
+const audit = (axe: Partial<AxeResults>, runs?: TextRun[]) =>
+  createAuditor(fakeRunner(axe, runs))('<p>x</p>');
 
 // ── axe impact → severity ────────────────────────────────────────────────────
 
@@ -126,44 +128,44 @@ test('message falls back to help, then to the rule id, when description is absen
 
 // ── computed contrast pass ───────────────────────────────────────────────────
 
-test('a fg/bg pair that fails AA yields a blocking contrast issue by default', async () => {
-  const { issues } = await audit({}, [{ fg: '#999999', bg: '#ffffff', size: 'normal' }]);
+test('a solid pair that fails AA yields a blocking contrast issue by default', async () => {
+  const { issues } = await audit({}, [solid('#999999', '#ffffff')]);
   assert.equal(issues.length, 1);
   assert.equal(issues[0]?.id, 'contrast');
   assert.equal(issues[0]?.category, 'contrast');
   assert.equal(issues[0]?.severity, 'blocker');
-  assert.match(issues[0]?.message ?? '', /2\.85/); // the computed ratio appears in the message
+  assert.match(issues[0]?.message ?? '', /2\.85/);
 });
 
-test('a fg/bg pair that passes AA yields no contrast issue', async () => {
-  const { issues } = await audit({}, [
-    { fg: '#666666', bg: '#ffffff', size: 'normal' },
-    { fg: '#000000', bg: '#ffffff', size: 'normal' },
-  ]);
+test('a solid pair that passes AA yields no contrast issue', async () => {
+  const { issues } = await audit({}, [solid('#666666', '#ffffff'), solid('#000000', '#ffffff')]);
   assert.deepEqual(issues, []);
 });
 
-test('contrast severity is ratio-driven via the text size class (large passes where normal fails)', async () => {
-  const large = await audit({}, [{ fg: '#808080', bg: '#ffffff', size: 'large' }]);
-  assert.deepEqual(large.issues, []); // 3.95:1 ≥ 3.0 large minimum
-
-  const normal = await audit({}, [{ fg: '#808080', bg: '#ffffff', size: 'normal' }]);
-  assert.equal(normal.issues.length, 1); // 3.95:1 < 4.5 normal minimum
+test('contrast verdict is size-driven (large passes where normal fails)', async () => {
+  assert.deepEqual((await audit({}, [solid('#808080', '#ffffff', 'large')])).issues, []);
+  const normal = await audit({}, [solid('#808080', '#ffffff', 'normal')]);
+  assert.equal(normal.issues.length, 1);
   assert.equal(normal.issues[0]?.category, 'contrast');
 });
 
-test('an uncomputable pair (e.g. transparent) becomes a needs-review alert, never a silent pass', async () => {
-  const { issues } = await audit({}, [{ fg: 'transparent', bg: '#ffffff', size: 'normal' }]);
+test('an unresolvable run becomes a needs-review alert, never a silent pass', async () => {
+  const { issues } = await audit({}, [{ fg: '#000000', size: 'normal', background: { kind: 'unresolvable', reason: 'css filter' } }]);
   assert.equal(issues.length, 1);
-  assert.equal(issues[0]?.id, 'contrast');
-  assert.equal(issues[0]?.category, 'contrast');
   assert.equal(issues[0]?.severity, 'alert');
+  assert.equal(issues[0]?.category, 'contrast');
 });
 
-test('contrastFailSeverity option overrides the blocking default', async () => {
-  const auditor = createAuditor(fakeRunner({}, [{ fg: '#999999', bg: '#ffffff', size: 'normal' }]), {
-    contrastFailSeverity: 'error',
-  });
+test('a failing gradient run blocks; a failing image run only warns (severity by certainty)', async () => {
+  const grad = await audit({}, [{ fg: '#000000', size: 'normal', background: { kind: 'gradient', css: 'linear-gradient(90deg, #ffffff, #222222)' } }]);
+  assert.equal(grad.issues[0]?.severity, 'blocker');
+
+  const image = await audit({}, [{ fg: '#ffffff', size: 'normal', background: { kind: 'image', swatches: ['rgb(240, 240, 240)'] } }]);
+  assert.equal(image.issues[0]?.severity, 'warning');
+});
+
+test('contrastFailSeverity overrides the deterministic blocking default', async () => {
+  const auditor = createAuditor(fakeRunner({}, [solid('#999999', '#ffffff')]), { contrastFailSeverity: 'error' });
   const { issues } = await auditor('<p>x</p>');
   assert.equal(issues[0]?.severity, 'error');
 });
@@ -181,7 +183,7 @@ test('violations, incompletes and contrast failures combine in a stable order', 
       violations: [violation('image-alt', 'critical')],
       incomplete: [{ id: 'color-contrast', impact: 'serious', description: 'd', nodes: [] }],
     },
-    [{ fg: '#999999', bg: '#ffffff', size: 'normal' }],
+    [solid('#999999', '#ffffff')],
   );
   assert.deepEqual(
     issues.map((i) => [i.id, i.severity]),
