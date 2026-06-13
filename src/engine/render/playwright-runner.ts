@@ -12,12 +12,16 @@
  *   npx playwright install chromium      # or point launchOptions.executablePath
  */
 import type { LaunchOptions } from 'playwright';
-import type { AxeResults, ScanResult, ScanRunner, TextRun } from './types.js';
+import type { AxeResults, ScanResult, ScanRunner, TextRun, ResolvedBackground } from './types.js';
 import type { TextSize } from '../../contracts/index.js';
+import { decodePng } from './png.js';
+import { sampleBackground } from './sample.js';
 
 export interface PlaywrightRunnerOptions {
   /** Render viewport width in px (Appendix K.5 default: 1200). `RENDER_VIEWPORT_WIDTH`. */
   viewportWidth?: number;
+  /** Render viewport height in px (default 900). `RENDER_VIEWPORT_HEIGHT`. */
+  viewportHeight?: number;
   /** Settle delay (ms) after load before scanning (Appendix K.5 default: 1000). `RENDER_SETTLE_DELAY_MS`. */
   settleDelayMs?: number;
   /** Extra Chromium launch options (e.g. `executablePath`, `channel`, `headless`). */
@@ -61,17 +65,17 @@ function canvasShell(fragment: string): string {
 }
 
 /**
- * Browser-side text/background color extractor (Appendix K.5 / §8.3). Runs in the
- * page as a string (the project's tsconfig has no DOM lib), walking visible text
- * runs and resolving each run's computed foreground and effective background.
- * Gradients / semi-transparent overlays are left for the contrast pass to route
- * to manual review.
+ * Browser-side classifier (§8.3 / Appendix K.5). For each visible text run, resolve
+ * the foreground color and classify the background: a solid `layers` stack, a
+ * `gradient` (raw css), an `image` (with the run's box rect for screenshotting), or
+ * `unresolvable` (CSS filters / conic gradients). Runs as a string — the project's
+ * tsconfig has no DOM lib. Exported so the dev-only WAVE oracle can reuse it.
  */
-const EXTRACT_TEXT_PAIRS = `(() => {
+export const EXTRACT_TEXT_RUNS = `(() => {
   const PX_LARGE = 24;          // ~18pt
   const PX_LARGE_BOLD = 18.66;  // ~14pt bold
   const seen = new Set();
-  const pairs = [];
+  const runs = [];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
@@ -83,31 +87,70 @@ const EXTRACT_TEXT_PAIRS = `(() => {
     if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') continue;
     if (parseFloat(cs.opacity || '1') === 0) continue;
     const fg = cs.color;
-    let bg = 'rgb(255, 255, 255)';
-    let cur = el;
-    while (cur) {
-      const bc = getComputedStyle(cur).backgroundColor;
-      if (bc && bc !== 'transparent') {
-        const m = /^rgba?\\(([^)]+)\\)$/.exec(bc);
-        if (m) {
-          const parts = m[1].split(',').map((s) => s.trim());
-          const a = parts.length === 4 ? parseFloat(parts[3]) : 1;
-          if (a > 0) { bg = bc; break; }
-        } else { bg = bc; break; }
-      }
-      cur = cur.parentElement;
-    }
     const fontSize = parseFloat(cs.fontSize) || 16;
     const weight = parseInt(cs.fontWeight, 10) || 400;
     const isBold = weight >= 700 || cs.fontWeight === 'bold';
     const size = (fontSize >= PX_LARGE || (isBold && fontSize >= PX_LARGE_BOLD)) ? 'large' : 'normal';
-    const key = fg + '|' + bg + '|' + size;
+
+    let bg = null;
+    let unresolved = null;
+    const layers = [];
+    let cur = el;
+    while (cur) {
+      const ccs = getComputedStyle(cur);
+      if ((ccs.filter && ccs.filter !== 'none') || (ccs.backdropFilter && ccs.backdropFilter !== 'none')) {
+        unresolved = 'css filter'; break;
+      }
+      const bi = ccs.backgroundImage;
+      if (bi && bi !== 'none') {
+        if (/gradient\\(/i.test(bi)) {
+          if (/conic-gradient/i.test(bi)) { unresolved = 'conic-gradient'; }
+          else { bg = { kind: 'gradient', css: bi }; }
+          break;
+        }
+        if (/url\\(/i.test(bi)) {
+          // Capture the TEXT element's box (el), not the image-bearing ancestor (cur):
+          // contrast is checked against the pixels behind the text itself.
+          const r = el.getBoundingClientRect();
+          bg = { kind: 'image', rect: { x: r.x, y: r.y, width: r.width, height: r.height } };
+          break;
+        }
+      }
+      const bc = ccs.backgroundColor;
+      if (bc && bc !== 'transparent' && bc !== 'rgba(0, 0, 0, 0)') {
+        layers.push(bc);
+        const m = /^rgba?\\(([^)]+)\\)$/.exec(bc);
+        const parts = m ? m[1].split(',') : null;
+        const a = parts && parts.length === 4 ? parseFloat(parts[3]) : 1;
+        if (a >= 1) break; // opaque base reached
+      }
+      cur = cur.parentElement;
+    }
+    if (!bg) {
+      if (unresolved) bg = { kind: 'unresolvable', reason: unresolved };
+      else { layers.push('rgb(255, 255, 255)'); bg = { kind: 'layers', layers: layers }; }
+    }
+    const key = fg + '|' + size + '|' + JSON.stringify(bg);
     if (seen.has(key)) continue;
     seen.add(key);
-    pairs.push({ fg: fg, bg: bg, size: size });
+    runs.push({ fg: fg, size: size, bg: bg });
   }
-  return pairs;
+  return runs;
 })()`;
+
+/** Raw image background as returned from the browser (rect, not swatches). */
+type RawImageBg = { kind: 'image'; rect: { x: number; y: number; width: number; height: number } };
+type RawRun = { fg: string; size: TextSize; bg: Exclude<ResolvedBackground, { kind: 'image' }> | RawImageBg };
+
+/** Clamp a DOM rect to a positive, in-viewport clip box (Playwright requires that). */
+function clampClip(rect: { x: number; y: number; width: number; height: number }, vw: number, vh: number) {
+  const x = Math.max(0, Math.floor(rect.x));
+  const y = Math.max(0, Math.floor(rect.y));
+  const width = Math.min(Math.ceil(rect.width), vw - x);
+  const height = Math.min(Math.ceil(rect.height), vh - y);
+  if (width <= 0 || height <= 0) return null;
+  return { x, y, width, height };
+}
 
 /**
  * Build a Chromium-backed `ScanRunner`. One browser is launched per `run()` and
@@ -116,6 +159,7 @@ const EXTRACT_TEXT_PAIRS = `(() => {
  */
 export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): ScanRunner {
   const viewportWidth = options.viewportWidth ?? envInt('RENDER_VIEWPORT_WIDTH', 1200);
+  const viewportHeight = options.viewportHeight ?? envInt('RENDER_VIEWPORT_HEIGHT', 900);
   const settleDelayMs = options.settleDelayMs ?? envInt('RENDER_SETTLE_DELAY_MS', 1000);
   const launchOptions = options.launchOptions ?? {};
 
@@ -126,7 +170,7 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
 
       const browser = await chromium.launch({ headless: true, ...launchOptions });
       try {
-        const context = await browser.newContext({ viewport: { width: viewportWidth, height: 900 } });
+        const context = await browser.newContext({ viewport: { width: viewportWidth, height: viewportHeight } });
         const page = await context.newPage();
         await page.setContent(canvasShell(html), { waitUntil: 'load' });
         if (settleDelayMs > 0) await page.waitForTimeout(settleDelayMs);
@@ -136,12 +180,30 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
           `axe.run(document, { runOnly: { type: 'tag', values: ${JSON.stringify(AXE_TAGS)} }, ` +
           `resultTypes: ['violations', 'incomplete'] })`;
         const axe = (await page.evaluate(axeExpr)) as AxeResults;
-        const rawPairs = (await page.evaluate(EXTRACT_TEXT_PAIRS)) as { fg: string; bg: string; size: TextSize }[];
-        const textRuns: TextRun[] = rawPairs.map((p) => ({
-          fg: p.fg,
-          size: p.size,
-          background: { kind: 'layers', layers: [p.bg] },
-        }));
+        const rawRuns = (await page.evaluate(EXTRACT_TEXT_RUNS)) as RawRun[];
+        const textRuns: TextRun[] = [];
+        for (const r of rawRuns) {
+          if (r.bg.kind === 'image' && 'rect' in r.bg) {
+            const clip = clampClip(r.bg.rect, viewportWidth, viewportHeight);
+            if (!clip) {
+              textRuns.push({ fg: r.fg, size: r.size, background: { kind: 'unresolvable', reason: 'empty box' } });
+              continue;
+            }
+            try {
+              const png = await page.screenshot({ clip });
+              const swatches = sampleBackground(decodePng(png), r.fg);
+              textRuns.push({
+                fg: r.fg,
+                size: r.size,
+                background: swatches.length ? { kind: 'image', swatches } : { kind: 'unresolvable', reason: 'no background pixels' },
+              });
+            } catch {
+              textRuns.push({ fg: r.fg, size: r.size, background: { kind: 'unresolvable', reason: 'screenshot failed' } });
+            }
+          } else {
+            textRuns.push({ fg: r.fg, size: r.size, background: r.bg as ResolvedBackground });
+          }
+        }
 
         return { axe, textRuns };
       } finally {
