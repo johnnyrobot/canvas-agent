@@ -213,3 +213,64 @@ export function parseGradientStops(css: string): string[] {
   }
   return stops;
 }
+
+export interface Rgba { r: number; g: number; b: number; a: number; }
+
+/** Parse a CSS color including alpha. 'transparent' → a=0. Throws on invalid input. */
+export function parseColorAlpha(input: string): Rgba {
+  if (typeof input !== 'string') throw new Error('Invalid color: expected a string');
+  const lower = input.trim().toLowerCase();
+  if (lower === '') throw new Error('Invalid color: empty string');
+  if (lower === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
+
+  if (lower.startsWith('#')) {
+    const { r, g, b } = parseColor(lower); // parseColor takes only r/g/b
+    const h = lower.slice(1);
+    let a = 1;
+    if (h.length === 4) a = parseInt(h[3]! + h[3]!, 16) / 255;
+    else if (h.length === 8) a = parseInt(h.slice(6, 8), 16) / 255;
+    return { r, g, b, a };
+  }
+  if (lower.startsWith('rgb')) {
+    const { r, g, b } = parseColor(lower);
+    const m = /^rgba?\(([^)]*)\)$/.exec(lower);
+    let a = 1;
+    if (m) {
+      const body = m[1]!.replace(/\//g, ' ').trim();
+      const parts = body.includes(',') ? body.split(',') : body.split(/\s+/);
+      const toks = parts.map((p) => p.trim()).filter((p) => p.length > 0);
+      if (toks.length === 4) {
+        const t = toks[3]!;
+        const parsed = t.endsWith('%') ? Number(t.slice(0, -1)) / 100 : Number(t);
+        a = Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
+      }
+    }
+    return { r, g, b, a };
+  }
+  const { r, g, b } = parseColor(lower); // named color → opaque
+  return { r, g, b, a: 1 };
+}
+
+/**
+ * Composite a stack of CSS color layers (top → bottom) into one solid `rgb(...)`.
+ * Layers below the last opaque one are irrelevant; an opaque white base is assumed
+ * so even an all-transparent stack resolves to white. Unparseable layers are skipped.
+ */
+export function compositeLayers(layers: string[]): string {
+  let r = 255;
+  let g = 255;
+  let b = 255; // opaque white base
+  for (let i = layers.length - 1; i >= 0; i -= 1) {
+    let c: Rgba;
+    try {
+      c = parseColorAlpha(layers[i]!);
+    } catch {
+      continue;
+    }
+    const a = c.a;
+    r = Math.round(c.r * a + r * (1 - a));
+    g = Math.round(c.g * a + g * (1 - a));
+    b = Math.round(c.b * a + b * (1 - a));
+  }
+  return `rgb(${r}, ${g}, ${b})`;
+}

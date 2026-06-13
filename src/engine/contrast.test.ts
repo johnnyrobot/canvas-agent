@@ -127,3 +127,22 @@ test('parseGradientStops returns [] for non-gradients and conic gradients', () =
   assert.deepEqual(parseGradientStops('url("x.png")'), []);
   assert.deepEqual(parseGradientStops('conic-gradient(red, blue)'), []);
 });
+
+import { parseColorAlpha, compositeLayers } from './contrast.js';
+
+test('parseColorAlpha reads alpha from rgba, hex8, and treats transparent as a=0', () => {
+  assert.deepEqual(parseColorAlpha('rgba(0, 0, 0, 0.5)'), { r: 0, g: 0, b: 0, a: 0.5 });
+  assert.deepEqual(parseColorAlpha('#ff000080'), { r: 255, g: 0, b: 0, a: 128 / 255 });
+  assert.deepEqual(parseColorAlpha('transparent'), { r: 0, g: 0, b: 0, a: 0 });
+  assert.equal(parseColorAlpha('#fff').a, 1);
+});
+
+test('compositeLayers folds a 50% black overlay onto white to mid-grey', () => {
+  // top→bottom: a 50%-alpha black over the opaque white base → rgb(128,128,128) (rounded).
+  assert.equal(compositeLayers(['rgba(0, 0, 0, 0.5)', 'rgb(255, 255, 255)']), 'rgb(128, 128, 128)');
+});
+
+test('compositeLayers returns the single opaque layer unchanged', () => {
+  assert.equal(compositeLayers(['#ffffff']), 'rgb(255, 255, 255)');
+  assert.equal(compositeLayers(['rgb(20, 40, 60)']), 'rgb(20, 40, 60)');
+});
