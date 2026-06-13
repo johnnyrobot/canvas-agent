@@ -29,7 +29,8 @@ export type {
   AxeNode,
   AxeResult,
   AxeResults,
+  ResolvedBackground,
   ScanResult,
   ScanRunner,
-  TextColorPair,
+  TextRun,
 } from './types.js';

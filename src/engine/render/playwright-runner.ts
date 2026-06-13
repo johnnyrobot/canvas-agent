@@ -12,7 +12,8 @@
  *   npx playwright install chromium      # or point launchOptions.executablePath
  */
 import type { LaunchOptions } from 'playwright';
-import type { AxeResults, ScanResult, ScanRunner, TextColorPair } from './types.js';
+import type { AxeResults, ScanResult, ScanRunner, TextRun } from './types.js';
+import type { TextSize } from '../../contracts/index.js';
 
 export interface PlaywrightRunnerOptions {
   /** Render viewport width in px (Appendix K.5 default: 1200). `RENDER_VIEWPORT_WIDTH`. */
@@ -135,9 +136,14 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
           `axe.run(document, { runOnly: { type: 'tag', values: ${JSON.stringify(AXE_TAGS)} }, ` +
           `resultTypes: ['violations', 'incomplete'] })`;
         const axe = (await page.evaluate(axeExpr)) as AxeResults;
-        const textPairs = (await page.evaluate(EXTRACT_TEXT_PAIRS)) as TextColorPair[];
+        const rawPairs = (await page.evaluate(EXTRACT_TEXT_PAIRS)) as { fg: string; bg: string; size: TextSize }[];
+        const textRuns: TextRun[] = rawPairs.map((p) => ({
+          fg: p.fg,
+          size: p.size,
+          background: { kind: 'layers', layers: [p.bg] },
+        }));
 
-        return { axe, textPairs };
+        return { axe, textRuns };
       } finally {
         await browser.close();
       }

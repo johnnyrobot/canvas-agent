@@ -42,20 +42,10 @@ export interface AxeResults {
   inapplicable?: ReadonlyArray<AxeResult>;
 }
 
-/** A computed foreground/background color pair for one visible text run (§8.3). */
-export interface TextColorPair {
-  /** Computed CSS color of the text. */
-  fg: string;
-  /** Effective (resolved) CSS background color behind the text. */
-  bg: string;
-  /** WCAG text-size class for the run. */
-  size: TextSize;
-}
-
 /** What a single render-and-scan pass yields for the pure auditor to map. */
 export interface ScanResult {
   axe: AxeResults;
-  textPairs: TextColorPair[];
+  textRuns: TextRun[];
 }
 
 /**

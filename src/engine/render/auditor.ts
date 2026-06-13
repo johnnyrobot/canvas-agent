@@ -5,69 +5,37 @@
  * this turns one scan pass into an `IssueSet`:
  *   1. axe violations    → impact-driven severity + WAVE category.
  *   2. axe incompletes   → `alert` (needs human review).
- *   3. computed contrast → engine-core `checkContrast` on each text pair; AA
- *      failures become blocking contrast issues; uncomputable pairs (gradients,
- *      transparency, …) become needs-review alerts rather than silent passes.
+ *   3. computed contrast → pure `runContrastIssue` adjudicator on each TextRun;
+ *      solid/gradient failures block; image worst-case warns; unresolvable alerts.
  *
  * All scanning is behind the runner, so this module — and the bulk of the tests —
  * is fully offline and browser-free.
  */
-import { checkContrast } from '../index.js';
-import { WCAG } from '../../contracts/index.js';
 import type { AuditIssue, Auditor, IssueSet, Severity } from '../../contracts/index.js';
-import type { AxeResult, ScanRunner, TextColorPair } from './types.js';
+import type { AxeResult, ScanRunner } from './types.js';
 import { semanticCategory, severityForImpact } from './mapping.js';
+import { runContrastIssue } from './run-contrast.js';
 
 export interface AuditorOptions {
-  /**
-   * Severity assigned to a computed-contrast pair that fails WCAG AA. Defaults to
-   * `'blocker'` because Appendix K.1 classifies a Contrast Error as badge-
-   * withholding. Set to `'error'` for a non-blocking treatment.
-   */
+  /** Severity for deterministic contrast failures (solid/gradient). Default 'blocker'. */
   contrastFailSeverity?: Severity;
+  /** Severity for raster (background-image) worst-case estimate failures. Default 'warning'. */
+  imageContrastSeverity?: Severity;
+  /** Interpolated samples per adjacent gradient stop pair (≈ every 10%). Default 9. */
+  gradientSamples?: number;
 }
-
-/** Stable id for findings from the computed-contrast pass (WAVE `contrast`). */
-const CONTRAST_ID = 'contrast';
 
 function messageFor(result: AxeResult): string {
   return result.description ?? result.help ?? result.id;
 }
 
-function contrastIssue(pair: TextColorPair, failSeverity: Severity): AuditIssue | null {
-  let result;
-  try {
-    result = checkContrast(pair.fg, pair.bg, pair.size);
-  } catch {
-    // Gradient / transparency / unparseable color → cannot adjudicate. Route to
-    // needs-manual-review (Appendix K.5) rather than passing it silently.
-    return {
-      id: CONTRAST_ID,
-      severity: 'alert',
-      message: `Contrast for ${pair.fg} on ${pair.bg} could not be computed; manual review needed.`,
-      category: 'contrast',
-    };
-  }
-  if (result.passesAA) return null;
-  const min = pair.size === 'large' ? WCAG.AA_LARGE : WCAG.AA_NORMAL;
-  return {
-    id: CONTRAST_ID,
-    severity: failSeverity,
-    message: `Text contrast ${result.ratio}:1 is below the WCAG AA minimum of ${min}:1 for ${pair.size} text (${pair.fg} on ${pair.bg}).`,
-    category: 'contrast',
-  };
-}
-
-/**
- * Build an `Auditor` from an injected scanner. Production wires the Chromium
- * `playwrightRunner`; tests wire a fake. The returned function is the frozen
- * `Auditor` port: `(html) => Promise<IssueSet>`.
- */
 export function createAuditor(runner: ScanRunner, options: AuditorOptions = {}): Auditor {
-  const contrastFailSeverity = options.contrastFailSeverity ?? 'blocker';
+  const failSeverity = options.contrastFailSeverity ?? 'blocker';
+  const imageFailSeverity = options.imageContrastSeverity ?? 'warning';
+  const gradientSamples = options.gradientSamples ?? 9;
 
   return async function audit(html: string): Promise<IssueSet> {
-    const { axe, textPairs } = await runner.run(html);
+    const { axe, textRuns } = await runner.run(html);
     const issues: AuditIssue[] = [];
 
     // [1] axe violations — impact-driven severity, rule-driven category.
@@ -90,9 +58,9 @@ export function createAuditor(runner: ScanRunner, options: AuditorOptions = {}):
       });
     }
 
-    // [3] computed-contrast pass (§8.3).
-    for (const pair of textPairs) {
-      const issue = contrastIssue(pair, contrastFailSeverity);
+    // [3] computed-contrast pass (§8.3) — adjudicates solid/gradient/image/unresolvable.
+    for (const run of textRuns) {
+      const issue = runContrastIssue(run, { failSeverity, imageFailSeverity, gradientSamples });
       if (issue) issues.push(issue);
     }
 
