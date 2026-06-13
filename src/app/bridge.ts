@@ -21,6 +21,7 @@ import type { AppApi, TurnChunk } from '../contracts/index.js';
 import type { IpcResult } from './ipc.js';
 import {
   RUN_TURN,
+  SAVE_CANVAS_AUTH,
   IMPORT_CANVAS,
   HEALTH,
   CREATE_SESSION,
@@ -74,8 +75,11 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
         off();
       }
     },
-    async importCanvas(config, courseId) {
-      return unwrap(await invoke(IMPORT_CANVAS, config, courseId));
+    async saveCanvasAuth(auth) {
+      return unwrap(await invoke(SAVE_CANVAS_AUTH, auth));
+    },
+    async importCanvas(baseUrl, courseId) {
+      return unwrap(await invoke(IMPORT_CANVAS, baseUrl, courseId));
     },
     async health() {
       return unwrap(await invoke(HEALTH));
@@ -109,12 +113,12 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
       return unwrap(await invoke(DELETE_BRAND_KIT, id));
     },
 
-    // ── Read-only Canvas page access ─────────────────────────────────────────────
-    async fetchCanvasPage(config, courseId, pageId) {
-      return unwrap(await invoke(FETCH_CANVAS_PAGE, config, courseId, pageId));
+    // ── Read-only Canvas page access (token-free; baseUrl only) ──────────────────
+    async fetchCanvasPage(baseUrl, courseId, pageId) {
+      return unwrap(await invoke(FETCH_CANVAS_PAGE, baseUrl, courseId, pageId));
     },
-    async listCanvasPages(config, courseId) {
-      return unwrap(await invoke(LIST_CANVAS_PAGES, config, courseId));
+    async listCanvasPages(baseUrl, courseId) {
+      return unwrap(await invoke(LIST_CANVAS_PAGES, baseUrl, courseId));
     },
   };
 }

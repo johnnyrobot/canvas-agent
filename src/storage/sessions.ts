@@ -17,6 +17,7 @@ import type {
   Session,
   SessionMessage,
   SessionState,
+  TurnFragment,
 } from '../contracts/index.js';
 import { DEFAULT_PROJECT_ID } from './schema.js';
 
@@ -46,6 +47,19 @@ interface SessionRow {
 interface TurnRow {
   role: string;
   content: string;
+  /** JSON-encoded `TurnFragment[]`, or null for turns that produced no fragment. */
+  fragments: string | null;
+}
+
+/** Parse the stored `fragments` JSON; tolerate null/garbage by returning undefined. */
+function parseFragments(json: string | null): TurnFragment[] | undefined {
+  if (!json) return undefined;
+  try {
+    const parsed = JSON.parse(json) as TurnFragment[];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const SESSION_COLUMNS = 'id, title, mode, created_at, updated_at';
@@ -80,14 +94,21 @@ export function createSessionStore(db: Database): SessionStore {
       // `rowid` (insertion order) is the tiebreaker so messages appended within
       // the same millisecond still load in the exact order they were written.
       const turns = await db.all<TurnRow>(
-        `SELECT role, content FROM turns WHERE session_id = ?
+        `SELECT role, content, fragments FROM turns WHERE session_id = ?
          ORDER BY created_at ASC, rowid ASC`,
         [id],
       );
-      const messages: SessionMessage[] = turns.map((t) => ({
-        role: t.role as SessionMessage['role'],
-        content: t.content,
-      }));
+      const messages: SessionMessage[] = turns.map((t) => {
+        const message: SessionMessage = {
+          role: t.role as SessionMessage['role'],
+          content: t.content,
+        };
+        const fragments = parseFragments(t.fragments);
+        // Only attach when present so fragment-free turns keep the lean
+        // role+content shape used for LLM-history replay.
+        if (fragments) message.fragments = fragments;
+        return message;
+      });
       return { session: toSession(row), messages };
     },
 
@@ -105,10 +126,14 @@ export function createSessionStore(db: Database): SessionStore {
     async appendMessages(sessionId: string, messages: SessionMessage[]): Promise<void> {
       const now = new Date().toISOString();
       for (const message of messages) {
+        const fragments =
+          message.fragments && message.fragments.length > 0
+            ? JSON.stringify(message.fragments)
+            : null;
         await db.run(
-          `INSERT INTO turns (id, session_id, role, content, created_at)
-           VALUES (?, ?, ?, ?, ?)`,
-          [randomUUID(), sessionId, message.role, message.content, now],
+          `INSERT INTO turns (id, session_id, role, content, fragments, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [randomUUID(), sessionId, message.role, message.content, fragments, now],
         );
       }
       // A new message makes the session the most recently touched.

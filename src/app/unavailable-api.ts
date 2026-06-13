@@ -31,6 +31,9 @@ export function createUnavailableApi(reason: string): AppApi {
     async runTurn() {
       return fail();
     },
+    async saveCanvasAuth() {
+      return fail();
+    },
     async importCanvas() {
       return fail();
     },

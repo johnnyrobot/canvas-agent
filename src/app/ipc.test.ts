@@ -17,6 +17,7 @@ import type {
 import { registerIpc, type IpcEventLike, type IpcMainLike, type IpcResult } from './ipc.js';
 import {
   RUN_TURN,
+  SAVE_CANVAS_AUTH,
   IMPORT_CANVAS,
   HEALTH,
   CREATE_SESSION,
@@ -112,8 +113,11 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
       calls.push({ method: 'runTurn', args: [req] });
       return TURN_VIEW;
     },
-    async importCanvas(config, courseId) {
-      calls.push({ method: 'importCanvas', args: [config, courseId] });
+    async saveCanvasAuth(auth) {
+      calls.push({ method: 'saveCanvasAuth', args: [auth] });
+    },
+    async importCanvas(baseUrl, courseId) {
+      calls.push({ method: 'importCanvas', args: [baseUrl, courseId] });
       return IMPORT_RESULT;
     },
     async health() {
@@ -150,12 +154,12 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
     async deleteBrandKit(id) {
       calls.push({ method: 'deleteBrandKit', args: [id] });
     },
-    async fetchCanvasPage(config, courseId, pageId) {
-      calls.push({ method: 'fetchCanvasPage', args: [config, courseId, pageId] });
+    async fetchCanvasPage(baseUrl, courseId, pageId) {
+      calls.push({ method: 'fetchCanvasPage', args: [baseUrl, courseId, pageId] });
       return '<p>page</p>';
     },
-    async listCanvasPages(config, courseId) {
-      calls.push({ method: 'listCanvasPages', args: [config, courseId] });
+    async listCanvasPages(baseUrl, courseId) {
+      calls.push({ method: 'listCanvasPages', args: [baseUrl, courseId] });
       return CANVAS_PAGES;
     },
     ...overrides,
@@ -238,15 +242,26 @@ test('runTurn channel (no turnId) never pushes a CHUNK event', async () => {
   assert.deepEqual(sent, []);
 });
 
-test('importCanvas channel forwards (config, courseId) and wraps the value', async () => {
+test('importCanvas channel forwards (baseUrl, courseId) and wraps the value', async () => {
   const ipc = fakeIpcMain();
   const { api, calls } = fakeApi();
   registerIpc(ipc, api);
 
-  const res = (await ipc.invoke(IMPORT_CANVAS, CONFIG, '123')) as IpcResult<CanvasImportResult>;
+  const res = (await ipc.invoke(IMPORT_CANVAS, CONFIG.baseUrl, '123')) as IpcResult<CanvasImportResult>;
 
-  assert.deepEqual(calls, [{ method: 'importCanvas', args: [CONFIG, '123'] }]);
+  assert.deepEqual(calls, [{ method: 'importCanvas', args: [CONFIG.baseUrl, '123'] }]);
   assert.ok(res.ok && res.value === IMPORT_RESULT);
+});
+
+test('saveCanvasAuth channel forwards the full config (token → main) and wraps the result', async () => {
+  const ipc = fakeIpcMain();
+  const { api, calls } = fakeApi();
+  registerIpc(ipc, api);
+
+  const res = (await ipc.invoke(SAVE_CANVAS_AUTH, CONFIG)) as IpcResult<void>;
+
+  assert.deepEqual(calls, [{ method: 'saveCanvasAuth', args: [CONFIG] }]);
+  assert.ok(res.ok);
 });
 
 test('health channel delegates to api.health and wraps the value', async () => {
@@ -268,8 +283,8 @@ test('every new product-layer channel delegates to its AppApi method and wraps t
     { channel: LIST_BRAND_KITS, method: 'listBrandKits', args: [] },
     { channel: SAVE_BRAND_KIT, method: 'saveBrandKit', args: [{ name: 'K', palette: { primary: '#fff', secondary: '#000' } }] },
     { channel: DELETE_BRAND_KIT, method: 'deleteBrandKit', args: ['kit-1'] },
-    { channel: FETCH_CANVAS_PAGE, method: 'fetchCanvasPage', args: [CONFIG, '123', 'syllabus'] },
-    { channel: LIST_CANVAS_PAGES, method: 'listCanvasPages', args: [CONFIG, '123'] },
+    { channel: FETCH_CANVAS_PAGE, method: 'fetchCanvasPage', args: [CONFIG.baseUrl, '123', 'syllabus'] },
+    { channel: LIST_CANVAS_PAGES, method: 'listCanvasPages', args: [CONFIG.baseUrl, '123'] },
   ];
 
   for (const { channel, method, args } of cases) {

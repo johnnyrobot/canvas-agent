@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openDatabase } from './database.js';
 import { migrate } from './schema.js';
 import { createSessionStore, type SessionStore } from './sessions.js';
-import type { Database } from '../contracts/index.js';
+import type { Database, TurnFragment } from '../contracts/index.js';
 
 async function harness(): Promise<{ db: Database; sessions: SessionStore }> {
   const db = await openDatabase(':memory:');
@@ -34,6 +34,32 @@ test('create → append → load round-trips a session and its transcript', asyn
     { role: 'user', content: 'hello' },
     { role: 'assistant', content: 'hi there' },
   ]);
+  await db.close();
+});
+
+test('append → load round-trips a message’s gated fragments (C10)', async () => {
+  const { db, sessions } = await harness();
+  const created = await sessions.createSession({ title: 'Build', mode: 'build' });
+  const fragment: TurnFragment = {
+    html: '<h2>Module 1</h2>',
+    gate: {
+      html: '<h2>Module 1</h2>',
+      badgeWithheld: false,
+      conformance: { passedChecks: true, blockers: [], warnings: [], needsHumanReview: [] },
+    },
+  };
+  await sessions.appendMessages(created.id, [
+    { role: 'user', content: 'build module 1' },
+    { role: 'assistant', content: 'Here it is.', fragments: [fragment] },
+  ]);
+
+  const state = await sessions.loadSession(created.id);
+  assert.ok(state);
+  assert.equal(state.messages.length, 2);
+  // The gated HTML + conformance (the actual work product) survive a reload.
+  assert.deepEqual(state.messages[1]?.fragments, [fragment]);
+  // A message without fragments keeps the lean LLM-history shape (no fragments key).
+  assert.equal('fragments' in state.messages[0]!, false);
   await db.close();
 });
 

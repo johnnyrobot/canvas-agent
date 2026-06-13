@@ -51,7 +51,7 @@ test('each fragment.html matches its gate.html (the gated, safe-to-render HTML)'
 
 test('importCanvas echoes the courseId and returns numeric counts', async () => {
   const api = createStubApi();
-  const result = await api.importCanvas({ baseUrl: 'https://x.instructure.com', token: 't' }, '4567');
+  const result = await api.importCanvas('https://x.instructure.com', '4567');
 
   assert.equal(result.courseId, '4567');
   assert.ok(result.name.length > 0);
@@ -185,7 +185,7 @@ test('deleteBrandKit resolves without throwing', async () => {
 
 test('fetchCanvasPage returns sample HTML referencing the pageId', async () => {
   const api = createStubApi();
-  const html = await api.fetchCanvasPage({ baseUrl: 'https://x', token: 't' }, '123', 'syllabus');
+  const html = await api.fetchCanvasPage('https://x', '123', 'syllabus');
 
   assert.equal(typeof html, 'string');
   assert.ok(html.includes('syllabus'), 'sample HTML should reference the requested page');
@@ -194,7 +194,7 @@ test('fetchCanvasPage returns sample HTML referencing the pageId', async () => {
 
 test('listCanvasPages returns a non-empty canned list of pages', async () => {
   const api = createStubApi();
-  const pages = await api.listCanvasPages({ baseUrl: 'https://x', token: 't' }, '123');
+  const pages = await api.listCanvasPages('https://x', '123');
 
   assert.ok(pages.length > 0);
   for (const p of pages) {

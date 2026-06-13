@@ -26,6 +26,7 @@ import type {
 } from '../contracts/index.js';
 import {
   RUN_TURN,
+  SAVE_CANVAS_AUTH,
   IMPORT_CANVAS,
   HEALTH,
   CREATE_SESSION,
@@ -102,8 +103,13 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
     });
   });
 
-  ipcMain.handle(IMPORT_CANVAS, (_event, config, courseId) =>
-    envelope(() => api.importCanvas(config as CanvasConfig, courseId as string)),
+  // The token crosses the boundary ONLY here, into the Keychain.
+  ipcMain.handle(SAVE_CANVAS_AUTH, (_event, auth) =>
+    envelope(() => api.saveCanvasAuth(auth as CanvasConfig)),
+  );
+
+  ipcMain.handle(IMPORT_CANVAS, (_event, baseUrl, courseId) =>
+    envelope(() => api.importCanvas(baseUrl as string, courseId as string)),
   );
 
   ipcMain.handle(HEALTH, () => envelope(() => api.health()));
@@ -138,14 +144,14 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
     envelope(() => api.deleteBrandKit(id as string)),
   );
 
-  // ── Read-only Canvas page access ─────────────────────────────────────────────
-  ipcMain.handle(FETCH_CANVAS_PAGE, (_event, config, courseId, pageId) =>
+  // ── Read-only Canvas page access (token-free; baseUrl only) ──────────────────
+  ipcMain.handle(FETCH_CANVAS_PAGE, (_event, baseUrl, courseId, pageId) =>
     envelope(() =>
-      api.fetchCanvasPage(config as CanvasConfig, courseId as string, pageId as string),
+      api.fetchCanvasPage(baseUrl as string, courseId as string, pageId as string),
     ),
   );
 
-  ipcMain.handle(LIST_CANVAS_PAGES, (_event, config, courseId) =>
-    envelope(() => api.listCanvasPages(config as CanvasConfig, courseId as string)),
+  ipcMain.handle(LIST_CANVAS_PAGES, (_event, baseUrl, courseId) =>
+    envelope(() => api.listCanvasPages(baseUrl as string, courseId as string)),
   );
 }

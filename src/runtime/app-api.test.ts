@@ -13,7 +13,7 @@ import type {
 } from '../contracts/index.js';
 import { validateAllowlist } from '../engine/index.js';
 import type { ChatRunner } from '../orchestrator/index.js';
-import { migrate, openDatabase } from '../storage/index.js';
+import { createInMemorySecretStore, migrate, openDatabase } from '../storage/index.js';
 import type { SessionStore } from '../storage/index.js';
 import { createAppApi } from './app-api.js';
 
@@ -167,13 +167,19 @@ test('importCanvas delegates to the injected importer', async () => {
     courseId: '42', name: 'Bio 101', importedAt: '2026-01-01T00:00:00Z',
     pages: 3, assignments: 2, files: 1, warnings: [],
   };
-  let seen: { baseUrl: string; courseId: string } | undefined;
+  let seen: { baseUrl: string; token: string; courseId: string } | undefined;
   const view = api(runner, {
-    importer: async (config, courseId) => { seen = { baseUrl: config.baseUrl, courseId }; return expected; },
+    secrets: createInMemorySecretStore(),
+    importer: async (config, courseId) => {
+      seen = { baseUrl: config.baseUrl, token: config.token, courseId };
+      return expected;
+    },
   });
-  const res = await view.importCanvas({ baseUrl: 'https://canvas.test', token: 't' }, '42');
+  await view.saveCanvasAuth({ baseUrl: 'https://canvas.test', token: 't' });
+  const res = await view.importCanvas('https://canvas.test', '42');
   assert.deepEqual(res, expected);
-  assert.deepEqual(seen, { baseUrl: 'https://canvas.test', courseId: '42' });
+  // The importer received the token resolved from the keychain, not from the renderer.
+  assert.deepEqual(seen, { baseUrl: 'https://canvas.test', token: 't', courseId: '42' });
 });
 
 // ── Mode routing + streaming ─────────────────────────────────────────────────
@@ -255,6 +261,28 @@ test('a turn with sessionId persists user+assistant and replays them as history'
   assert.equal(after2?.messages.length, 4);
 });
 
+test('a Build turn persists its gated fragment so a reload restores the work product (C10)', async () => {
+  const db = await freshDb();
+  const runner = new ScriptedRunner([
+    callTool('render_template', {
+      type: 'page-content',
+      slots: { title: 'Welcome', sections: [{ heading: 'Intro', body: 'Hello' }] },
+    }),
+    text('Here is your page.'),
+  ]);
+  const app = api(runner, { db });
+  const s = await app.createSession({ title: 'build', mode: 'build' });
+
+  const view = await app.runTurn({ user: 'build a page', sessionId: s.id, mode: 'build' });
+  assert.ok(view.fragments.length > 0, 'the turn produced a gated fragment');
+
+  // Reloading the session must restore the gated HTML + badge, not just the prose.
+  const reloaded = await app.loadSession(s.id);
+  const assistant = reloaded?.messages.find((m) => m.role === 'assistant');
+  assert.ok(assistant?.fragments && assistant.fragments.length > 0, 'fragments restored on reload');
+  assert.deepEqual(assistant.fragments, view.fragments, 'restored fragment matches what was produced');
+});
+
 test('session methods honor an injected sessionStore (override seam)', async () => {
   let createdWith: { title: string; mode: string } | undefined;
   const store: SessionStore = {
@@ -308,14 +336,32 @@ test('resolveBrandTheme honors an injected resolver (override seam)', async () =
 
 // ── Read-only Canvas page access ─────────────────────────────────────────────
 
-test('fetchCanvasPage / listCanvasPages delegate to the injected readers', async () => {
+test('fetchCanvasPage / listCanvasPages delegate to the injected readers (token from keychain)', async () => {
   const app = api(new ScriptedRunner([]), {
-    fetchPageBody: async (cfg, courseId, pageId) => `body:${cfg.baseUrl}:${courseId}:${pageId}`,
+    secrets: createInMemorySecretStore(),
+    fetchPageBody: async (cfg, courseId, pageId) => `body:${cfg.baseUrl}:${cfg.token}:${courseId}:${pageId}`,
     listPages: async () => [{ id: 'p1', title: 'Page 1' }],
   });
-  const cfg = { baseUrl: 'https://canvas.test', token: 't' };
-  assert.equal(await app.fetchCanvasPage(cfg, '7', 'intro'), 'body:https://canvas.test:7:intro');
-  assert.deepEqual(await app.listCanvasPages(cfg, '7'), [{ id: 'p1', title: 'Page 1' }]);
+  await app.saveCanvasAuth({ baseUrl: 'https://canvas.test', token: 'tok' });
+  // Read calls take only the baseUrl; the runtime injects the keychain token.
+  assert.equal(await app.fetchCanvasPage('https://canvas.test', '7', 'intro'), 'body:https://canvas.test:tok:7:intro');
+  assert.deepEqual(await app.listCanvasPages('https://canvas.test', '7'), [{ id: 'p1', title: 'Page 1' }]);
+});
+
+test('a Canvas read without saved credentials is refused — no tokenless call (C7)', async () => {
+  let called = false;
+  const app = api(new ScriptedRunner([]), {
+    secrets: createInMemorySecretStore(),
+    fetchPageBody: async () => {
+      called = true;
+      return '';
+    },
+  });
+  await assert.rejects(
+    () => app.fetchCanvasPage('https://canvas.test', '7', 'intro'),
+    /credential|saveCanvasAuth/i,
+  );
+  assert.equal(called, false, 'the reader must not be called without a resolved token');
 });
 
 // ── Remediate flow ───────────────────────────────────────────────────────────
