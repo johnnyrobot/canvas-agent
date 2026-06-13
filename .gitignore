@@ -17,3 +17,6 @@ data/
 .agent-status
 AGENT_BRIEF.md
 AGENT_CONTRACT.md
+
+# WAVE oracle (dev-only) scratch output
+/oracle-out/
