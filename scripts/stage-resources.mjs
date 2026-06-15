@@ -4,7 +4,11 @@
  * The binaries are large and machine-specific, so they are NEVER committed — this
  * copies them from your local installs, pointed at by env vars:
  *
- *   OLLAMA_BIN          path to the `ollama` executable        → resources/sidecars/ollama/ollama
+ *   OLLAMA_BIN          path to the `ollama` executable        → resources/sidecars/ollama/
+ *                       (typically a symlink into Ollama.app; the WHOLE
+ *                        Contents/Resources runner set is copied, since
+ *                        `ollama serve` spawns a sibling `llama-server` + dylibs)
+ *   OLLAMA_RESOURCES_DIR optional explicit override for the Ollama Resources dir
  *   DOCLING_SERVE_DIR   the docling-serve onedir app dir       → resources/sidecars/docling-serve/
  *                       (its IMMEDIATE child must be the `docling-serve` launcher,
  *                        e.g. PyInstaller's `.../dist/docling-serve`, NOT the parent `dist`)
@@ -17,7 +21,7 @@
  * Chromium for the audit engine is staged separately: `npm run stage:browsers`.
  * After staging, `npm run pre-release -- --strict` verifies everything is present.
  */
-import { existsSync, mkdirSync, copyFileSync, cpSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, cpSync, realpathSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,11 +35,27 @@ const missing = [];
 if (ollamaBin && existsSync(ollamaBin)) {
   const dst = path.join(ROOT, 'resources/sidecars/ollama');
   mkdirSync(dst, { recursive: true });
-  // Force the canonical leaf name `ollama` regardless of the source filename, so the
-  // runtime resolver (sidecars/ollama/ollama) always finds it even if OLLAMA_BIN is a
-  // renamed/versioned/symlinked binary.
-  copyFileSync(ollamaBin, path.join(dst, 'ollama'));
-  console.log(`✓ staged ollama from ${ollamaBin} → sidecars/ollama/ollama`);
+  // `ollama serve` does NOT run standalone: it spawns a SIBLING `llama-server`
+  // runner and loads sibling dylibs + mlx_metal_* via @loader_path. So the WHOLE
+  // Ollama.app/Contents/Resources tree must travel, not just the `ollama` binary.
+  // OLLAMA_BIN is usually a symlink (/usr/local/bin/ollama → Ollama.app/.../ollama);
+  // resolve it to find the real Resources dir. OLLAMA_RESOURCES_DIR overrides.
+  const realOllama = realpathSync(ollamaBin);
+  const srcRes = process.env.OLLAMA_RESOURCES_DIR || path.dirname(realOllama);
+  cpSync(srcRes, dst, { recursive: true, dereference: false }); // keep relative dylib symlinks
+  // Drop app-icon junk; keep every runtime binary/dylib/metallib.
+  for (const name of readdirSync(dst)) {
+    if (/\.(icns|png)$/i.test(name)) rmSync(path.join(dst, name), { force: true });
+  }
+  // Guarantee the resolver leaf name `ollama`, and that the runner is present.
+  if (!existsSync(path.join(dst, 'ollama'))) copyFileSync(realOllama, path.join(dst, 'ollama'));
+  if (!existsSync(path.join(dst, 'llama-server'))) {
+    console.error(`✗ staged Ollama from ${srcRes}, but no \`llama-server\` runner at sidecars/ollama/llama-server.`);
+    console.error('  `ollama serve` spawns llama-server as a sibling — point OLLAMA_BIN (or');
+    console.error('  OLLAMA_RESOURCES_DIR) at the full Ollama.app Contents/Resources dir.');
+    process.exit(1);
+  }
+  console.log(`✓ staged Ollama runner set from ${srcRes} → sidecars/ollama/ (ollama + llama-server + dylibs + mlx_metal_*)`);
   staged += 1;
 } else {
   missing.push('OLLAMA_BIN — path to the `ollama` binary (e.g. "$(command -v ollama)")');
