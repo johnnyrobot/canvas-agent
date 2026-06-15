@@ -99,6 +99,37 @@ async function signOne(file, identity) {
   ]);
 }
 
+/**
+ * Relativize any ABSOLUTE symlink under `dir`. codesign --strict rejects "invalid
+ * destination for symbolic link in bundle", and an absolute link also breaks
+ * relocation. Every sidecar symlink targets a sibling, so the relative form is the
+ * target's basename (verified to exist beside the link before relinking). This is a
+ * safety net in case the packager rewrites the (already-relative) staged symlinks.
+ */
+function relativizeSymlinks(dir) {
+  let fixed = 0;
+  const walk = (d) => {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isSymbolicLink()) {
+        const target = fs.readlinkSync(p);
+        if (path.isAbsolute(target)) {
+          const base = path.basename(target);
+          if (fs.existsSync(path.join(path.dirname(p), base))) {
+            fs.rmSync(p);
+            fs.symlinkSync(base, p);
+            fixed += 1;
+          }
+        }
+      } else if (ent.isDirectory()) {
+        walk(p);
+      }
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  return fixed;
+}
+
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== 'darwin') return;
 
@@ -108,6 +139,9 @@ exports.default = async function afterPack(context) {
     console.log('[afterPack] no Contents/Resources/sidecars — nothing to sign');
     return;
   }
+
+  const relinked = relativizeSymlinks(sidecars);
+  if (relinked) console.log(`[afterPack] relativized ${relinked} absolute symlink(s) (codesign --strict safety)`);
 
   const identity = discoverIdentity();
   // Deepest-first so any nested code is signed before its container.

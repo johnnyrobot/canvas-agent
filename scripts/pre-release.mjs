@@ -99,7 +99,10 @@ for (const res of build.extraResources ?? []) {
 if (build.mac?.notarize === true) {
   const credA = !!(process.env.APPLE_API_KEY && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER);
   const credB = !!(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID);
-  const credK = !!(process.env.APPLE_KEYCHAIN && process.env.APPLE_KEYCHAIN_PROFILE);
+  // A notarytool keychain profile alone is sufficient — it resolves via the default
+  // keychain search list. (Do NOT also set APPLE_KEYCHAIN to a path: store-credentials
+  // items are not found by an explicit --keychain lookup, so it breaks notarization.)
+  const credK = !!process.env.APPLE_KEYCHAIN_PROFILE;
   const haveCreds = credA || credB || credK;
   check(haveCreds, 'staged', 'notarization credentials present (one full family)',
     haveCreds
