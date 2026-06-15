@@ -53,8 +53,15 @@ const REMEDIATION_STRONG = ['fix', 'alt text', 'wcag', 'remediate', 'repair', 'b
  * WEAK accessibility vocabulary — present in BOTH authoring and repair requests
  * (e.g. "create an *accessible* page" is a BUILD, not a remediation). Only
  * decisive when no authoring verb is present, so build wins the overlap.
+ *
+ * `'inaccess'` is listed separately from `'accessib'` because each needle is
+ * matched at a leading word boundary (`countStemHits`): in "in*accessible*" the
+ * boundary falls before "in", not before "accessib", so `\baccessib` cannot match
+ * the negated form. Without `'inaccess'`, "is my page inaccessible" would fall
+ * through to the bare-noun BUILD rule (step 5) and mis-route to build — yet it is
+ * plainly an audit request. Both 'inaccessible' and 'accessible' now → remediate.
  */
-const REMEDIATION_WEAK = ['accessib', 'contrast'] as const;
+const REMEDIATION_WEAK = ['accessib', 'inaccess', 'contrast'] as const;
 
 /** Authoring VERBS — an explicit intent to produce a new artifact; these beat weak a11y words. */
 const BUILD_VERBS = ['create', 'make', 'build', 'generate', 'draft', 'template'] as const;

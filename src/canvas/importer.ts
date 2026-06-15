@@ -13,7 +13,7 @@ import type {
   CanvasImporter,
   CanvasImportResult,
 } from '../contracts/index.js';
-import { createCanvasGet, parseLinkNext } from './http.js';
+import { createCanvasGet, parseLinkNext, sameOrigin } from './http.js';
 import type { CanvasGet, FetchLike } from './http.js';
 
 export interface ImporterOptions {
@@ -43,6 +43,7 @@ export function createImporter(opts: ImporterOptions = {}): CanvasImporter {
   ): Promise<CanvasImportResult> {
     const get = createCanvasGet({
       token: config.token,
+      baseUrl: config.baseUrl,
       ...(fetchImpl ? { fetch: fetchImpl } : {}),
     });
     const base = config.baseUrl.replace(/\/+$/, '');
@@ -120,7 +121,17 @@ async function countList(
     }
     count += data.length;
 
-    const next = parseLinkNext(res.headers.get('link'));
+    let next = parseLinkNext(res.headers.get('link'));
+    // Defense in depth: a cross-origin `next` (a hostile/misconfigured Canvas
+    // could emit one) ends pagination instead of sending the Bearer token to
+    // another host. The get() backstop would also refuse it, but stopping here
+    // keeps a completed partial count rather than throwing the whole import.
+    if (next && !sameOrigin(next, endpoint)) {
+      warnings.push(
+        `${label}: stopped at a cross-origin pagination link (counted ${count}); the token is never sent off-origin`,
+      );
+      next = null;
+    }
     pagesFollowed += 1;
     if (next && pagesFollowed >= MAX_PAGES) {
       warnings.push(

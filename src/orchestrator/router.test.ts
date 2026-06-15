@@ -14,6 +14,17 @@ test('an explicit override always wins with full confidence', () => {
   }
 });
 
+test('negated-a11y audit requests ("inaccessible") route to remediate, not build', () => {
+  // Pre-fix these fell through to the bare-noun BUILD rule because the `\baccessib`
+  // stem cannot match inside "inaccessible". They are audits → remediate.
+  assert.equal(routeIntent('is my page inaccessible').mode, 'remediate');
+  assert.equal(routeIntent('this syllabus is inaccessible').mode, 'remediate');
+  // And the affirmative audit phrasing still routes to remediate (L5b guard kept).
+  assert.equal(routeIntent('is my syllabus accessible').mode, 'remediate');
+  // A verb-present authoring request still wins for build (negation doesn't flip it).
+  assert.equal(routeIntent('create an accessible page').mode, 'build');
+});
+
 test('pasted HTML routes to remediate', () => {
   const d = routeIntent('Here is my page:\n<div><img src="x"><p>hello</p></div>');
   assert.equal(d.mode, 'remediate');

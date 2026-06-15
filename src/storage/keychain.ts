@@ -78,17 +78,37 @@ export function createKeychainSecretStore(options: KeychainOptions = {}): Secret
     },
 
     async set(key: string, value: string): Promise<void> {
-      // `-U` updates the item if it already exists (otherwise it errors).
-      await run('security', [
-        'add-generic-password',
-        '-U',
-        '-s',
-        service,
-        '-a',
-        key,
-        '-w',
-        value,
-      ]);
+      // SECURITY (invariant #4): the secret is passed to `security` as the `-w`
+      // argv value. On a write FAILURE the underlying `execFile` rejection embeds
+      // the full command line (`err.cmd`) and often the value in `err.message`/
+      // `err.stack`. That rejection would otherwise propagate up through ipc.ts →
+      // bridge.ts and reach the renderer, leaking the Canvas token. So we catch any
+      // failure here and rethrow a REDACTED error that carries no message/cmd/stack
+      // from the original — the secret can never cross the IPC boundary on an error.
+      //
+      // (`-w <value>` argv is kept deliberately: `security add-generic-password -w`
+      // with no value prompts the controlling tty twice rather than reading a pipe,
+      // so there is no reliable non-interactive stdin path. The residual argv
+      // exposure is marginal — a same-user process can already read the stored item
+      // prompt-free on this single-user device.)
+      try {
+        // `-U` updates the item if it already exists (otherwise it errors).
+        await run('security', [
+          'add-generic-password',
+          '-U',
+          '-s',
+          service,
+          '-a',
+          key,
+          '-w',
+          value,
+        ]);
+      } catch {
+        throw new Error(
+          'Failed to store the secret in the macOS Keychain (the `security` command exited with an error). ' +
+            'Details were redacted to avoid leaking the secret value.',
+        );
+      }
     },
 
     async delete(key: string): Promise<void> {

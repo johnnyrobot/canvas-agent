@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the packaged Canvas Agent .app
+  (referenced by build.mac.entitlements / entitlementsInherit in package.json).
+
+  This app, under hardenedRuntime:true, must:
+    - run V8 / the bundled headless Chromium (JIT + unsigned executable memory),
+    - load the bundled Chromium and the on-device sidecars (Ollama, docling-serve)
+      which are signed independently of the app (library-validation must relax),
+    - read the env vars we set at launch (e.g. PLAYWRIGHT_BROWSERS_PATH, sidecar
+      hosts), which dyld blocks under hardened runtime without this entitlement,
+    - have child processes (Chromium, sidecars) inherit these entitlements.
+
+  No network-server / device entitlements are requested: the renderer permission
+  handler denies all permission prompts and the app talks only to localhost
+  sidecars + the user's explicit Canvas instance.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.inherit</key>
+    <true/>
+  </dict>
+</plist>

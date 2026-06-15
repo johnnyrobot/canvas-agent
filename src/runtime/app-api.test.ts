@@ -124,6 +124,27 @@ test('runTurn withholds the badge for a deliberately bad fenced fragment', async
   assert.ok(frag.gate.conformance.blockers.some((b) => b.id.startsWith('allowlist-removed-semantic')));
 });
 
+test('a prose conformance claim is LABELLED (not asserted) and never implies a badge', async () => {
+  // Model asserts conformance in prose AND emits a blocker-triggering fragment
+  // (<figure>/<figcaption> are off the Canvas allowlist → removed → blocker).
+  const bad =
+    'This page is WCAG 2.2 AA certified.\n\n```html\n<figure><img src="https://x/y.png" alt="y"><figcaption>cap</figcaption></figure>\n```\n';
+  const runner = new ScriptedRunner([text(bad)]);
+  const view = await api(runner).runTurn({ user: 'is it accessible?' });
+
+  // The authoritative signal — the gate badge — is correctly withheld.
+  assert.equal(view.fragments[0]?.gate.badgeWithheld, true);
+  // The prose is labelled non-authoritative; the claim itself is preserved, not scrubbed.
+  assert.match(view.text, /badge|authoritative|not a verified/i, 'conformance claim must be labelled');
+  assert.ok(view.text.includes('WCAG 2.2 AA certified'), 'the author claim is preserved (labelled, not deleted)');
+});
+
+test('ordinary prose with no conformance claim is left untouched', async () => {
+  const runner = new ScriptedRunner([text('Here is a friendly welcome message for your students.')]);
+  const view = await api(runner).runTurn({ user: 'write a welcome note' });
+  assert.equal(view.text, 'Here is a friendly welcome message for your students.');
+});
+
 test('runTurn grounds the system prompt with retrieved Knowledge-Pack citations', async () => {
   const runner = new ScriptedRunner([text('answer')]);
   const retriever = async (): Promise<KbResult> => ({
@@ -149,6 +170,21 @@ test('toolsUsed is de-duplicated by name', async () => {
   ]);
   const view = await api(runner).runTurn({ user: 'audit twice' });
   assert.deepEqual(view.toolsUsed, ['audit_html']);
+});
+
+test('a truncated final draft (doneReason="length") is flagged incomplete in view.text (C11)', async () => {
+  const runner = new ScriptedRunner([
+    { content: 'Here is the first half of your page', model: 'm', raw: {}, doneReason: 'length' },
+  ]);
+  const view = await api(runner).runTurn({ user: 'write a long page' });
+  assert.match(view.text, /cut off|incomplete|output limit/i, 'truncation must be surfaced');
+  assert.ok(view.text.includes('first half of your page'), 'original draft text is preserved after the notice');
+});
+
+test('a normally-finished draft (doneReason="stop") carries no truncation notice', async () => {
+  const runner = new ScriptedRunner([{ content: 'All done.', model: 'm', raw: {}, doneReason: 'stop' }]);
+  const view = await api(runner).runTurn({ user: 'hi' });
+  assert.equal(view.text, 'All done.');
 });
 
 test('health() reports per-sidecar reachability and never throws', async () => {
@@ -204,6 +240,30 @@ test('importCanvas records a provenance row in canvas_imports (L6)', async () =>
   assert.equal(row?.name, 'Chem 200');
   assert.equal(row?.imported_at, '2026-02-02T00:00:00Z');
   assert.deepEqual(JSON.parse(row!.summary_json), { pages: 5, assignments: 4, files: 2, warnings: ['heads up'] });
+});
+
+test('importCanvas still resolves when the provenance write fails (best-effort DB)', async () => {
+  const expected: CanvasImportResult = {
+    courseId: '7', name: 'Chem 200', importedAt: '2026-02-02T00:00:00Z',
+    pages: 5, assignments: 4, files: 2, warnings: [],
+  };
+  // A DB whose run() always rejects (locked DB / disk full). The completed import
+  // must NOT be discarded by a provenance bookkeeping failure.
+  const rejectingDb = {
+    exec: async () => {},
+    all: async () => [],
+    get: async () => undefined,
+    run: async () => { throw new Error('database is locked'); },
+    close: async () => {},
+  };
+  const view = api(new ScriptedRunner([]), {
+    db: rejectingDb,
+    secrets: createInMemorySecretStore(),
+    importer: async () => expected,
+  });
+  await view.saveCanvasAuth({ baseUrl: 'https://canvas.test', token: 't' });
+  const res = await view.importCanvas('https://canvas.test', '7');
+  assert.deepEqual(res, expected, 'import result is returned despite the provenance write failing');
 });
 
 // ── Mode routing + streaming ─────────────────────────────────────────────────

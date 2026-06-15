@@ -81,7 +81,11 @@ export class Orchestrator {
         messages.push({ role: 'assistant', content: res.content });
         // Non-streaming callers still get the final text as one terminal event.
         if (ctx.onEvent && !streaming && res.content) ctx.onEvent({ type: 'text', delta: res.content });
-        return { text: res.content, iterations, toolInvocations, messages };
+        const result: TurnResult = { text: res.content, iterations, toolInvocations, messages };
+        // C11: carry the terminal response's done_reason so turn assembly can flag a
+        // truncated ('length') final answer as incomplete.
+        if (res.doneReason !== undefined && res.doneReason !== '') result.doneReason = res.doneReason;
+        return result;
       }
 
       // Record the assistant's tool-call turn, then execute each call.
@@ -113,6 +117,7 @@ export class Orchestrator {
     onEvent: (e: OrchestratorEvent) => void,
   ): Promise<ChatResult> {
     let content = '';
+    let doneReason: string | undefined;
     const toolCalls: ToolCall[] = [];
     for await (const chunk of this.runner.chatStream!(opts)) {
       if (chunk.delta) {
@@ -120,9 +125,13 @@ export class Orchestrator {
         onEvent({ type: 'text', delta: chunk.delta });
       }
       if (chunk.toolCalls) toolCalls.push(...chunk.toolCalls);
+      // C11: the terminal chunk carries done_reason ('length' = truncated). Carry it
+      // through instead of dropping it, so a streamed truncated draft is detectable.
+      if (chunk.doneReason !== undefined && chunk.doneReason !== '') doneReason = chunk.doneReason;
     }
     const result: ChatResult = { content, model: '', raw: undefined };
     if (toolCalls.length > 0) result.toolCalls = toolCalls;
+    if (doneReason !== undefined) result.doneReason = doneReason;
     return result;
   }
 

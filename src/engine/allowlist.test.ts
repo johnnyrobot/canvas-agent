@@ -35,6 +35,37 @@ test('<style> blocks are removed entirely (no inline CSS leaks as text)', async 
   assert.ok(!r.html.includes('color:red'));
 });
 
+// ── RCDATA/RAWTEXT characterization (textarea/title/noscript/xmp/plaintext) ──
+// These five tags are RCDATA/RAWTEXT/PLAINTEXT in the HTML spec, but the tokenizer
+// models only script/style as raw-text, so their *contents* are parsed as markup
+// (a known, latent fidelity gap). This PINS today's output so a future tokenizer
+// change is caught — and asserts the load-bearing invariant regardless: no
+// executable attribute or URL ever survives the allowlist for any of them.
+test('RCDATA/RAWTEXT tags: output is pinned and no executable vector survives', async () => {
+  const cases: { in: string; out: string; removed: string[] }[] = [
+    { in: '<textarea onfocus="alert(1)"><script>alert(2)</script></textarea>', out: '', removed: ['textarea'] },
+    { in: '<title>hi<img src=x onerror=alert(1)></title>', out: 'hi<img src="x">', removed: [] },
+    { in: '<noscript><img src=x onerror=alert(1)></noscript>', out: '<img src="x">', removed: [] },
+    { in: '<xmp><script>alert(1)</script></xmp>', out: '', removed: [] },
+    { in: '<plaintext><script>alert(1)</script>', out: '', removed: [] },
+  ];
+  for (const c of cases) {
+    const r = await validateAllowlist(c.in);
+    assert.equal(r.html, c.out, `pinned output for: ${c.in}`);
+    assert.deepEqual(r.removedSemantic, c.removed, `pinned removedSemantic for: ${c.in}`);
+    // Invariant — must hold even if the pinned output above ever legitimately shifts:
+    assert.ok(!/<script/i.test(r.html), `no <script> survives: ${c.in}`);
+    assert.ok(!/\son\w+\s*=/i.test(r.html), `no inline event handler survives: ${c.in}`);
+    assert.ok(!/javascript:/i.test(r.html), `no javascript: URL survives: ${c.in}`);
+  }
+});
+
+test('a javascript: href is stripped even adjacent to a removed RCDATA tag', async () => {
+  const r = await validateAllowlist('<textarea>x</textarea><a href="javascript:alert(1)">y</a>');
+  assert.equal(r.html, 'x<a>y</a>');
+  assert.ok(!/javascript:/i.test(r.html));
+});
+
 test('HTML comments and doctype declarations are dropped', async () => {
   const r = await validateAllowlist('<!DOCTYPE html><p>a<!-- secret -->b</p>');
   assert.equal(r.html, '<p>ab</p>');

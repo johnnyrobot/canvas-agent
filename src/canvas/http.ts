@@ -24,9 +24,33 @@ export interface CanvasGetOptions {
    * shorter than the LLM client's, since these are small JSON list calls.
    */
   timeoutMs?: number;
+  /**
+   * The Canvas instance this client is bound to. When set, EVERY request URL must
+   * be same-origin with it; a cross-origin URL is refused BEFORE the Bearer token
+   * is attached or any request is made. This is the token-exfiltration backstop:
+   * a hostile `Link: rel="next"` (or any other Canvas-supplied URL) pointing at a
+   * different host can never carry the token off-origin. All real callers pass
+   * `config.baseUrl`; tests may omit it.
+   */
+  baseUrl?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+/** Origin of a URL, or `null` when it does not parse (so it can never falsely match). */
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** True only when both URLs parse AND share an origin (scheme + host + port). */
+export function sameOrigin(a: string, b: string): boolean {
+  const oa = originOf(a);
+  return oa !== null && oa === originOf(b);
+}
 
 /**
  * A bound GET function. The optional `method` exists ONLY so the read-only
@@ -40,11 +64,20 @@ export function createCanvasGet(opts: CanvasGetOptions): CanvasGet {
   const doFetch: FetchLike = opts.fetch ?? globalThis.fetch;
   const { token } = opts;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const allowedOrigin = opts.baseUrl;
 
   return async function get(url: string, method = 'GET'): Promise<Response> {
     if (method !== 'GET') {
       throw new Error(
         `read-only Canvas importer refuses non-GET method "${method}" (PRD §17: the source course is never mutated)`,
+      );
+    }
+    // Token-exfiltration backstop: never attach the Bearer token to — or even
+    // dispatch — a request whose origin differs from the bound Canvas instance.
+    if (allowedOrigin !== undefined && !sameOrigin(url, allowedOrigin)) {
+      throw new Error(
+        `read-only Canvas importer refuses a cross-origin request to ${originOf(url) ?? 'an unparseable URL'} ` +
+          `(this client is bound to ${originOf(allowedOrigin) ?? allowedOrigin}); the Bearer token is never sent off-origin`,
       );
     }
     return doFetch(url, {

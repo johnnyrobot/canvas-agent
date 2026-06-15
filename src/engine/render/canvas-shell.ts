@@ -49,6 +49,11 @@ export const CANVAS_SHELL_CSS = [
 export function wrapInCanvasShell(fragment: string): string {
   return (
     '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
+    // A non-empty <title> is REQUIRED: the auditor scans this exact document, and
+    // WCAG 2.4.2 (axe `document-title`, impact serious → a badge-WITHHOLDING `error`
+    // in the gate) fires on a title-less document — which would otherwise withhold
+    // the badge on EVERY rendered fragment. The exported standalone file needs one too.
+    '<title>Canvas content</title>' +
     `<style>${CANVAS_SHELL_CSS}</style></head>` +
     `<body><div id="content">${fragment}</div></body></html>`
   );

@@ -13,6 +13,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises';
 import type { LLMConfig } from './types.js';
 import { uniqueModels } from './config.js';
+import { resolveSidecarCommand } from '../runtime/bundled-resources.js';
 
 export interface OllamaProcessLogger {
   info(msg: string): void;
@@ -39,6 +40,8 @@ export class OllamaProcess {
     private readonly config: LLMConfig,
     private readonly log: OllamaProcessLogger = noopLogger,
     private readonly spawnImpl: SpawnLike = spawn,
+    /** Resolve the `ollama` command — bundled abs path when packaged, else PATH. */
+    private readonly resolveCommand: (name: string) => string = resolveSidecarCommand,
   ) {}
 
   /** Whether this manager spawned (and therefore owns) the daemon. */
@@ -76,9 +79,13 @@ export class OllamaProcess {
   }
 
   private spawn(): void {
-    this.log.info('Spawning `ollama serve`…');
+    // Resolve the bundled binary when packaged; a Finder-launched .app does not
+    // inherit the user's shell PATH, so a bare `ollama` would ENOENT (see
+    // resolveSidecarCommand). Falls back to the PATH name in dev.
+    const command = this.resolveCommand('ollama');
+    this.log.info(`Spawning \`${command} serve\`…`);
     this.spawnError = undefined;
-    this.child = this.spawnImpl('ollama', ['serve'], {
+    this.child = this.spawnImpl(command, ['serve'], {
       env: {
         ...process.env,
         OLLAMA_HOST: this.config.ollamaHost,

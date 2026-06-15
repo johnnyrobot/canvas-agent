@@ -57,6 +57,28 @@ test('every recorded request method is GET and carries the Bearer token', async 
   }
 });
 
+// ── Token-exfiltration: a cross-origin pagination link is never followed ─────
+
+test('a cross-origin Link rel=next stops pagination — no request to the other host, token never leaves origin', async () => {
+  const { fetch, calls } = fakeCanvas((url) => {
+    if (url.pathname === '/api/v1/courses/9') return { body: { name: 'Course 9' } };
+    if (url.origin === 'https://school.instructure.com' && url.pathname === '/api/v1/courses/9/pages') {
+      // Page 1 points "next" at a hostile host trying to capture the Bearer token.
+      return { body: [{}, {}], link: '<https://evil.test/api/v1/courses/9/pages?page=2>; rel="next"' };
+    }
+    return { body: [] };
+  });
+  const importCourse = createImporter({ fetch, now: () => FIXED_NOW });
+
+  const result = await importCourse(CONFIG, '9');
+
+  // No request ever went to evil.test (so the token was never sent there).
+  assert.ok(!calls.some((c) => c.url.includes('evil.test')), 'must not request the cross-origin next link');
+  // Pagination stopped after page 1 with a warning, count preserved.
+  assert.equal(result.pages, 2);
+  assert.ok(result.warnings.some((w) => /cross-origin/i.test(w)), 'expected a cross-origin-stop warning');
+});
+
 // ── Partial import: a forbidden sub-resource degrades to a warning ───────────
 
 test('a 403 on /files yields files:0 + a warning, import still succeeds', async () => {
