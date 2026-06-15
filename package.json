@@ -1,6 +1,7 @@
 {
   "name": "canvas-agent",
   "version": "0.1.0",
+  "author": "Quang Phung",
   "private": true,
   "type": "module",
   "description": "Canvas Course Design & Accessibility Assistant — on-device, single-user macOS app (see PRD).",
@@ -49,7 +50,7 @@
       "!**/*.test.{js,d.ts}"
     ],
     "asar": true,
-    "afterPack": "build-resources/afterPack.js",
+    "afterPack": "build-resources/afterPack.cjs",
     "extraResources": [
       {
         "from": "resources/ms-playwright",

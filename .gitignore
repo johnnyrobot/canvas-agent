@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+release/
 *.tsbuildinfo
 
 # env / secrets (Canvas token lives in the macOS Keychain, not here)

@@ -42,7 +42,9 @@ if (ollamaBin && existsSync(ollamaBin)) {
   // resolve it to find the real Resources dir. OLLAMA_RESOURCES_DIR overrides.
   const realOllama = realpathSync(ollamaBin);
   const srcRes = process.env.OLLAMA_RESOURCES_DIR || path.dirname(realOllama);
-  cpSync(srcRes, dst, { recursive: true, dereference: false }); // keep relative dylib symlinks
+  // verbatimSymlinks keeps symlinks RELATIVE; without it Node rewrites them to absolute
+  // paths, which `codesign --strict` rejects ("invalid destination for symbolic link").
+  cpSync(srcRes, dst, { recursive: true, dereference: false, verbatimSymlinks: true });
   // Drop app-icon junk; keep every runtime binary/dylib/metallib.
   for (const name of readdirSync(dst)) {
     if (/\.(icns|png)$/i.test(name)) rmSync(path.join(dst, name), { force: true });
@@ -64,7 +66,9 @@ if (ollamaBin && existsSync(ollamaBin)) {
 if (doclingDir && existsSync(doclingDir)) {
   const dst = path.join(ROOT, 'resources/sidecars/docling-serve');
   mkdirSync(dst, { recursive: true });
-  cpSync(doclingDir, dst, { recursive: true });
+  // verbatimSymlinks: keep the PBS interpreter's symlinks RELATIVE (python3 -> python3.13
+  // etc.); without it Node rewrites them absolute → codesign --strict rejects + breaks relocation.
+  cpSync(doclingDir, dst, { recursive: true, verbatimSymlinks: true });
   // The runtime spawns sidecars/docling-serve/docling-serve. cpSync copies the source
   // dir's CONTENTS, so the launcher lands at the leaf ONLY when DOCLING_SERVE_DIR's
   // immediate child is the `docling-serve` executable. Assert it rather than letting a
