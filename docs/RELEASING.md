@@ -66,7 +66,12 @@ export APPLE_ID="you@example.com"
 export APPLE_APP_SPECIFIC_PASSWORD="abcd-efgh-ijkl-mnop"
 export APPLE_TEAM_ID="ABCDE12345"
 
-npm run package         # build → pre-release --strict → electron-builder --mac (sign + notarize + staple)
+# Option C (used for the 0.1.0 build): a stored notarytool keychain profile.
+# Do NOT also set APPLE_KEYCHAIN to a path — store-credentials items are not found by
+# an explicit --keychain lookup, which makes notarization fail.
+export APPLE_KEYCHAIN_PROFILE="canvas-agent-notary"   # from `xcrun notarytool store-credentials`
+
+npm run package   # build → pre-release --strict → electron-builder --mac → make-dmg.sh
 ```
 
 `npm run package` re-runs the strict pre-release gate first, so a build can never
@@ -78,11 +83,21 @@ rejects on other Macs. The `--strict` pre-flight turns that silent skip into a h
 failure, so `npm run package` is genuinely fail-closed. (Dev runs use `npm run app`
 / `electron .`, which never invoke electron-builder, so day-to-day work is unaffected.)
 
-Confirm the staple after the build:
+electron-builder notarizes + staples the **.app** (and emits the auto-update **.zip**).
+Its own `dmg` target is **disabled** — it corrupts the bundled framework signatures (the
+Electron Framework reads "not signed at all" inside its image, so the dmg fails
+notarization). `scripts/make-dmg.sh` — chained into `npm run package` — builds the
+shippable dmg from the signed .app with `ditto`+`hdiutil` (a faithful copy) and notarizes
++ staples it.
+
+Confirm both artifacts after the build:
 
 ```sh
 xcrun stapler validate "release/mac-arm64/Canvas Agent.app"
-spctl -a -vvv -t install "release/mac-arm64/Canvas Agent.app"   # → accepted, source=Notarized Developer ID
+spctl -a -vvv -t install "release/mac-arm64/Canvas Agent.app"        # → accepted, Notarized Developer ID
+xcrun stapler validate "release/Canvas Agent-<version>-arm64.dmg"
+spctl -a -vvv -t open --context context:primary-signature \
+  "release/Canvas Agent-<version>-arm64.dmg"                         # → accepted, Notarized Developer ID
 ```
 
 ## 5. Packaged-artifact smoke (proves asar/path/preload/resourcesPath + the bundled gate)

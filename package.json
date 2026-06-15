@@ -24,7 +24,7 @@
     "stage:browsers": "PLAYWRIGHT_BROWSERS_PATH=\"$PWD/resources/ms-playwright\" npx playwright install chromium",
     "stage:sidecars": "node scripts/stage-resources.mjs",
     "pre-release": "node scripts/pre-release.mjs",
-    "package": "npm run build && node scripts/pre-release.mjs --strict && electron-builder --mac"
+    "package": "npm run build && node scripts/pre-release.mjs --strict && electron-builder --mac && bash scripts/make-dmg.sh"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -75,7 +75,6 @@
     "mac": {
       "category": "public.app-category.education",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
         { "target": "zip", "arch": ["arm64"] }
       ],
       "hardenedRuntime": true,
