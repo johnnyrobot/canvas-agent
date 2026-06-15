@@ -1,0 +1,35 @@
+# graphify scope for canvas-agent.
+# Graph covers: src/ + scripts/ + docs/ + top-level *.md docs.
+# Everything below is excluded from the knowledge graph.
+
+# Dependencies / build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local Python sidecar virtualenv (Docling) — graphify's default skip-set
+# misses this because the dir name isn't an exact "venv"/".venv" match.
+.venv-docling/
+
+# graphify's own output (avoid graphing the graph)
+graphify-out/
+
+# Agent tooling dirs
+.claude/
+.codex/
+
+# Logs, OS cruft, secrets, local data
+*.log
+.DS_Store
+.env
+.env.local
+data/
+
+# Lockfiles
+package-lock.json
+
+# Out of graph scope (kept narrow per request: docs + scripts, not tests/config).
+# Remove these lines to fold them into the graph.
+e2e/
+package.json
+tsconfig.json
