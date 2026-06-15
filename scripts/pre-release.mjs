@@ -81,6 +81,12 @@ for (const res of build.extraResources ?? []) {
     const leafOk = existsSync(path.join(from, name));
     check(leafOk, 'staged', `sidecar launcher present: sidecars/${name}/${name}`,
       leafOk ? 'present' : 'MISSING — resolveSidecarCommand spawns this exact path; re-stage so the launcher lands here');
+    // Ollama is not standalone: `ollama serve` spawns a sibling `llama-server` runner.
+    if (name === 'ollama') {
+      const runnerOk = existsSync(path.join(from, 'llama-server'));
+      check(runnerOk, 'staged', 'ollama runner present: sidecars/ollama/llama-server',
+        runnerOk ? 'present' : 'MISSING — `ollama serve` spawns llama-server as a sibling; stage the full runner set');
+    }
   }
 }
 
