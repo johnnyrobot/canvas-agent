@@ -71,4 +71,11 @@ export interface TurnResult {
   toolInvocations: ToolInvocation[];
   /** Full transcript including tool turns (resumable). */
   messages: ChatMessage[];
+  /**
+   * The terminal model response's `done_reason` (C11), when reported. `'length'`
+   * means the final answer was truncated at `num_predict` — the runtime must flag
+   * such a draft as incomplete and never surface it as a finished/verified result.
+   * Absent when the provider reported no reason (e.g. the offline streaming path).
+   */
+  doneReason?: string;
 }

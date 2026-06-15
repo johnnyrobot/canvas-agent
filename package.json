@@ -1,6 +1,6 @@
 {
   "name": "canvas-agent",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Canvas Course Design & Accessibility Assistant — on-device, single-user macOS app (see PRD).",
@@ -15,7 +15,15 @@
     "test": "tsx --test 'src/**/*.test.ts' 'e2e/**/*.test.ts'",
     "e2e": "tsx --test 'e2e/**/*.test.ts'",
     "app": "npm run build && electron .",
-    "llm:smoke": "tsx src/llm/example.ts"
+    "llm:smoke": "tsx src/llm/example.ts",
+    "verify": "tsc --noEmit && npm test",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "install:hooks": "git config core.hooksPath githooks",
+    "prepare": "git config core.hooksPath githooks || true",
+    "stage:browsers": "PLAYWRIGHT_BROWSERS_PATH=\"$PWD/resources/ms-playwright\" npx playwright install chromium",
+    "stage:sidecars": "node scripts/stage-resources.mjs",
+    "pre-release": "node scripts/pre-release.mjs",
+    "package": "npm run build && node scripts/pre-release.mjs --strict && electron-builder --mac"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -43,6 +51,11 @@
     "asar": true,
     "extraResources": [
       {
+        "from": "resources/ms-playwright",
+        "to": "ms-playwright",
+        "filter": ["**/*"]
+      },
+      {
         "from": "resources/sidecars/ollama",
         "to": "sidecars/ollama",
         "filter": ["**/*"]
@@ -51,6 +64,10 @@
         "from": "resources/sidecars/docling-serve",
         "to": "sidecars/docling-serve",
         "filter": ["**/*"]
+      },
+      {
+        "from": "THIRD-PARTY-NOTICES.md",
+        "to": "THIRD-PARTY-NOTICES.md"
       }
     ],
     "mac": {
@@ -61,6 +78,7 @@
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "notarize": true,
       "entitlements": "build-resources/entitlements.mac.plist",
       "entitlementsInherit": "build-resources/entitlements.mac.plist"
     },

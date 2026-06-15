@@ -6,6 +6,7 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { IngestConfig } from './types.js';
+import { resolveSidecarCommand } from '../runtime/bundled-resources.js';
 
 export interface IngestProcessLogger {
   info(msg: string): void;
@@ -28,6 +29,8 @@ export class DoclingProcess {
     private readonly config: IngestConfig,
     private readonly log: IngestProcessLogger = noopLogger,
     private readonly spawnImpl: SpawnLike = spawn,
+    /** Resolve the `docling-serve` command — bundled abs path when packaged, else PATH. */
+    private readonly resolveCommand: (name: string) => string = resolveSidecarCommand,
   ) {}
 
   get isOwned(): boolean {
@@ -65,9 +68,12 @@ export class DoclingProcess {
 
   private spawn(): void {
     const { hostname, port } = new URL(this.config.baseUrl);
-    this.log.info('Spawning `docling-serve run`…');
-    // Assumes `docling-serve` is on PATH (bundled with the app).
-    this.child = this.spawnImpl('docling-serve', ['run', '--host', hostname, '--port', port || '5001'], {
+    // Resolve the bundled binary when packaged; a Finder-launched .app does not
+    // inherit the user's shell PATH, so a bare `docling-serve` would ENOENT (see
+    // resolveSidecarCommand). Falls back to the PATH name in dev.
+    const command = this.resolveCommand('docling-serve');
+    this.log.info(`Spawning \`${command} run\`…`);
+    this.child = this.spawnImpl(command, ['run', '--host', hostname, '--port', port || '5001'], {
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

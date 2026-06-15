@@ -11,9 +11,21 @@ import type {
   LLMConfig,
 } from './types.js';
 import { loadLLMConfig, type Env } from './config.js';
-import { OllamaClient, OllamaError } from './client.js';
+import { OllamaClient, OllamaError, type FetchLike } from './client.js';
 import { OllamaProcess, type OllamaProcessLogger } from './process.js';
 import { Mutex } from './mutex.js';
+import { toRawBase64 } from './payload.js';
+
+/** Max DECODED image size `describeImage` accepts (memory/latency guard, PRD §10). */
+export const MAX_DESCRIBE_IMAGE_BYTES = 12 * 1024 * 1024; // 12 MB
+
+/** Approximate decoded byte length of a base64 image (data: prefix stripped). No allocation. */
+export function decodedBase64Bytes(image: string): number {
+  const raw = toRawBase64(image).trim();
+  if (raw.length === 0) return 0;
+  const padding = raw.endsWith('==') ? 2 : raw.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((raw.length * 3) / 4) - padding);
+}
 
 export class OllamaJsonError extends Error {
   constructor(
@@ -28,6 +40,8 @@ export class OllamaJsonError extends Error {
 export interface CreateSidecarOptions {
   env?: Env;
   logger?: OllamaProcessLogger;
+  /** Injectable transport for the chat client (tests pass a fake; default global `fetch`). */
+  fetch?: FetchLike;
 }
 
 export class OllamaSidecar {
@@ -38,7 +52,7 @@ export class OllamaSidecar {
 
   constructor(options: CreateSidecarOptions = {}) {
     this.config = loadLLMConfig(options.env);
-    this.client = new OllamaClient(this.config);
+    this.client = new OllamaClient(this.config, options.fetch);
     this.process = new OllamaProcess(this.config, options.logger);
   }
 
@@ -100,6 +114,16 @@ export class OllamaSidecar {
   describeImage(opts: DescribeImageOptions): Promise<ChatResult> {
     if (!this.config.visionEnabled) {
       throw new OllamaError('Vision is disabled (LLM_VISION_ENABLED=false).');
+    }
+    // Size guard (PRD §10): reject an oversized blob BEFORE it flows verbatim into
+    // the request body — an unbounded image would otherwise hang/OOM the on-device
+    // GPU. Bounded by a single-user device, but cheap to stop and gives a clear error.
+    const bytes = decodedBase64Bytes(opts.image);
+    if (bytes > MAX_DESCRIBE_IMAGE_BYTES) {
+      throw new OllamaError(
+        `Image is too large for on-device description (~${Math.round(bytes / 1024 / 1024)} MB decoded, ` +
+          `limit ${Math.round(MAX_DESCRIBE_IMAGE_BYTES / 1024 / 1024)} MB). Resize or compress it first.`,
+      );
     }
     return this.chat({
       role: opts.role ?? 'vision',

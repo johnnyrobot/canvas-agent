@@ -11,6 +11,8 @@
  * To exercise it you need a Chromium binary:
  *   npx playwright install chromium      # or point launchOptions.executablePath
  */
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import type { LaunchOptions } from 'playwright';
 import type { AxeResults, ScanResult, ScanRunner, TextRun, ResolvedBackground } from './types.js';
 import type { TextSize } from '../../contracts/index.js';
@@ -38,6 +40,32 @@ export interface PlaywrightRunnerOptions {
  * excluded — they are not WCAG 2.2 AA failures and would manufacture false blockers.
  */
 export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+
+/**
+ * Resolve the Chromium browser bundle shipped INSIDE the packaged `.app`.
+ *
+ * The product's core guarantee — the unconditional accessibility gate — depends on
+ * a real headless Chromium. In dev, `npx playwright install chromium` populates the
+ * global `~/.cache/ms-playwright` (or `%LOCALAPPDATA%`) cache and `chromium.launch()`
+ * finds it. A packaged DMG carries no such cache, so without this the gate would
+ * fail-closed on every turn. electron-builder bundles the browser under
+ * `<resources>/ms-playwright` (see `build.extraResources`); pointing
+ * `PLAYWRIGHT_BROWSERS_PATH` at that dir makes `chromium.launch()` resolve the
+ * bundled binary (playwright knows its own revision/nesting).
+ *
+ * Returns the bundled dir only when it actually exists. In dev/test (no
+ * `process.resourcesPath`, or the dir absent) it returns `undefined` so playwright
+ * falls back to its normal cache — dev behavior is unchanged. Pure + injectable so
+ * it is unit-tested without a filesystem or a packaged app.
+ */
+export function resolveBundledBrowsersPath(
+  resourcesPath: string | undefined = (process as { resourcesPath?: string }).resourcesPath,
+  exists: (p: string) => boolean = existsSync,
+): string | undefined {
+  if (!resourcesPath) return undefined;
+  const dir = path.join(resourcesPath, 'ms-playwright');
+  return exists(dir) ? dir : undefined;
+}
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -147,6 +175,16 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
 
   return {
     async run(html: string): Promise<ScanResult> {
+      // When packaged, point playwright at the bundled Chromium BEFORE it loads, so
+      // `chromium.launch()` resolves the in-`.app` browser instead of a dev-only
+      // global cache that a DMG does not carry. No-op in dev/test or when the caller
+      // pinned an explicit `executablePath`. (PLAYWRIGHT_BROWSERS_PATH already set by
+      // the environment wins.)
+      if (!launchOptions.executablePath && !process.env.PLAYWRIGHT_BROWSERS_PATH) {
+        const bundled = resolveBundledBrowsersPath();
+        if (bundled) process.env.PLAYWRIGHT_BROWSERS_PATH = bundled;
+      }
+
       const { chromium } = await import('playwright');
       const axeSource = (await import('axe-core')).default.source;
 

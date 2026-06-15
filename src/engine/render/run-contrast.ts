@@ -3,7 +3,8 @@
  * Handles every ResolvedBackground kind, reusing engine-core's WCAG math. No DOM,
  * no browser — fully unit-tested with hand-built TextRun fixtures.
  */
-import { checkContrast, parseColor, parseColorAlpha, compositeLayers, parseGradientStops } from '../contrast.js';
+import { checkContrast, parseColorAlpha, compositeLayers, parseGradientStops } from '../contrast.js';
+import type { Rgba } from '../contrast.js';
 import { WCAG } from '../../contracts/index.js';
 import type { AuditIssue, Severity, TextSize } from '../../contracts/index.js';
 import type { ResolvedBackground, TextRun } from './types.js';
@@ -50,30 +51,58 @@ function worstAgainst(fg: string, candidates: string[], size: TextSize): { ratio
   return { ratio: minRatio, bg: worstBg, passes };
 }
 
-/** Parsed stop colors + interpolated samples; null when no stop parses (e.g. conic). */
+/**
+ * Composite a straight-alpha gradient stop over the engine's opaque base (white,
+ * matching `compositeLayers`) → an opaque `rgb(...)`. A TRANSLUCENT stop is scored
+ * against what actually shows through, not the alpha-dropped opaque color.
+ */
+function flattenStop(r: number, g: number, b: number, a: number): string {
+  const mix = (c: number): number => Math.round(c * a + 255 * (1 - a));
+  return rgb(mix(r), mix(g), mix(b));
+}
+
+/**
+ * Parsed stop colors + interpolated samples, each composited over the opaque base;
+ * null when no stop parses (e.g. conic). Parsing now keeps ALPHA (`parseColorAlpha`)
+ * and flattens each stop/sample over white — mirroring the layers case — so a
+ * `linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0))` no longer collapses to opaque
+ * black and pass ~21:1 against light text (the closed fail-OPEN); the transparent
+ * end correctly flattens to white and is scored as such.
+ */
 function gradientCandidates(css: string, samples: number): string[] | null {
-  const parsed: { r: number; g: number; b: number }[] = [];
+  const parsed: Rgba[] = [];
   for (const token of parseGradientStops(css)) {
     try {
-      parsed.push(parseColor(token));
+      parsed.push(parseColorAlpha(token));
     } catch {
       // direction/angle/shape token or unsupported color — skip
     }
   }
   if (parsed.length === 0) return null;
-  if (parsed.length === 1) return [rgb(parsed[0]!.r, parsed[0]!.g, parsed[0]!.b)];
+  if (parsed.length === 1) {
+    const s = parsed[0]!;
+    return [flattenStop(s.r, s.g, s.b, s.a)];
+  }
   const out: string[] = [];
   for (let i = 0; i < parsed.length - 1; i += 1) {
     const a = parsed[i]!;
     const b = parsed[i + 1]!;
-    out.push(rgb(a.r, a.g, a.b));
+    out.push(flattenStop(a.r, a.g, a.b, a.a));
     for (let s = 1; s <= samples; s += 1) {
       const t = s / (samples + 1);
-      out.push(rgb(Math.round(a.r + (b.r - a.r) * t), Math.round(a.g + (b.g - a.g) * t), Math.round(a.b + (b.b - a.b) * t)));
+      // Interpolate straight-alpha r/g/b/a between adjacent stops, then composite.
+      out.push(
+        flattenStop(
+          a.r + (b.r - a.r) * t,
+          a.g + (b.g - a.g) * t,
+          a.b + (b.b - a.b) * t,
+          a.a + (b.a - a.a) * t,
+        ),
+      );
     }
   }
   const last = parsed[parsed.length - 1]!;
-  out.push(rgb(last.r, last.g, last.b));
+  out.push(flattenStop(last.r, last.g, last.b, last.a));
   return out;
 }
 

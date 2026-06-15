@@ -16,7 +16,7 @@
  * This module neither sanitizes nor trusts it.
  */
 import type { CanvasConfig, CanvasPage } from '../contracts/index.js';
-import { createCanvasGet, parseLinkNext } from './http.js';
+import { createCanvasGet, parseLinkNext, sameOrigin } from './http.js';
 import type { CanvasGet, FetchLike } from './http.js';
 
 export interface PageReaderOptions {
@@ -45,6 +45,7 @@ export function createPageReader(opts: PageReaderOptions = {}): PageReader {
   function clientFor(config: CanvasConfig): { get: CanvasGet; base: string } {
     const get = createCanvasGet({
       token: config.token,
+      baseUrl: config.baseUrl,
       ...(fetchImpl ? { fetch: fetchImpl } : {}),
     });
     const base = config.baseUrl.replace(/\/+$/, '');
@@ -87,6 +88,9 @@ export function createPageReader(opts: PageReaderOptions = {}): PageReader {
         }
 
         const next = parseLinkNext(res.headers.get('link'));
+        // A cross-origin `next` ends pagination (the token is never sent
+        // off-origin); the get() backstop would also refuse it.
+        if (next && !sameOrigin(next, endpoint)) break;
         pagesFollowed += 1;
         // Anti-runaway cap, consistent with `importCourse`.
         if (next && pagesFollowed >= MAX_PAGES) break;

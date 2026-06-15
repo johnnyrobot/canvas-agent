@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-push gate (SHIP-READINESS recommendation #8): nothing leaves the machine
+# without a clean typecheck + the full offline test suite. Wired via
+# `git config core.hooksPath githooks`, which the `prepare` npm script runs on
+# `npm install` (or run `npm run install:hooks` once). Bypass in an emergency with
+# `git push --no-verify`.
+set -e
+echo "[pre-push] verify: tsc --noEmit && npm test"
+npm run --silent verify
+echo "[pre-push] OK"

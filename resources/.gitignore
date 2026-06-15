@@ -1,0 +1,7 @@
+# Staged release payloads are large and machine-specific — never commit them.
+# The directory structure + .gitkeep + STAGING.md ARE committed so the layout is
+# self-describing and pre-release.mjs can validate it.
+ms-playwright/*
+sidecars/ollama/*
+sidecars/docling-serve/*
+!.gitkeep

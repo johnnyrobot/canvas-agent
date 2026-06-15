@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCanvasGet, parseLinkNext } from './http.js';
+import { createCanvasGet, parseLinkNext, sameOrigin } from './http.js';
 import { fakeCanvas } from './fake-canvas.js';
 
 // ── The read-only GET client ─────────────────────────────────────────────────
@@ -34,6 +34,36 @@ test('createCanvasGet refuses any non-GET method and never touches the network',
   }
   // The read-only guarantee: a refused method must NOT reach fetch.
   assert.equal(calls.length, 0);
+});
+
+// ── Same-origin token-exfiltration backstop ─────────────────────────────────
+
+test('sameOrigin compares scheme+host+port and is false for unparseable input', () => {
+  assert.equal(sameOrigin('https://x.test/a', 'https://x.test/b?q=1'), true);
+  assert.equal(sameOrigin('https://x.test', 'http://x.test'), false); // scheme
+  assert.equal(sameOrigin('https://x.test', 'https://evil.test'), false); // host
+  assert.equal(sameOrigin('https://x.test:8443', 'https://x.test'), false); // port
+  assert.equal(sameOrigin('not a url', 'https://x.test'), false);
+});
+
+test('a baseUrl-bound client refuses a cross-origin URL: no token attached, no request made', async () => {
+  const { fetch, calls } = fakeCanvas(() => ({ body: { ok: true } }));
+  const get = createCanvasGet({ token: 'sekret', fetch, baseUrl: 'https://school.instructure.com' });
+
+  await assert.rejects(
+    () => get('https://evil.test/api/v1/courses/1'),
+    /cross-origin|off-origin/i,
+  );
+  // The token must never reach the wire on a cross-origin attempt.
+  assert.equal(calls.length, 0, 'a cross-origin request must not reach fetch');
+});
+
+test('a baseUrl-bound client still allows same-origin requests (paths/queries differ)', async () => {
+  const { fetch, calls } = fakeCanvas(() => ({ body: { ok: true } }));
+  const get = createCanvasGet({ token: 't', fetch, baseUrl: 'https://school.instructure.com' });
+  const res = await get('https://school.instructure.com/api/v1/courses/1/pages?page=2');
+  assert.equal(res.ok, true);
+  assert.equal(calls[0]?.authorization, 'Bearer t');
 });
 
 // ── RFC-5988 Link-header parsing ─────────────────────────────────────────────

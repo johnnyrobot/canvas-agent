@@ -224,6 +224,62 @@ function lastFragment(turn: TurnResult): string | undefined {
   return frags.length > 0 ? frags[frags.length - 1] : undefined;
 }
 
+/**
+ * C11 enforcement (the half the arc left unwired): a final answer truncated at
+ * `num_predict` (`doneReason==='length'`) must never be surfaced as a finished
+ * draft. The frozen `TurnView` has no structured field for this, so we flag it
+ * honestly in the user-visible prose — the gate still re-audits any HTML fragment
+ * independently, so this only governs how the *prose* is presented.
+ */
+const TRUNCATION_NOTICE =
+  '⚠️ This response was cut off before it finished (the model reached its output limit), ' +
+  'so it may be incomplete — ask me to continue or regenerate it.';
+
+function withTruncationNotice(text: string, doneReason: string | undefined): string {
+  if (doneReason !== 'length') return text;
+  return text.trim().length > 0 ? `${TRUNCATION_NOTICE}\n\n${text}` : TRUNCATION_NOTICE;
+}
+
+/**
+ * The model is instructed never to self-certify — only the server-side gate may
+ * grant the "passed checks" badge. But `view.text` is ungated prose, so a
+ * prompt-injected or over-eager draft can still ASSERT achieved conformance
+ * ("this page is WCAG 2.2 AA certified", "fully accessible", "508 compliant").
+ * That over-claim could mislead a user into trusting the prose over the badge —
+ * exactly the overlay-style dishonesty the gate exists to prevent.
+ *
+ * We LABEL (never scrub) such claims: a prepended disclaimer makes clear the prose
+ * is the assistant's wording and only the per-fragment badge is authoritative. The
+ * author's text is preserved verbatim. This is purely a text-honesty guard — prose
+ * renders as `textContent`, never an `innerHTML` sink, so this is not sanitization.
+ */
+const CONFORMANCE_CLAIM = new RegExp(
+  [
+    'wcag\\s*2(?:\\.\\d)?\\s*(?:level\\s*)?a{1,3}\\b', // "WCAG 2.2 AA", "WCAG 2 A"
+    '\\bcertified\\b',
+    '\\bcompliant\\b',
+    '\\bconforms?\\s+to\\b',
+    '\\b(?:fully|100%)\\s+accessible\\b',
+    '\\bmeets?\\s+(?:all\\s+)?(?:the\\s+)?(?:wcag|accessibility)\\b',
+    '\\bpass(?:es|ed)?\\s+(?:all\\s+)?(?:the\\s+)?(?:accessibility|wcag|a11y)\\b',
+    '\\b(?:section\\s*508|ada)\\s+complian\\w*', // (also caught by 'compliant' above)
+  ].join('|'),
+  'i',
+);
+
+const CONFORMANCE_DISCLAIMER =
+  'ℹ️ Only the accessibility badge on each generated fragment is an authoritative WCAG check. ' +
+  'Any "certified" / "compliant" / "passes" wording below is the assistant\'s phrasing, not a verified result.';
+
+function withConformanceDisclaimer(text: string): string {
+  return CONFORMANCE_CLAIM.test(text) ? `${CONFORMANCE_DISCLAIMER}\n\n${text}` : text;
+}
+
+/** Honesty annotations applied to the ungated prose of a turn (truncation + conformance over-claim). */
+function annotateProse(text: string, doneReason: string | undefined): string {
+  return withTruncationNotice(withConformanceDisclaimer(text), doneReason);
+}
+
 /** Map a persisted `SessionMessage` onto an LLM `ChatMessage` for history replay. */
 function toChatMessage(m: SessionMessage): ChatMessage {
   return { role: m.role, content: m.content };
@@ -375,7 +431,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     }
 
     const view: TurnView = {
-      text: turn.text,
+      text: annotateProse(turn.text, turn.doneReason),
       fragments,
       toolsUsed: dedupe(turn.toolInvocations.map((i) => i.call.name)),
       iterations: turn.iterations,
@@ -396,6 +452,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     const toolNames: string[] = [];
     let iterations = 0;
     let finalText = '';
+    let finalDoneReason: string | undefined;
 
     // One repair turn: ask the model to correct `html` given its `issues`.
     const repairOnce = async (html: string, issues: AuditIssue[]): Promise<string | undefined> => {
@@ -405,6 +462,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       toolNames.push(...turn.toolInvocations.map((i) => i.call.name));
       iterations += turn.iterations;
       finalText = turn.text;
+      finalDoneReason = turn.doneReason;
       return lastFragment(turn);
     };
 
@@ -445,7 +503,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     onChunk?.({ type: 'fragment', fragment });
 
     const view: TurnView = {
-      text: finalText,
+      text: annotateProse(finalText, finalDoneReason),
       fragments: [fragment],
       toolsUsed: dedupe(toolNames),
       iterations,
@@ -473,24 +531,37 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       // Record local provenance of this read-only import (course → last-imported
       // summary). This writes ONLY to the on-device DB; Canvas is never mutated.
       // Re-importing the same course updates the row (UPSERT on the course_id PK).
-      const db = await database();
-      await db.run(
-        `INSERT INTO canvas_imports (course_id, name, imported_at, summary_json)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(course_id) DO UPDATE SET
-           name = excluded.name, imported_at = excluded.imported_at, summary_json = excluded.summary_json`,
-        [
-          result.courseId,
-          result.name,
-          result.importedAt,
-          JSON.stringify({
-            pages: result.pages,
-            assignments: result.assignments,
-            files: result.files,
-            warnings: result.warnings,
-          }),
-        ],
-      );
+      //
+      // BEST-EFFORT (robustness regression fix): the import has already completed
+      // successfully by the time we get here. A provenance-write failure (locked
+      // DB, disk full, migration error) must NOT throw away that completed import —
+      // IPC would turn the rejection into an error envelope and the user would lose
+      // a successful read-only crawl over a local bookkeeping hiccup. So the write
+      // is wrapped: on failure we drop the provenance row (recoverable via an
+      // idempotent re-import) and still return the import result.
+      try {
+        const db = await database();
+        await db.run(
+          `INSERT INTO canvas_imports (course_id, name, imported_at, summary_json)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(course_id) DO UPDATE SET
+             name = excluded.name, imported_at = excluded.imported_at, summary_json = excluded.summary_json`,
+          [
+            result.courseId,
+            result.name,
+            result.importedAt,
+            JSON.stringify({
+              pages: result.pages,
+              assignments: result.assignments,
+              files: result.files,
+              warnings: result.warnings,
+            }),
+          ],
+        );
+      } catch {
+        // Swallow: provenance is local bookkeeping, not the import itself. (No
+        // console logging in this layer by convention; the row is re-creatable.)
+      }
       return result;
     },
 
