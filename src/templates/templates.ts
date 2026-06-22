@@ -290,6 +290,7 @@ export const renderRubric: Renderer = (slots, theme) => {
 
   // Column labels = union of level labels, in order of first appearance.
   const columns: string[] = [];
+  let hasUnlabelledContent = false;
   const rows = criteria.map((criterion) => {
     const name = str(criterion.name) ?? '(unnamed criterion)';
     const levels: RubricLevel[] = recList(criterion.levels).map((level) => ({
@@ -298,7 +299,11 @@ export const renderRubric: Renderer = (slots, theme) => {
       descriptor: str(level.descriptor) ?? '',
     }));
     for (const level of levels) {
-      if (level.label !== '' && !columns.includes(level.label)) columns.push(level.label);
+      if (level.label !== '') {
+        if (!columns.includes(level.label)) columns.push(level.label);
+      } else if (level.descriptor !== '' || level.points !== undefined) {
+        hasUnlabelledContent = true;
+      }
     }
     return { name, levels };
   });
@@ -310,6 +315,11 @@ export const renderRubric: Renderer = (slots, theme) => {
       const descriptor = row.levels.map((l) => l.descriptor).filter((d) => d !== '').join('; ');
       row.levels = [{ label: 'Details', points: undefined, descriptor }];
     }
+  } else if (hasUnlabelledContent && !columns.includes('Details')) {
+    // Mixed case: some criteria have unlabelled levels alongside labelled ones.
+    // Without a home column their descriptors would be silently dropped, so add
+    // a trailing "Details" column to hold them (see cell mapping below).
+    columns.push('Details');
   }
 
   const headerCells =
@@ -322,9 +332,24 @@ export const renderRubric: Renderer = (slots, theme) => {
       const cells = columns
         .map((col) => {
           const level = row.levels.find((l) => l.label === col);
-          if (!level) return el('td', {}, '');
-          const pts = level.points !== undefined ? ` (${level.points} pts)` : '';
-          return el('td', {}, txt(level.descriptor + pts));
+          if (level) {
+            const pts = level.points !== undefined ? ` (${level.points} pts)` : '';
+            return el('td', {}, txt(level.descriptor + pts));
+          }
+          // "Details" column folds in this row's unlabelled levels so their
+          // content is never dropped in the mixed labelled/unlabelled case.
+          if (col === 'Details') {
+            const merged = row.levels
+              .filter((l) => l.label === '' && (l.descriptor !== '' || l.points !== undefined))
+              .map((l) => {
+                const pts = l.points !== undefined ? ` (${l.points} pts)` : '';
+                return (l.descriptor + pts).trim();
+              })
+              .filter((s) => s !== '')
+              .join('; ');
+            return el('td', {}, merged ? txt(merged) : '');
+          }
+          return el('td', {}, '');
         })
         .join('');
       return el('tr', {}, el('th', { scope: 'row' }, txt(row.name)) + cells);

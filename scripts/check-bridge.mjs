@@ -3,7 +3,7 @@
 import { _electron as electron } from 'playwright';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const REPO = '/Users/laccd/code/canvas-agent';
+const REPO = process.env.REPO_PATH ?? process.cwd();
 const app = await electron.launch({ args: ['.'], cwd: REPO, env: { ...process.env } });
 const mainLogs = [];
 app.process().stderr.on('data', (d) => mainLogs.push('STDERR ' + d.toString()));

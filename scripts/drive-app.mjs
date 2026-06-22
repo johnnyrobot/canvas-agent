@@ -5,7 +5,7 @@
 import { _electron as electron } from 'playwright';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const REPO = '/Users/laccd/code/canvas-agent';
+const REPO = process.env.REPO_PATH ?? process.cwd();
 const PROMPT = process.env.DRIVE_PROMPT
   ?? 'Create an accessible Canvas page-content fragment titled "Photosynthesis" with a short intro section and a section on the light reactions.';
 const OUT = process.env.DRIVE_OUT ?? '/tmp/canvas-agent-app';

@@ -1,6 +1,6 @@
 /**
  * HTTP client for docling-serve's `/v1/convert/source` endpoint.
- * Dependency-free (global `fetch`, Node 20+).
+ * Dependency-free (global `fetch`; `AbortSignal.any()` requires Node 20.3.0+).
  */
 import type { ConvertOptions, ConvertedDocument, FileSource, IngestConfig } from './types.js';
 import { buildFileRequest, buildUrlRequest, normalizeResponse, type ConvertRequest } from './payload.js';

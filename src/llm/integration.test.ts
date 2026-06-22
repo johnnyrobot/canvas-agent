@@ -80,5 +80,5 @@ test('chatJSON() returns a parsed object', { skip }, async () => {
     messages: [{ role: 'user', content: 'Return {"ok": true} as JSON, nothing else.' }],
     maxTokens: 512,
   });
-  assert.equal(typeof obj, 'object');
+  assert.ok(obj !== null && typeof obj === 'object');
 });
