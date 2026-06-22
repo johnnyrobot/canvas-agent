@@ -59,7 +59,7 @@ for (const key of ['entitlements', 'entitlementsInherit']) {
   const rel = build.mac?.[key];
   if (!rel) { check(false, 'required', `mac.${key} configured`, '(missing)'); continue; }
   const p = path.join(ROOT, rel);
-  check(existsSync(p) && statSync(p).size > 0, 'required', `mac.${key} file exists & non-empty`, rel);
+  check(existsSync(p) && statSync(p).isFile() && statSync(p).size > 0, 'required', `mac.${key} file exists & non-empty`, rel);
 }
 
 // 4. extraResources: the path must exist (structure) and be populated (staged).
@@ -78,9 +78,13 @@ for (const res of build.extraResources ?? []) {
   const sidecar = /(?:^|[\\/])sidecars[\\/]([^\\/]+)$/.exec(res.from);
   if (sidecar) {
     const name = sidecar[1];
-    const leafOk = existsSync(path.join(from, name));
-    check(leafOk, 'staged', `sidecar launcher present: sidecars/${name}/${name}`,
-      leafOk ? 'present' : 'MISSING — resolveSidecarCommand spawns this exact path; re-stage so the launcher lands here');
+    const leaf = path.join(from, name);
+    // A directory or non-executable at the leaf would pass a bare existsSync but
+    // still ENOENT/EACCES at spawn time, so assert it is an executable regular file.
+    const leafOk =
+      existsSync(leaf) && statSync(leaf).isFile() && (statSync(leaf).mode & 0o111) !== 0;
+    check(leafOk, 'staged', `sidecar launcher present & executable: sidecars/${name}/${name}`,
+      leafOk ? 'present' : 'MISSING/not-executable — resolveSidecarCommand spawns this exact path; re-stage so the launcher lands here');
   }
 }
 

@@ -3,7 +3,7 @@
 import { _electron as electron } from 'playwright';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const REPO = '/Users/laccd/code/canvas-agent';
+const REPO = process.env.REPO_PATH ?? process.cwd();
 const OUT = process.env.DRIVE_OUT ?? '/tmp/cda-remediate';
 const BAD_HTML =
   '<h2>Lab Safety</h2>' +
