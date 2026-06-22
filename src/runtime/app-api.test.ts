@@ -194,7 +194,206 @@ test('health() reports per-sidecar reachability and never throws', async () => {
     ingest: { convertPath: async () => ({ status: 'failure', processingTimeMs: 0 }), isHealthy: async () => { throw new Error('down'); } },
   });
   const health = await view.health();
-  assert.deepEqual(health, { llm: true, ingest: false });
+  assert.equal(health.llm, true);
+  assert.equal(health.ingest, false);
+  assert.equal(health.model?.available, true);
+  assert.match(health.model?.installCommand ?? '', /^ollama pull /);
+});
+
+test('health() reports injected model availability when supplied', async () => {
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({ available: false }),
+    },
+  });
+  const health = await view.health();
+  assert.equal(health.model?.available, false);
+  assert.match(health.model?.installCommand ?? '', /^ollama pull /);
+});
+
+test('screenshot attachments are summarized before the model sees the turn', async () => {
+  const runner = new ScriptedRunner([text('answer')]);
+  const seenImages: string[] = [];
+  const app = api(runner, {
+    llm: {
+      describeImage: async ({ image }) => {
+        seenImages.push(image);
+        return text('Canvas Modules page with an unpublished item visible.');
+      },
+      isHealthy: async () => true,
+    },
+  });
+
+  await app.runTurn({
+    user: 'What am I looking at?',
+    mode: 'guidance',
+    attachments: [
+      {
+        id: 'shot-1',
+        kind: 'screenshot',
+        mime: 'image/png',
+        dataUrl: 'data:image/png;base64,SECRETBASE64',
+        label: 'Entire Screen',
+        capturedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+  });
+
+  assert.deepEqual(seenImages, ['data:image/png;base64,SECRETBASE64']);
+  const user = runner.messagesSeen[0]?.find((m) => m.role === 'user')?.content;
+  assert.equal(typeof user, 'string');
+  assert.ok((user as string).includes('Canvas Modules page with an unpublished item visible.'));
+  assert.ok(!(user as string).includes('SECRETBASE64'), 'raw screenshot data must not reach the chat prompt');
+});
+
+test('screenshot summaries, not raw pixels, are persisted in sessions', async () => {
+  const db = await freshDb();
+  const runner = new ScriptedRunner([text('answer')]);
+  const app = api(runner, {
+    db,
+    llm: {
+      describeImage: async () => text('Canvas settings page with the Navigation tab open.'),
+      isHealthy: async () => true,
+    },
+  });
+  const session = await app.createSession({ title: 'screenshots', mode: 'guidance' });
+
+  await app.runTurn({
+    user: 'How does this screen work?',
+    sessionId: session.id,
+    mode: 'guidance',
+    attachments: [
+      {
+        id: 'shot-1',
+        kind: 'screenshot',
+        mime: 'image/png',
+        dataUrl: 'data:image/png;base64,RAWPIXELS',
+        label: 'Canvas window',
+        capturedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+  });
+
+  const loaded = await app.loadSession(session.id);
+  const user = loaded?.messages.find((m) => m.role === 'user')?.content ?? '';
+  assert.ok(user.includes('Canvas settings page with the Navigation tab open.'));
+  assert.ok(!user.includes('RAWPIXELS'), 'stored user message must not contain raw screenshot data');
+});
+
+test('a screenshot description failure blocks the turn with a clear error', async () => {
+  const runner = new ScriptedRunner([]);
+  const app = api(runner, {
+    llm: {
+      describeImage: async () => {
+        throw new Error('vision offline');
+      },
+      isHealthy: async () => false,
+    },
+  });
+
+  await assert.rejects(
+    () => app.runTurn({
+      user: 'What is this?',
+      attachments: [
+        {
+          id: 'shot-1',
+          kind: 'screenshot',
+          mime: 'image/png',
+          dataUrl: 'data:image/png;base64,abc',
+          label: 'Entire Screen',
+          capturedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    }),
+    /Could not describe screenshot "Entire Screen": vision offline/,
+  );
+  assert.equal(runner.messagesSeen.length, 0, 'model text turn must not run after screenshot failure');
+});
+
+test('convertDocument sends decoded base64 to Docling and returns HTML', async () => {
+  const runner = new ScriptedRunner([]);
+  let seen: { filename: string; base64: string } | undefined;
+  const app = api(runner, {
+    ingest: {
+      convertPath: async () => ({ status: 'success', processingTimeMs: 0 }),
+      isHealthy: async () => true,
+      convert: async (file) => {
+        seen = file;
+        return { status: 'success', processingTimeMs: 7, html: '<h2>Syllabus</h2><p>Hello</p>' };
+      },
+    },
+  });
+
+  const result = await app.convertDocument({
+    filename: 'syllabus.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    sizeBytes: 3,
+    dataUrl: 'data:application/octet-stream;base64,QUJD',
+  });
+
+  assert.deepEqual(seen, { filename: 'syllabus.docx', base64: 'QUJD' });
+  assert.equal(result.html, '<h2>Syllabus</h2><p>Hello</p>');
+  assert.equal(result.processingTimeMs, 7);
+});
+
+test('convertDocument falls back to escaped HTML when Docling returns text only', async () => {
+  const runner = new ScriptedRunner([]);
+  const app = api(runner, {
+    ingest: {
+      convertPath: async () => ({ status: 'success', processingTimeMs: 0 }),
+      isHealthy: async () => true,
+      convert: async () => ({ status: 'success', processingTimeMs: 1, text: 'Week <1>\n\nRead chapter 1' }),
+    },
+  });
+
+  const result = await app.convertDocument({
+    filename: 'notes.txt',
+    mime: 'text/plain',
+    sizeBytes: 8,
+    dataUrl: 'data:text/plain;base64,V2Vlaw==',
+  });
+
+  assert.match(result.html ?? '', /<h2>notes\.txt<\/h2>/);
+  assert.ok(result.html?.includes('Week &lt;1&gt;'));
+  assert.ok(!result.html?.includes('Week <1>'));
+});
+
+test('convertDocument rejects oversized or non-data-url uploads before conversion', async () => {
+  const runner = new ScriptedRunner([]);
+  let called = false;
+  const app = api(runner, {
+    ingest: {
+      convertPath: async () => ({ status: 'success', processingTimeMs: 0 }),
+      isHealthy: async () => true,
+      convert: async () => {
+        called = true;
+        return { status: 'success', processingTimeMs: 1 };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => app.convertDocument({
+      filename: 'huge.pdf',
+      mime: 'application/pdf',
+      sizeBytes: 26 * 1024 * 1024,
+      dataUrl: 'data:application/pdf;base64,QUJD',
+    }),
+    /under 25 MB/,
+  );
+  await assert.rejects(
+    () => app.convertDocument({
+      filename: 'bad.pdf',
+      mime: 'application/pdf',
+      sizeBytes: 1,
+      dataUrl: 'not-a-data-url',
+    }),
+    /base64 data URL/,
+  );
+  assert.equal(called, false);
 });
 
 test('importCanvas delegates to the injected importer', async () => {

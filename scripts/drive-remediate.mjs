@@ -12,36 +12,35 @@ const BAD_HTML =
 
 const app = await electron.launch({ args: ['.'], cwd: REPO, env: { ...process.env } });
 const win = await app.firstWindow();
-await win.waitForSelector('#prompt', { timeout: 30_000 });
+await win.waitForSelector('[data-testid="home-remediate"]', { timeout: 30_000 });
 await sleep(1500);
-console.log('HEALTH:', ((await win.textContent('#health').catch(() => '')) ?? '').trim());
+console.log('HEALTH:', ((await win.textContent('[data-testid="health"]').catch(() => '')) ?? '').trim());
 
-// Pick Remediate mode (mode buttons are rendered into #mode-bar).
-await win.click('#mode-bar >> text=Remediate');
+// Pick the guided Remediate flow and paste source HTML.
+await win.click('[data-testid="home-remediate"]');
 await sleep(500);
-await win.waitForSelector('#remediate-source', { state: 'visible', timeout: 5000 });
-await win.fill('#remediate-source', BAD_HTML);
-await win.fill('#prompt', 'Repair the accessibility issues in this page.');
+await win.click('[data-testid="remediate-source-paste"]');
+await win.waitForSelector('[data-testid="remediate-source-html"]', { state: 'visible', timeout: 5000 });
+await win.fill('[data-testid="remediate-source-html"]', BAD_HTML);
 await win.screenshot({ path: `${OUT}-1-input.png` });
-await win.click('#submit');
+await win.click('[data-testid="remediate-check-fix"]');
 console.log('SUBMITTED remediate with bad HTML (missing alt + low contrast)');
 
 const deadline = Date.now() + 300_000;
 let done = false;
 while (Date.now() < deadline) {
-  if ((await win.$('.fragment')) || (await win.$('.turn--error'))) { done = true; break; }
+  if ((await win.$('[data-testid="result-card"]')) || (await win.$('[data-testid="error-banner"]'))) { done = true; break; }
   await sleep(2000);
 }
 await sleep(1000);
 await win.screenshot({ path: `${OUT}-2-result.png`, fullPage: true });
 
-const transcript = ((await win.textContent('#transcript').catch(() => '')) ?? '').replace(/\s+/g, ' ');
-const hasBeforeAfter = await win.$$eval('.remediate__label, .remediate__before, .remediate__diffs', (els) => els.length);
-const badgePassed = await win.$('.badge--passed');
-const badgeWithheld = await win.$('.badge--withheld');
+const appText = ((await win.textContent('#app').catch(() => '')) ?? '').replace(/\s+/g, ' ');
+const hasBeforeAfter = await win.$$eval('[data-testid="remediate-before-html"], [data-testid="remediate-after-html"], [data-testid="remediate-diff-list"]', (els) => els.length);
+const badgeText = ((await win.textContent('[data-testid="result-badge"]').catch(() => '')) ?? '').trim();
 console.log('RESULT_FOUND:', done);
 console.log('REMEDIATE_DIFF_ELEMENTS:', hasBeforeAfter);
-console.log('BADGE_PASSED:', !!badgePassed, '| BADGE_WITHHELD:', !!badgeWithheld);
-console.log('TRANSCRIPT_TEXT:', transcript.slice(0, 700));
+console.log('BADGE:', badgeText);
+console.log('APP_TEXT:', appText.slice(0, 700));
 await app.close();
 console.log('SCREENSHOTS:', `${OUT}-1-input.png`, `${OUT}-2-result.png`);

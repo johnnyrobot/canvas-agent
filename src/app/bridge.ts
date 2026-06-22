@@ -34,6 +34,10 @@ import {
   DELETE_BRAND_KIT,
   FETCH_CANVAS_PAGE,
   LIST_CANVAS_PAGES,
+  CONVERT_DOCUMENT,
+  SCREENSHOT_PERMISSION_STATUS,
+  LIST_SCREENSHOT_SOURCES,
+  CAPTURE_SCREENSHOT,
   CHUNK,
 } from './channels.js';
 
@@ -119,6 +123,22 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
     },
     async listCanvasPages(baseUrl, courseId) {
       return unwrap(await invoke(LIST_CANVAS_PAGES, baseUrl, courseId));
+    },
+
+    // ── Local document conversion ───────────────────────────────────────────
+    async convertDocument(document) {
+      return unwrap(await invoke(CONVERT_DOCUMENT, document));
+    },
+
+    // ── Screenshot capture ───────────────────────────────────────────────────
+    async screenshotPermissionStatus() {
+      return unwrap(await invoke(SCREENSHOT_PERMISSION_STATUS));
+    },
+    async listScreenshotSources() {
+      return unwrap(await invoke(LIST_SCREENSHOT_SOURCES));
+    },
+    async captureScreenshot(sourceId) {
+      return unwrap(await invoke(CAPTURE_SCREENSHOT, sourceId));
     },
   };
 }

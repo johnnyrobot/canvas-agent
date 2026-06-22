@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import type { AppApi, TurnChunk } from '../contracts/index.js';
 import { createStubApi } from './stub-api.js';
 
-test('createStubApi returns an object with the three AppApi methods', () => {
+test('createStubApi returns an object with the core AppApi methods', () => {
   const api: AppApi = createStubApi();
   assert.equal(typeof api.runTurn, 'function');
   assert.equal(typeof api.importCanvas, 'function');
   assert.equal(typeof api.health, 'function');
+  assert.equal(typeof api.convertDocument, 'function');
+  assert.equal(typeof api.captureScreenshot, 'function');
 });
 
 test('runTurn returns a sane TurnView referencing the prompt', async () => {
@@ -64,7 +66,34 @@ test('importCanvas echoes the courseId and returns numeric counts', async () => 
 
 test('health reports both sidecars up', async () => {
   const api = createStubApi();
-  assert.deepEqual(await api.health(), { llm: true, ingest: true });
+  const health = await api.health();
+  assert.equal(health.llm, true);
+  assert.equal(health.ingest, true);
+  assert.equal(health.model?.available, true);
+});
+
+test('screenshot stub returns a local screenshot attachment', async () => {
+  const api = createStubApi();
+  assert.equal(await api.screenshotPermissionStatus(), 'granted');
+  const sources = await api.listScreenshotSources();
+  assert.ok(sources.length > 0);
+  const shot = await api.captureScreenshot(sources[0]!.id);
+  assert.equal(shot.kind, 'screenshot');
+  assert.equal(shot.mime, 'image/png');
+  assert.match(shot.dataUrl, /^data:image\/png;base64,/);
+});
+
+test('document stub returns converted HTML for remediation', async () => {
+  const api = createStubApi();
+  const result = await api.convertDocument({
+    filename: 'syllabus.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    sizeBytes: 12,
+    dataUrl: 'data:application/octet-stream;base64,QUJD',
+  });
+  assert.equal(result.filename, 'syllabus.docx');
+  assert.equal(result.status, 'success');
+  assert.match(result.html ?? '', /<h2>syllabus\.docx<\/h2>/);
 });
 
 // ── Streaming ────────────────────────────────────────────────────────────────

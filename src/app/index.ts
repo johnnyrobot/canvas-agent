@@ -13,7 +13,16 @@
  *     before the integration track lands; the lead swaps it for `createAppApi`.
  *   • `registerIpc(ipcMain, api)` — the typed IPC boundary onto `AppApi`.
  */
-export { CHANNELS, RUN_TURN, IMPORT_CANVAS, HEALTH } from './channels.js';
+export {
+  CHANNELS,
+  RUN_TURN,
+  IMPORT_CANVAS,
+  HEALTH,
+  CONVERT_DOCUMENT,
+  SCREENSHOT_PERMISSION_STATUS,
+  LIST_SCREENSHOT_SOURCES,
+  CAPTURE_SCREENSHOT,
+} from './channels.js';
 export type { ChannelName } from './channels.js';
 
 export { registerIpc } from './ipc.js';

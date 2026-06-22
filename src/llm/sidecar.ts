@@ -71,6 +71,22 @@ export class OllamaSidecar {
     return this.process.isHealthy();
   }
 
+  /** Probe whether the configured text model tag is already present locally. */
+  async modelStatus(): Promise<{ tag: string; available: boolean }> {
+    const tag = this.config.models.text;
+    try {
+      const res = await fetch(this.config.nativeUrl + '/api/tags', {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!res.ok) return { tag, available: false };
+      const data = (await res.json()) as { models?: Array<{ name?: string; model?: string }> };
+      const available = (data.models ?? []).some((m) => m.name === tag || m.model === tag);
+      return { tag, available };
+    } catch {
+      return { tag, available: false };
+    }
+  }
+
   /** Non-streaming chat, serialized against other heavy calls. */
   chat(opts: ChatOptions): Promise<ChatResult> {
     return this.mutex.run(() => this.client.chat(opts));

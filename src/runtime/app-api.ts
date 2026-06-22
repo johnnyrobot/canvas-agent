@@ -22,6 +22,7 @@ import { resolveTheme as defaultResolveTheme } from '../theme/index.js';
 import { createOllamaSidecar } from '../llm/index.js';
 import type { ChatMessage, OllamaSidecar } from '../llm/index.js';
 import { createDoclingSidecar } from '../ingest/index.js';
+import type { ConvertedDocument, FileSource } from '../ingest/index.js';
 import {
   Orchestrator,
   ToolRegistry,
@@ -61,6 +62,7 @@ import type {
   CanvasConfig,
   CanvasImporter,
   Database,
+  DocumentConversionResult,
   SecretStore,
   GateDeps,
   GateResult,
@@ -75,16 +77,19 @@ import type {
   TurnFragment,
   TurnRequest,
   TurnView,
+  UploadedDocument,
 } from '../contracts/index.js';
 
 /** LLM capability the runtime needs: vision drafting + a health probe. */
 export interface LlmRuntime extends LlmDescriber {
   isHealthy(): Promise<boolean>;
+  modelStatus?(): Promise<{ available: boolean }>;
 }
 
 /** Docling capability the runtime needs: conversion + a health probe. */
 export interface IngestRuntime extends DocConverter {
   isHealthy(): Promise<boolean>;
+  convert?(file: FileSource): Promise<ConvertedDocument>;
 }
 
 export interface AppApiOptions {
@@ -235,6 +240,14 @@ const TRUNCATION_NOTICE =
   '⚠️ This response was cut off before it finished (the model reached its output limit), ' +
   'so it may be incomplete — ask me to continue or regenerate it.';
 
+const SCREENSHOT_PROMPT = [
+  'You are helping answer a Canvas LMS question from a screenshot.',
+  'Describe the relevant UI state, visible Canvas controls, error messages, selected content,',
+  'and accessibility/course-design clues. Do not invent hidden information. Keep it concise.',
+].join(' ');
+
+const MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
+
 function withTruncationNotice(text: string, doneReason: string | undefined): string {
   if (doneReason !== 'length') return text;
   return text.trim().length > 0 ? `${TRUNCATION_NOTICE}\n\n${text}` : TRUNCATION_NOTICE;
@@ -280,6 +293,48 @@ function annotateProse(text: string, doneReason: string | undefined): string {
   return withTruncationNotice(withConformanceDisclaimer(text), doneReason);
 }
 
+function escapeHtmlText(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function fallbackHtmlFromText(filename: string, text: string): string {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 80);
+  const body = paragraphs.length > 0
+    ? paragraphs.map((part) => `<p>${escapeHtmlText(part).replace(/\n/g, '<br>')}</p>`).join('\n')
+    : '<p>No readable document text was returned.</p>';
+  return `<h2>${escapeHtmlText(filename)}</h2>\n${body}`;
+}
+
+function base64FromDataUrl(dataUrl: string): string {
+  const match = /^data:[^,]*;base64,(?<base64>[A-Za-z0-9+/=\s]+)$/u.exec(dataUrl);
+  const base64 = match?.groups?.base64?.replace(/\s/g, '');
+  if (!base64) throw new Error('Document upload must be a base64 data URL.');
+  return base64;
+}
+
+function documentConversionResult(document: UploadedDocument, converted: ConvertedDocument): DocumentConversionResult {
+  const html = converted.html
+    ?? (converted.markdown ? fallbackHtmlFromText(document.filename, converted.markdown) : undefined)
+    ?? (converted.text ? fallbackHtmlFromText(document.filename, converted.text) : undefined);
+  const out: DocumentConversionResult = {
+    filename: document.filename,
+    status: converted.status,
+    processingTimeMs: converted.processingTimeMs,
+  };
+  if (html) out.html = html;
+  if (converted.markdown) out.markdown = converted.markdown;
+  if (converted.text) out.text = converted.text;
+  return out;
+}
+
 /** Map a persisted `SessionMessage` onto an LLM `ChatMessage` for history replay. */
 function toChatMessage(m: SessionMessage): ChatMessage {
   return { role: m.role, content: m.content };
@@ -306,6 +361,33 @@ function remediateUserPrompt(html: string, issues: AuditIssue[]): string {
   ].join('\n');
 }
 
+async function userWithScreenshotContext(req: TurnRequest, llm: LlmRuntime): Promise<string> {
+  const screenshots = (req.attachments ?? []).filter((a) => a.kind === 'screenshot');
+  if (screenshots.length === 0) return req.user;
+
+  const summaries: string[] = [];
+  for (const [idx, screenshot] of screenshots.entries()) {
+    try {
+      const described = await llm.describeImage({
+        image: screenshot.dataUrl,
+        prompt: SCREENSHOT_PROMPT,
+      });
+      summaries.push(
+        `Screenshot ${idx + 1} (${screenshot.label}, captured ${screenshot.capturedAt}): ${described.content.trim()}`,
+      );
+    } catch (err) {
+      throw new Error(`Could not describe screenshot "${screenshot.label}": ${(err as Error).message}`);
+    }
+  }
+
+  return [
+    req.user,
+    '',
+    'Screenshot context (summarized locally; raw pixels were not stored in the session):',
+    ...summaries.map((summary) => `- ${summary}`),
+  ].join('\n');
+}
+
 /** Build the frozen `AppApi` from real (or injected) parts. */
 export function createAppApi(opts: AppApiOptions = {}): AppApi {
   // A single real Ollama sidecar backs both the chat runner and vision/health
@@ -326,6 +408,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const fetchPageBodyFn: PageReader['fetchPageBody'] = opts.fetchPageBody ?? defaultFetchPageBody;
   const listPagesFn: PageReader['listPages'] = opts.listPages ?? defaultListPages;
   const secrets: SecretStore = opts.secrets ?? createKeychainSecretStore();
+  const configuredModel = sidecar().config.models.text;
 
   // Resolve the saved Canvas token for `baseUrl` from the OS Keychain and build the
   // full config the read-only canvas readers expect. The token never reaches (or
@@ -516,9 +599,12 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
 
   return {
     async runTurn(req: TurnRequest, onChunk?: OnTurnChunk): Promise<TurnView> {
-      const { mode } = routeIntent(req.user, req.mode);
-      if (mode === 'remediate' && req.remediateInput) return runRemediate(req, onChunk);
-      return runStandardTurn(req, mode, onChunk);
+      const user = await userWithScreenshotContext(req, llm);
+      const prepared: TurnRequest = { ...req, user };
+      delete prepared.attachments;
+      const { mode } = routeIntent(user, req.mode);
+      if (mode === 'remediate' && prepared.remediateInput) return runRemediate(prepared, onChunk);
+      return runStandardTurn(prepared, mode, onChunk);
     },
 
     async saveCanvasAuth(auth) {
@@ -565,10 +651,28 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       return result;
     },
 
+    async convertDocument(document) {
+      const filename = document.filename.trim();
+      if (!filename) throw new Error('Choose a document with a filename first.');
+      if (document.sizeBytes > MAX_DOCUMENT_UPLOAD_BYTES) {
+        throw new Error('Choose a document under 25 MB for this first pass.');
+      }
+      if (typeof ingest.convert !== 'function') {
+        throw new Error('Document conversion is not available in this runtime.');
+      }
+      const converted = await ingest.convert({
+        filename,
+        base64: base64FromDataUrl(document.dataUrl),
+      });
+      return documentConversionResult({ ...document, filename }, converted);
+    },
+
     async health(): Promise<RuntimeHealth> {
+      const model = await modelHealth(llm, configuredModel);
       return {
         llm: await reachable(() => llm.isHealthy()),
         ingest: await reachable(() => ingest.isHealthy()),
+        model,
       };
     },
 
@@ -607,5 +711,28 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     async listCanvasPages(baseUrl, courseId) {
       return listPagesFn(await canvasConfigFor(baseUrl), courseId);
     },
+
+    async screenshotPermissionStatus() {
+      return 'unknown';
+    },
+    async listScreenshotSources() {
+      throw new Error('Screenshot capture is only available in the Electron app shell.');
+    },
+    async captureScreenshot() {
+      throw new Error('Screenshot capture is only available in the Electron app shell.');
+    },
   };
+}
+
+async function modelHealth(llm: LlmRuntime, tag: string): Promise<NonNullable<RuntimeHealth['model']>> {
+  const installCommand = `ollama pull ${tag}`;
+  if (typeof (llm as { modelStatus?: unknown }).modelStatus === 'function') {
+    try {
+      const status = await (llm as { modelStatus(): Promise<{ available: boolean }> }).modelStatus();
+      return { tag, available: status.available, installCommand };
+    } catch {
+      return { tag, available: false, installCommand };
+    }
+  }
+  return { tag, available: await reachable(() => llm.isHealthy()), installCommand };
 }

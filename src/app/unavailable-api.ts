@@ -67,5 +67,17 @@ export function createUnavailableApi(reason: string): AppApi {
     async listCanvasPages() {
       return fail();
     },
+    async convertDocument() {
+      return fail();
+    },
+    async screenshotPermissionStatus() {
+      return 'unknown';
+    },
+    async listScreenshotSources() {
+      return fail();
+    },
+    async captureScreenshot() {
+      return fail();
+    },
   };
 }

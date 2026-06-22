@@ -307,6 +307,55 @@ export interface CanvasPage {
   updatedAt?: string;
 }
 
+/** A user-picked document sent once to the local Docling sidecar for conversion. */
+export interface UploadedDocument {
+  filename: string;
+  mime: string;
+  sizeBytes: number;
+  /** Browser data URL; runtime strips this to raw base64 and does not persist it. */
+  dataUrl: string;
+}
+
+/** Normalized document conversion result for the renderer/remediation flow. */
+export interface DocumentConversionResult {
+  filename: string;
+  status: string;
+  processingTimeMs: number;
+  /** Prefer this when present; it goes through the same remediation gate. */
+  html?: string;
+  /** Markdown/text fallbacks when Docling cannot return HTML. */
+  markdown?: string;
+  text?: string;
+}
+
+/** A one-time, user-initiated screenshot attachment for a turn. */
+export interface ScreenshotAttachment {
+  id: string;
+  kind: 'screenshot';
+  mime: 'image/png';
+  /** PNG data URL captured locally; runtime summarizes it and does not persist it. */
+  dataUrl: string;
+  /** User-facing screen/window label. */
+  label: string;
+  capturedAt: string;
+}
+
+/** A screen/window source the Electron shell can capture. */
+export interface ScreenshotSource {
+  id: string;
+  kind: 'screen' | 'window';
+  label: string;
+  thumbnailDataUrl: string;
+}
+
+/** macOS screen-recording permission state, mirrored from Electron. */
+export type ScreenshotPermissionStatus =
+  | 'not-determined'
+  | 'granted'
+  | 'denied'
+  | 'restricted'
+  | 'unknown';
+
 /** A streamed turn event. Bridged to the renderer over IPC (design §4.4). */
 export type TurnChunk =
   | { type: 'text'; delta: string }
@@ -327,6 +376,8 @@ export interface TurnRequest {
   mode?: ProductMode;
   /** Remediate input; honored only when the resolved mode is 'remediate'. */
   remediateInput?: RemediateInput;
+  /** User-supplied, local-only screenshots that should inform this turn. */
+  attachments?: ScreenshotAttachment[];
 }
 
 /** A gated, safe-to-render HTML fragment produced during a turn. */
@@ -350,9 +401,17 @@ export interface TurnView {
 }
 
 /** Health of the local sidecars (for a UI status indicator). */
+export interface ModelHealth {
+  tag: string;
+  available: boolean;
+  installCommand: string;
+}
+
 export interface RuntimeHealth {
   llm: boolean;
   ingest: boolean;
+  /** Local Ollama model tag selected for text turns, plus availability. */
+  model?: ModelHealth;
 }
 
 /** The single surface the Electron main process exposes to the renderer via IPC. */
@@ -386,4 +445,12 @@ export interface AppApi {
   // from the Keychain (see `saveCanvasAuth`), so no secret transits the renderer.
   fetchCanvasPage(baseUrl: string, courseId: string, pageId: string): Promise<string>;
   listCanvasPages(baseUrl: string, courseId: string): Promise<CanvasPage[]>;
+
+  // ── Local document conversion (Docling sidecar; raw bytes are transient) ──
+  convertDocument(document: UploadedDocument): Promise<DocumentConversionResult>;
+
+  // ── One-time screenshot capture (Electron shell; raw pixels stay local/transient) ──
+  screenshotPermissionStatus(): Promise<ScreenshotPermissionStatus>;
+  listScreenshotSources(): Promise<ScreenshotSource[]>;
+  captureScreenshot(sourceId: string): Promise<ScreenshotAttachment>;
 }

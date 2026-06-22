@@ -202,7 +202,11 @@ export function createStubApi(): AppApi {
     },
 
     async health(): Promise<RuntimeHealth> {
-      return { llm: true, ingest: true };
+      return {
+        llm: true,
+        ingest: true,
+        model: { tag: 'gemma4:31b', available: true, installCommand: 'ollama pull gemma4:31b' },
+      };
     },
 
     // ── Sessions ───────────────────────────────────────────────────────────────
@@ -283,6 +287,44 @@ export function createStubApi(): AppApi {
 
     async listCanvasPages(_baseUrl, _courseId): Promise<CanvasPage[]> {
       return CANNED_CANVAS_PAGES.map((p) => ({ ...p }));
+    },
+
+    async convertDocument(document) {
+      return {
+        filename: document.filename,
+        status: 'success',
+        processingTimeMs: 12,
+        html:
+          `<h2>${document.filename}</h2>` +
+          '<p>This sample document was converted locally, then can be checked and repaired before copying into Canvas.</p>',
+        text: 'This sample document was converted locally.',
+      };
+    },
+
+    async screenshotPermissionStatus() {
+      return 'granted';
+    },
+
+    async listScreenshotSources() {
+      return [
+        {
+          id: 'screen:stub:0',
+          kind: 'screen',
+          label: 'Entire Screen',
+          thumbnailDataUrl: 'data:image/png;base64,',
+        },
+      ];
+    },
+
+    async captureScreenshot(sourceId) {
+      return {
+        id: `shot-${crypto.randomUUID()}`,
+        kind: 'screenshot',
+        mime: 'image/png',
+        dataUrl: 'data:image/png;base64,QUJD',
+        label: sourceId === 'screen:stub:0' ? 'Entire Screen' : sourceId,
+        capturedAt: new Date().toISOString(),
+      };
     },
   };
 }
