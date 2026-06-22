@@ -10,13 +10,17 @@
  * Not unit-tested (Electron can't launch headless under `node:test`); exercised
  * via the manual `npm run app` smoke the lead adds after merge.
  */
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences } from 'electron';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { buildApi } from './build-api.js';
+import { createE2eAppApi } from './e2e-api.js';
 import { isInAppUrl, externalOpenTarget } from './navigation.js';
+import { withScreenshotCapture } from './screenshot.js';
 import { createAppApi } from '../runtime/index.js';
+import type { ScreenshotPermissionStatus } from '../contracts/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const indexPath = path.join(here, 'renderer', 'index.html');
@@ -72,12 +76,25 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
+function createRuntimeApi() {
+  if (process.env.CANVAS_AGENT_E2E_API === 'scripted') {
+    return createE2eAppApi(process.env.CANVAS_AGENT_E2E_SCENARIO);
+  }
+  return withScreenshotCapture(createAppApi(), {
+    permissionStatus: () =>
+      systemPreferences.getMediaAccessStatus('screen') as ScreenshotPermissionStatus,
+    getSources: (options) => desktopCapturer.getSources(options),
+    now: () => new Date().toISOString(),
+    randomId: () => randomUUID(),
+  });
+}
+
 // Wire the IPC boundary once, before any window exists. Use the real local
 // runtime; if it can't be constructed (e.g. before the Ollama/docling sidecars
 // are installed) fall back to an HONEST degraded API that reports the runtime as
 // down and refuses to fabricate results — never the demo stub, which would
 // report healthy and emit passing accessibility badges (C3).
-registerIpc(ipcMain, buildApi(createAppApi));
+registerIpc(ipcMain, buildApi(createRuntimeApi));
 
 void app.whenReady().then(() => {
   // This on-device app needs no device permissions (camera/mic/geo/notifications/

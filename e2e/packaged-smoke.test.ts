@@ -61,7 +61,8 @@ test('packaged .app exposes the bridge, resolves health, and gates an emitted fr
   const app = await electron.launch({ executablePath: executablePath as string, args: [] });
   try {
     const win = await app.firstWindow();
-    await win.waitForSelector('#prompt', { timeout: 30_000 });
+    await win.waitForSelector('#app', { timeout: 30_000 });
+    await win.waitForSelector('[data-testid="home-build"]', { timeout: 30_000 });
 
     // 1. The contextBridge preload exposes the AppApi in the packaged renderer.
     const bridge = await win.evaluate(() => {

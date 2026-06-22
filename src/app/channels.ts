@@ -29,6 +29,14 @@ export const DELETE_BRAND_KIT = 'canvasAgent:deleteBrandKit';
 export const FETCH_CANVAS_PAGE = 'canvasAgent:fetchCanvasPage';
 export const LIST_CANVAS_PAGES = 'canvasAgent:listCanvasPages';
 
+// ── Local document conversion ───────────────────────────────────────────────
+export const CONVERT_DOCUMENT = 'canvasAgent:convertDocument';
+
+// ── Screenshot capture ──────────────────────────────────────────────────────
+export const SCREENSHOT_PERMISSION_STATUS = 'canvasAgent:screenshotPermissionStatus';
+export const LIST_SCREENSHOT_SOURCES = 'canvasAgent:listScreenshotSources';
+export const CAPTURE_SCREENSHOT = 'canvasAgent:captureScreenshot';
+
 /**
  * One-way event channel carrying streamed `runTurn` chunks from main → renderer.
  * Deliberately NOT part of `CHANNELS`: it is a `send` (event), never a `handle`
@@ -52,6 +60,10 @@ export const CHANNELS = {
   deleteBrandKit: DELETE_BRAND_KIT,
   fetchCanvasPage: FETCH_CANVAS_PAGE,
   listCanvasPages: LIST_CANVAS_PAGES,
+  convertDocument: CONVERT_DOCUMENT,
+  screenshotPermissionStatus: SCREENSHOT_PERMISSION_STATUS,
+  listScreenshotSources: LIST_SCREENSHOT_SOURCES,
+  captureScreenshot: CAPTURE_SCREENSHOT,
 } as const;
 
 /** Union of every channel name (handy for typing a generic invoke). */

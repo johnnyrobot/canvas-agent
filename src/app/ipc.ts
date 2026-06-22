@@ -23,6 +23,7 @@ import type {
   CanvasConfig,
   ProductMode,
   TurnRequest,
+  UploadedDocument,
 } from '../contracts/index.js';
 import {
   RUN_TURN,
@@ -39,6 +40,10 @@ import {
   DELETE_BRAND_KIT,
   FETCH_CANVAS_PAGE,
   LIST_CANVAS_PAGES,
+  CONVERT_DOCUMENT,
+  SCREENSHOT_PERMISSION_STATUS,
+  LIST_SCREENSHOT_SOURCES,
+  CAPTURE_SCREENSHOT,
   CHUNK,
 } from './channels.js';
 
@@ -153,5 +158,23 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
 
   ipcMain.handle(LIST_CANVAS_PAGES, (_event, baseUrl, courseId) =>
     envelope(() => api.listCanvasPages(baseUrl as string, courseId as string)),
+  );
+
+  // ── Local document conversion ─────────────────────────────────────────────
+  ipcMain.handle(CONVERT_DOCUMENT, (_event, document) =>
+    envelope(() => api.convertDocument(document as UploadedDocument)),
+  );
+
+  // ── Screenshot capture ─────────────────────────────────────────────────────
+  ipcMain.handle(SCREENSHOT_PERMISSION_STATUS, () =>
+    envelope(() => api.screenshotPermissionStatus()),
+  );
+
+  ipcMain.handle(LIST_SCREENSHOT_SOURCES, () =>
+    envelope(() => api.listScreenshotSources()),
+  );
+
+  ipcMain.handle(CAPTURE_SCREENSHOT, (_event, sourceId) =>
+    envelope(() => api.captureScreenshot(sourceId as string)),
   );
 }

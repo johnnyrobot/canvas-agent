@@ -5,11 +5,18 @@
 # Dependencies / build artifacts
 node_modules/
 dist/
+build/
+release/
 *.tsbuildinfo
 
 # Local Python sidecar virtualenv (Docling) — graphify's default skip-set
 # misses this because the dir name isn't an exact "venv"/".venv" match.
 .venv-docling/
+
+# Staged release payloads (bundled Chromium / Ollama / docling binaries — gitignored,
+# machine-staged blobs with thousands of internal files; never graph them).
+resources/ms-playwright/
+resources/sidecars/
 
 # graphify's own output (avoid graphing the graph)
 graphify-out/

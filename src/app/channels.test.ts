@@ -17,6 +17,10 @@ import {
   DELETE_BRAND_KIT,
   FETCH_CANVAS_PAGE,
   LIST_CANVAS_PAGES,
+  CONVERT_DOCUMENT,
+  SCREENSHOT_PERMISSION_STATUS,
+  LIST_SCREENSHOT_SOURCES,
+  CAPTURE_SCREENSHOT,
 } from './channels.js';
 
 test('exposes the original three IPC channel names', () => {
@@ -41,6 +45,10 @@ test('CHANNELS bundles every request/response channel, keyed by AppApi method', 
     deleteBrandKit: DELETE_BRAND_KIT,
     fetchCanvasPage: FETCH_CANVAS_PAGE,
     listCanvasPages: LIST_CANVAS_PAGES,
+    convertDocument: CONVERT_DOCUMENT,
+    screenshotPermissionStatus: SCREENSHOT_PERMISSION_STATUS,
+    listScreenshotSources: LIST_SCREENSHOT_SOURCES,
+    captureScreenshot: CAPTURE_SCREENSHOT,
   });
 });
 

@@ -5,12 +5,15 @@ import type {
   BrandKit,
   CanvasConfig,
   CanvasPage,
+  ScreenshotAttachment,
+  ScreenshotSource,
   Session,
   SessionState,
   ThemeResult,
   TurnChunk,
   TurnRequest,
   TurnView,
+  UploadedDocument,
 } from '../contracts/index.js';
 import { createBridge, type Invoke, type Subscribe } from './bridge.js';
 import type { IpcResult } from './ipc.js';
@@ -29,6 +32,10 @@ import {
   DELETE_BRAND_KIT,
   FETCH_CANVAS_PAGE,
   LIST_CANVAS_PAGES,
+  CONVERT_DOCUMENT,
+  SCREENSHOT_PERMISSION_STATUS,
+  LIST_SCREENSHOT_SOURCES,
+  CAPTURE_SCREENSHOT,
   CHUNK,
 } from './channels.js';
 
@@ -66,11 +73,33 @@ const BRAND_KIT: BrandKit = {
 };
 const CANVAS_PAGES: CanvasPage[] = [{ id: 'syllabus', title: 'Syllabus' }];
 const CONFIG: CanvasConfig = { baseUrl: 'https://x', token: 't' };
+const SCREENSHOT_SOURCE: ScreenshotSource = {
+  id: 'screen:1:0',
+  kind: 'screen',
+  label: 'Entire Screen',
+  thumbnailDataUrl: 'data:image/png;base64,',
+};
+const SCREENSHOT: ScreenshotAttachment = {
+  id: 'shot-1',
+  kind: 'screenshot',
+  mime: 'image/png',
+  dataUrl: 'data:image/png;base64,QUJD',
+  label: 'Entire Screen',
+  capturedAt: '2026-01-01T00:00:00.000Z',
+};
+const DOCUMENT: UploadedDocument = {
+  filename: 'syllabus.docx',
+  mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  sizeBytes: 12,
+  dataUrl: 'data:application/octet-stream;base64,QUJD',
+};
 
 test('createBridge exposes exactly the AppApi methods', () => {
   const { invoke } = fakeInvoke({});
   const bridge = createBridge(invoke, noSub);
   assert.deepEqual(Object.keys(bridge).sort(), [
+    'captureScreenshot',
+    'convertDocument',
     'createSession',
     'deleteBrandKit',
     'deleteSession',
@@ -79,12 +108,14 @@ test('createBridge exposes exactly the AppApi methods', () => {
     'importCanvas',
     'listBrandKits',
     'listCanvasPages',
+    'listScreenshotSources',
     'listSessions',
     'loadSession',
     'resolveBrandTheme',
     'runTurn',
     'saveBrandKit',
     'saveCanvasAuth',
+    'screenshotPermissionStatus',
   ]);
 });
 
@@ -198,6 +229,10 @@ test('each new method invokes its channel with the right args and unwraps the va
     { channel: DELETE_BRAND_KIT, value: undefined, args: ['kit-1'], run: (b) => b.deleteBrandKit('kit-1') },
     { channel: FETCH_CANVAS_PAGE, value: '<p>page</p>', args: [CONFIG.baseUrl, '123', 'syllabus'], run: (b) => b.fetchCanvasPage(CONFIG.baseUrl, '123', 'syllabus') },
     { channel: LIST_CANVAS_PAGES, value: CANVAS_PAGES, args: [CONFIG.baseUrl, '123'], run: (b) => b.listCanvasPages(CONFIG.baseUrl, '123') },
+    { channel: CONVERT_DOCUMENT, value: { filename: 'syllabus.docx', status: 'success', processingTimeMs: 1, html: '<p>x</p>' }, args: [DOCUMENT], run: (b) => b.convertDocument(DOCUMENT) },
+    { channel: SCREENSHOT_PERMISSION_STATUS, value: 'granted', args: [], run: (b) => b.screenshotPermissionStatus() },
+    { channel: LIST_SCREENSHOT_SOURCES, value: [SCREENSHOT_SOURCE], args: [], run: (b) => b.listScreenshotSources() },
+    { channel: CAPTURE_SCREENSHOT, value: SCREENSHOT, args: [SCREENSHOT_SOURCE.id], run: (b) => b.captureScreenshot(SCREENSHOT_SOURCE.id) },
   ];
 
   for (const { channel, value, args, run } of cases) {

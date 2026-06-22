@@ -1,0 +1,159 @@
+How do I embed an image in a discussion reply as an instructor?
+You can insert an image file directly into discussion replies using the image icon. You can embed an image from a website URL or upload and embed an image from your Canvas files. If a change is made to the source of your image after you have embedded it in a discussion reply, the image added to your discussion reply does not be changed.
+
+Notes:
+
+* If you post your discussion response before an attached image finishes uploading, Canvas will display a warning message.
+* You can embed a variety of image file types. Learn what types of image files you can embed.
+
+
+
+View the video transcript
+
+
+
+00:07: How do I embed an image in a discussion reply as an instructor?
+
+00:11: In Course Navigation, click the Discussions link.
+
+00:15: Click the discussion name.
+
+00:18: Click the reply button.
+
+00:21: To add an image from the toolbar, click the Image icon.
+
+00:25: You can also upload an image from the image options menu. To view additional image options, click the Image Options arrow. Then select the Upload Image option.
+
+00:35: You can also add an image using the menu bar in the rich content editor.
+
+00:39: The menu bar displays the title of Rich content editor tools and may be
+
+00:43: preferable for those using keyboard navigation.
+
+00:46: To upload an image using the menu bar.
+
+00:48: Click the insert menu.
+
+00:51: Then, select the Image option. You can upload new images and embed images from your course and user files.
+
+00:59: By default, the Image Upload Tool displays the Computer tab. Click or drag and drop an image file to the image uploader to upload a file from your computer.
+
+01:09: The uploader displays the image file name and an image preview. To remove the image, click the Delete icon.
+
+01:16: To embed an image using a URL, click the URL tab. Enter the URL in the File URL field.
+
+01:25: To add Alt Text to your image, type an alternative text description or text tags in the Alt Text field. By default, the Alt Text field displays the image file name. Alt text is read by screen readers, and it displays when an embedded image cannot display. If the image is decorative and does not require alt text, select the Decorative Image option.
+
+01:49: By default, the Embed Image display option is selected for embedded images. To display the image file link, select the Display Text Link display option. The file link will replace the image in the Rich Content Editor.
+
+02:04: To embed your selected image, click the Submit button.
+
+02:08: View your uploaded image in the Rich Content Editor. You can also add or modify alt text tags and manage the image display options.
+
+02:17: Click the Reply button.
+
+02:20: View the discussion reply.
+
+02:23: This guide covered how to embed an image in a discussion reply as an instructor.
+
+
+
+Open Discussions
+
+
+In Course Navigation, click the Discussions link.
+
+Open Discussion
+
+Click the discussion name.
+
+Create Reply
+
+
+Click the Reply button.
+
+Add Image from Toolbar
+
+To add an image from the toolbar, click the Image icon [1].
+
+You can also upload an image from the image options menu. To view additional image options, click the Image Options arrow [2]. Then select the Upload Image option [3].
+
+Note: To view the Image icon, you may have to click the Options icon [4].
+
+Add Image from Menubar
+
+
+You can also add an image using the menubar in the Rich Content Editor. The menubar displays the title of Rich Content Editor tools and may be preferable for those using keyboard navigation.
+
+To upload an image using the menubar, click the Insert menu [1], select the Image option [2]. You can upload new images and embed images from your course and user files [3].
+
+Upload Image from Computer
+
+By default, the Image Upload Tool displays the Computer tab [1]. Click or drag and drop an image file to the image uploader to upload a file from your computer [2].
+
+Note: Images uploaded from your computer using the image upload tool are added to your course files.
+
+Select File
+
+
+Select the image file [1] and click the Open button [2].
+
+Learn about supported image file types.
+
+View Selected File
+
+The uploader displays the image file name [1] and an image preview [2]. To remove the image, click the Delete icon [3].
+
+Embed Image from URL
+
+
+To embed an image using a URL, click the URL tab [1].
+
+Enter the URL in the File URL field [2].
+
+Manage Usage Rights
+
+If required by your institution, you will need to select usage right settings for your image.
+
+In the Usage Right drop-down menu [1], select one of the five usage right options:
+
+* I hold the copyright: original content created by you
+* I have obtained permission to use this file: authorized permission by the author
+* The material is in the public domain: explicitly assigned to public domain, cannot be copyrighted, or is no longer protected by copyright
+* The material is subject to an exception - e.g. fair use, the right to quote, or others under applicable copyright laws: excerpt or summary used for commentary, news reporting, research, or analysis in education
+* The material is licensed under Creative Commons: this option also requires setting a specific Creative Commons license
+
+If known, enter the copyright holder information in the Copyright Holder field [2].
+
+Note: If you are not sure which usage right applies to your image, please consult your institutional admin for guidance.
+
+Manage Image Attributes
+
+
+To add Alt Text to your image, type an alternative text description or text tags in the Alt Text field [1]. By default, the Alt Text field displays the image file name. Alt text is read by screen readers, and it displays when an embedded image cannot display.
+
+If the image is decorative and does not require alt text, click the Decorative Image checkbox [2].
+
+By default, the Embed Image display option is selected for embedded images [3].
+
+To display the image file link, select the Display Text Link display option [4]. The file link will replace the image in the Rich Content Editor.
+
+Embed Image
+
+To embed your selected image, click the Submit button.
+
+Note: The image will flash before it embeds in the Rich Content Editor.
+
+View Embedded Image
+
+
+View your uploaded image in the Rich Content Editor. You can also add or modify alt text tags and manage the image display options.
+
+Post Reply
+
+Click the Reply button.
+
+View Reply
+
+
+View the discussion reply.

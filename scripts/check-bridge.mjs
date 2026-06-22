@@ -9,7 +9,7 @@ const mainLogs = [];
 app.process().stderr.on('data', (d) => mainLogs.push('STDERR ' + d.toString()));
 app.process().stdout.on('data', (d) => mainLogs.push('STDOUT ' + d.toString()));
 const win = await app.firstWindow();
-await win.waitForSelector('#prompt', { timeout: 30_000 });
+await win.waitForSelector('[data-testid="home-build"]', { timeout: 30_000 });
 await sleep(3000); // let the health probe resolve
 
 const hasBridge = await win.evaluate(
@@ -18,7 +18,7 @@ const hasBridge = await win.evaluate(
 const methods = await win.evaluate(() =>
   window.canvasAgent ? Object.keys(window.canvasAgent).sort().join(',') : '(none)',
 );
-const health = ((await win.textContent('#health').catch(() => '')) ?? '').trim();
+const health = ((await win.textContent('[data-testid="health"]').catch(() => '')) ?? '').trim();
 console.log('HAS_BRIDGE:', hasBridge);
 console.log('METHODS:', methods);
 console.log('HEALTH:', health);

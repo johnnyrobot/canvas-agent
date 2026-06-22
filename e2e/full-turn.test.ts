@@ -106,3 +106,45 @@ test('a deliberately bad fragment makes the gate withhold the badge', async () =
   // The gated HTML is still safe to show (allowlist-repaired), just badge-less.
   assert.ok(!frag.html.includes('<figure'));
 });
+
+test('a fragment with only warnings and human-review items still surfaces them', async () => {
+  const auditWithNonBlockers = createAuditor({
+    run: async (): Promise<ScanResult> => ({
+      axe: {
+        violations: [
+          {
+            id: 'table-fake-warning',
+            impact: 'moderate',
+            description: 'Table has a non-blocking warning',
+          },
+        ],
+        incomplete: [
+          {
+            id: 'manual-review',
+            impact: 'minor',
+            description: 'Confirm linked document accessibility',
+          },
+        ],
+      },
+      textRuns: [],
+    }),
+  });
+  const app = createAppApi({
+    chatRunner: new ScriptedRunner([
+      callTool('render_template', {
+        type: 'page-content',
+        slots: { title: 'Policy', sections: [{ heading: 'Read', body: 'Review the policy.' }] },
+      }),
+      text('Draft ready.'),
+    ]),
+    audit: auditWithNonBlockers,
+    llm: fakeLlm,
+    ingest: fakeIngest,
+  });
+
+  const view = await app.runTurn({ user: 'Build a policy page.', mode: 'build' });
+  const frag = view.fragments[0]!;
+  assert.equal(frag.gate.badgeWithheld, false);
+  assert.equal(frag.gate.conformance.warnings.length, 1);
+  assert.equal(frag.gate.conformance.needsHumanReview.length, 1);
+});

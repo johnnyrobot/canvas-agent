@@ -1,0 +1,29 @@
+How do I export quiz content from a course?
+If you need to export content from Classic Quizzes, you can export quiz content as a QTI ZIP file. Classic quizzes are exported as QTI 1.2 files.
+
+Notes:
+
+* An exported quiz with questions linked to a question bank will not include an export of the question bank. The QTI file will only include questions from the question bank that have been added to the quiz. If you want to import the classic quiz into another course along with question banks, you may prefer to export your Canvas course and select quizzes and question banks in the course import.
+* You can use the QTI zip file to import quiz content between Canvas courses. If you unzip the QTI file, the files are in XML format.
+
+Open Settings
+
+
+In Course Navigation, click the Settings link.
+
+Export Course Content
+
+In the sidebar, click the Export Course Content button.
+
+Choose Export Type
+
+
+Click the radio button for Quiz Export [1]. Choose the Quizzes you want to export [2]. Click the Create Export button [3].
+
+Note: When you create an export, Canvas will create an export archive [4] where you can download prior export files.
+
+View Quiz Export
+
+When the export is complete, click the New Export link.
+
+Note: Content exports expire after 30 days and can no longer be downloaded.

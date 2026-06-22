@@ -7,12 +7,15 @@ import type {
   CanvasImportResult,
   CanvasPage,
   RuntimeHealth,
+  ScreenshotAttachment,
+  ScreenshotSource,
   Session,
   SessionState,
   ThemeResult,
   TurnChunk,
   TurnRequest,
   TurnView,
+  UploadedDocument,
 } from '../contracts/index.js';
 import { registerIpc, type IpcEventLike, type IpcMainLike, type IpcResult } from './ipc.js';
 import {
@@ -30,6 +33,10 @@ import {
   DELETE_BRAND_KIT,
   FETCH_CANVAS_PAGE,
   LIST_CANVAS_PAGES,
+  CONVERT_DOCUMENT,
+  SCREENSHOT_PERMISSION_STATUS,
+  LIST_SCREENSHOT_SOURCES,
+  CAPTURE_SCREENSHOT,
   CHUNK,
   CHANNELS,
 } from './channels.js';
@@ -104,6 +111,26 @@ const BRAND_KIT: BrandKit = {
 const CANVAS_PAGES: CanvasPage[] = [{ id: 'syllabus', title: 'Syllabus' }];
 
 const CONFIG: CanvasConfig = { baseUrl: 'https://x.instructure.com', token: 't' };
+const SCREENSHOT_SOURCE: ScreenshotSource = {
+  id: 'screen:1:0',
+  kind: 'screen',
+  label: 'Entire Screen',
+  thumbnailDataUrl: 'data:image/png;base64,',
+};
+const SCREENSHOT: ScreenshotAttachment = {
+  id: 'shot-1',
+  kind: 'screenshot',
+  mime: 'image/png',
+  dataUrl: 'data:image/png;base64,QUJD',
+  label: 'Entire Screen',
+  capturedAt: '2026-01-01T00:00:00.000Z',
+};
+const DOCUMENT: UploadedDocument = {
+  filename: 'syllabus.docx',
+  mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  sizeBytes: 12,
+  dataUrl: 'data:application/octet-stream;base64,QUJD',
+};
 
 /** A fake `AppApi` that records its calls and returns canned values. */
 function fakeApi(overrides: Partial<AppApi> = {}) {
@@ -161,6 +188,22 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
     async listCanvasPages(baseUrl, courseId) {
       calls.push({ method: 'listCanvasPages', args: [baseUrl, courseId] });
       return CANVAS_PAGES;
+    },
+    async convertDocument(document) {
+      calls.push({ method: 'convertDocument', args: [document] });
+      return { filename: document.filename, status: 'success', processingTimeMs: 1, html: '<p>page</p>' };
+    },
+    async screenshotPermissionStatus() {
+      calls.push({ method: 'screenshotPermissionStatus', args: [] });
+      return 'granted';
+    },
+    async listScreenshotSources() {
+      calls.push({ method: 'listScreenshotSources', args: [] });
+      return [SCREENSHOT_SOURCE];
+    },
+    async captureScreenshot(sourceId) {
+      calls.push({ method: 'captureScreenshot', args: [sourceId] });
+      return SCREENSHOT;
     },
     ...overrides,
   };
@@ -285,6 +328,10 @@ test('every new product-layer channel delegates to its AppApi method and wraps t
     { channel: DELETE_BRAND_KIT, method: 'deleteBrandKit', args: ['kit-1'] },
     { channel: FETCH_CANVAS_PAGE, method: 'fetchCanvasPage', args: [CONFIG.baseUrl, '123', 'syllabus'] },
     { channel: LIST_CANVAS_PAGES, method: 'listCanvasPages', args: [CONFIG.baseUrl, '123'] },
+    { channel: CONVERT_DOCUMENT, method: 'convertDocument', args: [DOCUMENT] },
+    { channel: SCREENSHOT_PERMISSION_STATUS, method: 'screenshotPermissionStatus', args: [] },
+    { channel: LIST_SCREENSHOT_SOURCES, method: 'listScreenshotSources', args: [] },
+    { channel: CAPTURE_SCREENSHOT, method: 'captureScreenshot', args: [SCREENSHOT_SOURCE.id] },
   ];
 
   for (const { channel, method, args } of cases) {

@@ -6,7 +6,9 @@ import { createUnavailableApi } from './unavailable-api.js';
 
 test('createUnavailableApi reports the runtime as DOWN, never healthy (C3)', async () => {
   const api = createUnavailableApi('boom');
-  assert.deepEqual(await api.health(), { llm: false, ingest: false });
+  const health = await api.health();
+  assert.equal(health.llm, false);
+  assert.equal(health.ingest, false);
 });
 
 test('createUnavailableApi never fabricates a turn result — runTurn rejects (C3)', async () => {
@@ -19,6 +21,7 @@ test('createUnavailableApi refuses runtime actions rather than faking success (C
   await assert.rejects(() => api.saveCanvasAuth({ baseUrl: 'https://x', token: 't' }));
   await assert.rejects(() => api.importCanvas('https://x', '1'));
   await assert.rejects(() => api.fetchCanvasPage('https://x', '1', 'p'));
+  await assert.rejects(() => api.convertDocument({ filename: 'x.pdf', mime: 'application/pdf', sizeBytes: 1, dataUrl: 'data:application/pdf;base64,QQ==' }));
   await assert.rejects(() => api.resolveBrandTheme('#111111', '#222222'));
 });
 
@@ -26,7 +29,9 @@ test('buildApi falls back to the honest unavailable API when the runtime throws 
   const api = buildApi(() => {
     throw new Error('no sidecars');
   });
-  assert.deepEqual(await api.health(), { llm: false, ingest: false });
+  const health = await api.health();
+  assert.equal(health.llm, false);
+  assert.equal(health.ingest, false);
   await assert.rejects(() => api.runTurn({ user: 'x' }));
 });
 
