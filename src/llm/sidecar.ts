@@ -42,6 +42,8 @@ export interface CreateSidecarOptions {
   logger?: OllamaProcessLogger;
   /** Injectable transport for the chat client (tests pass a fake; default global `fetch`). */
   fetch?: FetchLike;
+  /** Injectable daemon lifecycle manager (tests pass a double; default a real `OllamaProcess`). */
+  process?: OllamaProcess;
 }
 
 export class OllamaSidecar {
@@ -53,7 +55,7 @@ export class OllamaSidecar {
   constructor(options: CreateSidecarOptions = {}) {
     this.config = loadLLMConfig(options.env);
     this.client = new OllamaClient(this.config, options.fetch);
-    this.process = new OllamaProcess(this.config, options.logger);
+    this.process = options.process ?? new OllamaProcess(this.config, options.logger);
   }
 
   /** Ensure the daemon is running and the model(s) are warm. Idempotent-ish. */
@@ -89,13 +91,19 @@ export class OllamaSidecar {
 
   /** Non-streaming chat, serialized against other heavy calls. */
   chat(opts: ChatOptions): Promise<ChatResult> {
-    return this.mutex.run(() => this.client.chat(opts));
+    return this.mutex.run(async () => {
+      // Respawn a crashed daemon before the request so a mid-session Ollama exit
+      // self-heals instead of failing every later call (no-op when healthy/unmanaged).
+      await this.process.ensureAlive();
+      return this.client.chat(opts);
+    });
   }
 
   /** Streaming chat — holds the lock for the duration of the stream. */
   async *chatStream(opts: ChatOptions): AsyncGenerator<ChatChunk> {
     const release = await this.mutex.acquire();
     try {
+      await this.process.ensureAlive();
       yield* this.client.chatStream(opts);
     } finally {
       release();

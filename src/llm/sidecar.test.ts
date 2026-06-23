@@ -1,9 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createOllamaSidecar, decodedBase64Bytes, MAX_DESCRIBE_IMAGE_BYTES } from './sidecar.js';
+import { OllamaProcess } from './process.js';
+import { loadLLMConfig } from './config.js';
 import type { FetchLike } from './client.js';
 
 const baseEnv = { LLM_BASE_URL: 'http://localhost:11434/v1', LLM_MANAGE_PROCESS: 'false' };
+
+/** A process double that counts liveness checks (no real daemon / spawn). */
+class CountingProcess extends OllamaProcess {
+  ensureAliveCalls = 0;
+  override async ensureAlive(): Promise<void> {
+    this.ensureAliveCalls += 1;
+  }
+}
 
 /** A fake fetch that records each parsed request body and returns a canned chat reply. */
 function recordingFetch() {
@@ -48,6 +58,21 @@ test('describeImage rejects an oversized image BEFORE any fetch (size guard)', a
   const huge = 'A'.repeat(overChars);
   await assert.rejects(async () => sidecar.describeImage({ image: huge, prompt: 'x' }), /too large/i);
   assert.equal(rec.bodies.length, 0, 'an oversized image must not reach the model');
+});
+
+test('chat() and chatStream() ensure the daemon is alive before issuing the request', async () => {
+  const rec = recordingFetch();
+  const proc = new CountingProcess(loadLLMConfig(baseEnv));
+  const sidecar = createOllamaSidecar({ env: baseEnv, fetch: rec.fetch, process: proc });
+
+  await sidecar.chat({ role: 'deep', messages: [{ role: 'user', content: 'hi' }] });
+  assert.equal(proc.ensureAliveCalls, 1, 'chat() checks daemon liveness first');
+  assert.equal(rec.bodies.length, 1, 'the chat request still goes through');
+
+  for await (const _chunk of sidecar.chatStream({ role: 'deep', messages: [{ role: 'user', content: 'hi' }] })) {
+    // drain
+  }
+  assert.equal(proc.ensureAliveCalls, 2, 'chatStream() checks daemon liveness first too');
 });
 
 test('decodedBase64Bytes approximates decoded size and strips a data: prefix', () => {

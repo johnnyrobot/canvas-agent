@@ -30,11 +30,23 @@ const noopLogger: OllamaProcessLogger = {
 /** Injection seam for `child_process.spawn` so the lifecycle is unit-testable. */
 export type SpawnLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
+/** Bound on how often a crashed daemon is respawned before we give up (anti crash-loop). */
+export interface RespawnPolicy {
+  /** Max respawns permitted within `windowMs`. */
+  maxRespawns: number;
+  /** Sliding window (ms) the respawn count is measured over. */
+  windowMs: number;
+}
+
+const DEFAULT_RESPAWN_POLICY: RespawnPolicy = { maxRespawns: 3, windowMs: 60_000 };
+
 export class OllamaProcess {
   private child: ChildProcess | undefined;
   private owned = false;
   /** Set by the child's `error` event (e.g. ENOENT when the binary isn't on PATH). */
   private spawnError: Error | undefined;
+  /** Epoch-ms of recent respawns, pruned to `respawnPolicy.windowMs` (crash-loop guard). */
+  private respawns: number[] = [];
 
   constructor(
     private readonly config: LLMConfig,
@@ -42,6 +54,7 @@ export class OllamaProcess {
     private readonly spawnImpl: SpawnLike = spawn,
     /** Resolve the `ollama` command — bundled abs path when packaged, else PATH. */
     private readonly resolveCommand: (name: string) => string = resolveSidecarCommand,
+    private readonly respawnPolicy: RespawnPolicy = DEFAULT_RESPAWN_POLICY,
   ) {}
 
   /** Whether this manager spawned (and therefore owns) the daemon. */
@@ -76,6 +89,42 @@ export class OllamaProcess {
     this.spawn();
     await this.waitUntilReady();
     this.owned = true;
+  }
+
+  /**
+   * Lazily make sure the daemon is still up before a request, respawning a crashed
+   * one (the `exit` handler only nulls `this.child`, so without this a mid-session
+   * crash leaves the LLM dead until app restart). Cheap on the happy path — a fast
+   * local `/api/version` ping — and bounded by `respawnPolicy` so a crash-looping
+   * daemon surfaces a clear error instead of being restarted forever.
+   *
+   * Honors attach-don't-kill: a healthy daemon (ours or the user's) is never touched,
+   * and when `manageProcess` is off we never start one — the call fails naturally.
+   */
+  async ensureAlive(): Promise<void> {
+    if (!this.config.manageProcess) return; // not ours to manage; let the request fail naturally
+    if (await this.isHealthy()) return; // up (owned or attached) — leave it alone
+    this.recordRespawn(); // throws once the crash-loop budget is spent
+    this.log.warn('Ollama daemon is unreachable mid-session — respawning.');
+    this.child = undefined;
+    this.owned = false;
+    this.spawn();
+    await this.waitUntilReady();
+    this.owned = true;
+    this.log.info('Ollama daemon respawned.');
+  }
+
+  /** Record a respawn attempt against the sliding-window budget; throw when exhausted. */
+  private recordRespawn(): void {
+    const now = Date.now();
+    this.respawns = this.respawns.filter((t) => now - t < this.respawnPolicy.windowMs);
+    if (this.respawns.length >= this.respawnPolicy.maxRespawns) {
+      throw new Error(
+        `Ollama daemon keeps dying — exceeded ${this.respawnPolicy.maxRespawns} respawns ` +
+          `within ${this.respawnPolicy.windowMs}ms; giving up.`,
+      );
+    }
+    this.respawns.push(now);
   }
 
   private spawn(): void {

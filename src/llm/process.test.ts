@@ -103,3 +103,58 @@ test('daemon crash: exit nulls the child, owned stays true, no auto-respawn (cha
   await proc.stop();
   assert.deepEqual(children[0]!.kills, [], 'stop() does not kill an already-exited child');
 });
+
+// ── Respawn supervisor (ensureAlive) ──────────────────────────────────────────
+
+test('ensureAlive is a no-op when the daemon is healthy (never touches an attached daemon)', async () => {
+  const { spawn, children } = fakeSpawn();
+  const proc = new ControlledHealthProcess({ ...loadLLMConfig({}), manageProcess: true }, undefined, spawn);
+  proc.healthy = true;
+  await proc.ensureAlive();
+  assert.equal(children.length, 0, 'a healthy daemon is left alone — no spawn');
+});
+
+test('ensureAlive is a no-op when LLM_MANAGE_PROCESS is disabled (we never manage the daemon)', async () => {
+  const { spawn, children } = fakeSpawn();
+  const proc = new ControlledHealthProcess({ ...loadLLMConfig({}), manageProcess: false }, undefined, spawn);
+  proc.healthy = false; // daemon down, but it is not ours to start
+  await proc.ensureAlive(); // must not throw and must not spawn
+  assert.equal(children.length, 0, 'no respawn when process management is off');
+});
+
+test('ensureAlive respawns a crashed daemon, then enforces the restart budget', async () => {
+  const { spawn, children } = fakeSpawn();
+  const proc = new ControlledHealthProcess(
+    { ...loadLLMConfig({}), manageProcess: true },
+    undefined,
+    spawn,
+    undefined,
+    { maxRespawns: 2, windowMs: 60_000 },
+  );
+
+  // Initial start (owned).
+  let running = proc.ensureRunning();
+  proc.healthy = true;
+  await running;
+  assert.equal(children.length, 1, 'spawned once on start');
+
+  // Crash #1 → ensureAlive brings it back.
+  proc.healthy = false;
+  running = proc.ensureAlive();
+  proc.healthy = true;
+  await running;
+  assert.equal(children.length, 2, 'respawned after the first crash');
+  assert.equal(proc.isOwned, true, 'owns the respawned daemon');
+
+  // Crash #2 → second (and last) respawn allowed in the window.
+  proc.healthy = false;
+  running = proc.ensureAlive();
+  proc.healthy = true;
+  await running;
+  assert.equal(children.length, 3, 'respawned after the second crash');
+
+  // Crash #3 → budget exhausted → surfaces a clear error instead of looping.
+  proc.healthy = false;
+  await assert.rejects(() => proc.ensureAlive(), /respawn|giving up|keeps dying/i);
+  assert.equal(children.length, 3, 'no respawn once the restart budget is spent');
+});
