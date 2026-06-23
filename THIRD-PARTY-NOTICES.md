@@ -58,10 +58,13 @@ own licenses:
 ### Ollama
 - **License:** MIT
 - **Copyright:** © Ollama, Inc. and contributors
-- **Use:** the local LLM inference server (`ollama serve`). Source:
-  <https://github.com/ollama/ollama>. Ollama statically links `llama.cpp`/`ggml`
-  (MIT) and other components; its own bundled license/NOTICE files ship beside the
-  binary in `Contents/Resources/sidecars/ollama` and are incorporated here by reference.
+- **Use:** the local LLM inference server (`ollama serve`), bundled as its full
+  Apple-Silicon runner set (`ollama` + `llama-server` + `libggml`/`libllama` +
+  `mlx_metal_*`). Source: <https://github.com/ollama/ollama>. Ollama statically
+  links **llama.cpp / ggml** (MIT, © the ggml authors,
+  <https://github.com/ggml-org/llama.cpp>) and bundles **MLX** (MIT, © Apple Inc.,
+  <https://github.com/ml-explore/mlx>); their full MIT texts are available from
+  those projects.
 
 ### Docling / `docling-serve`
 - **License:** MIT
