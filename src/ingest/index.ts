@@ -7,6 +7,7 @@
  */
 export { createDoclingSidecar, DoclingSidecar } from './sidecar.js';
 export { resolveStagedPath, IngestPathError } from './safe-path.js';
+export { assertSafeIngestUrl, IngestUrlError } from './safe-url.js';
 export { DoclingClient, DoclingError } from './client.js';
 export { DoclingProcess } from './process.js';
 export { loadIngestConfig, parseExportFormats } from './config.js';

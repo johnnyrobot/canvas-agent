@@ -26,6 +26,12 @@ test('buildUrlRequest uses http_sources', () => {
   assert.equal(req.file_sources, undefined);
 });
 
+test('buildUrlRequest applies the SSRF guard (rejects metadata/loopback/non-http)', () => {
+  for (const bad of ['http://169.254.169.254/latest/meta-data/', 'http://127.0.0.1:11434/', 'file:///etc/passwd']) {
+    assert.throws(() => buildUrlRequest(bad, {}, config), /Refusing to ingest URL/, `should reject ${bad}`);
+  }
+});
+
 test('normalizeResponse extracts requested format contents', () => {
   const doc = normalizeResponse({
     document: { md_content: '# Title', json_content: { a: 1 }, html_content: '<h1>Title</h1>' },

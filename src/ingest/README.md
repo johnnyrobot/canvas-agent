@@ -12,10 +12,26 @@ remediates** the source document — it only reads it.
 | `types.ts` | Public types (`ConvertOptions`, `ConvertedDocument`, `FileSource`) |
 | `config.ts` | Env → config (PRD Appendix H) — **pure** |
 | `payload.ts` | Build `/v1/convert/source` bodies; normalize response — **pure** |
+| `safe-path.ts` | Contain model-supplied `fileRef`s to the uploads dir (C6) — **pure** |
+| `safe-url.ts` | SSRF guard for `http_sources` URLs — **pure** |
 | `process.ts` | Spawn / attach / stop `docling-serve` |
 | `client.ts` | `fetch` client for `POST /v1/convert/source` |
 | `sidecar.ts` | Facade: `start/stop/convert/convertPath/convertUrl` |
 | `*.test.ts` | Unit tests for the pure logic |
+
+## Security guards
+
+- **File refs** (`safe-path.ts`): `ingest_document` takes an LLM-chosen `fileRef`;
+  `resolveStagedPath` rejects absolute paths and `..` traversal so only files
+  inside the uploads/staging dir can be read.
+- **URLs** (`safe-url.ts`): `buildUrlRequest` runs `assertSafeIngestUrl` before a
+  URL is forwarded to docling-serve, rejecting non-http(s) schemes and
+  private/loopback/link-local/reserved literal addresses (incl. the cloud
+  metadata IP `169.254.169.254` and integer/hex/octal IP encodings) — a static
+  SSRF guard. It does **not** resolve DNS; a caller wiring `convertUrl` to a live
+  tool must also pin/resolve at fetch time in the sidecar (DNS-rebinding is out of
+  scope for a static check). Today `convertUrl` has no tool/IPC caller — the only
+  ingestion tool routes to `convertPath` — so the guard is defense-in-depth.
 
 ## Usage
 

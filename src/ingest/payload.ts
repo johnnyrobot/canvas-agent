@@ -10,6 +10,7 @@
  * preset mapping as a follow-up (see README).
  */
 import type { ConvertOptions, ConvertedDocument, FileSource, IngestConfig } from './types.js';
+import { assertSafeIngestUrl } from './safe-url.js';
 
 export interface ConvertRequest {
   options: {
@@ -40,6 +41,10 @@ export function buildFileRequest(file: FileSource, opts: ConvertOptions, config:
 }
 
 export function buildUrlRequest(url: string, opts: ConvertOptions, config: IngestConfig): ConvertRequest {
+  // SSRF guard: never forward a URL targeting a private/loopback/link-local/
+  // metadata address or a non-http(s) scheme to docling-serve. Throws
+  // `IngestUrlError` on a blocked target. See safe-url.ts for scope (no DNS).
+  assertSafeIngestUrl(url);
   return {
     options: buildConvertOptions(opts, config),
     http_sources: [{ url }],
