@@ -158,3 +158,37 @@ test('ensureAlive respawns a crashed daemon, then enforces the restart budget', 
   await assert.rejects(() => proc.ensureAlive(), /respawn|giving up|keeps dying/i);
   assert.equal(children.length, 3, 'no respawn once the restart budget is spent');
 });
+
+test('ensureAlive: a late exit from the replaced daemon does not orphan the live one (respawn race)', async () => {
+  const { spawn, children } = fakeSpawn();
+  const proc = new ControlledHealthProcess({ ...loadLLMConfig({}), manageProcess: true }, undefined, spawn);
+
+  // Initial start (owned) → child[0].
+  let running = proc.ensureRunning();
+  proc.healthy = true;
+  await running;
+  assert.equal(children.length, 1, 'spawned once on start');
+
+  // Daemon goes unreachable → respawn brings up child[1].
+  proc.healthy = false;
+  running = proc.ensureAlive();
+  proc.healthy = true;
+  await running;
+  assert.equal(children.length, 2, 'respawned the crashed daemon');
+
+  // The ORIGINAL child finally delivers its (delayed) `exit` event *after* the
+  // replacement is already live. An exit handler bound to `this` (rather than to
+  // the specific child) would null out the new child here, silently dropping our
+  // handle to a still-running daemon.
+  children[0]!.emit('exit', 1);
+  await flush();
+
+  // The live daemon must still be tracked: stop() must terminate child[1].
+  const stopping = proc.stop();
+  await flush();
+  children[1]!.emit('exit', 0); // let stop()'s exit-wait resolve without the 5s timeout
+  await stopping;
+
+  assert.ok(children[0]!.kills.includes('SIGKILL'), 'the stale/hung original is reaped before respawn');
+  assert.ok(children[1]!.kills.includes('SIGTERM'), 'stop() terminates the live respawned daemon');
+});

@@ -106,7 +106,14 @@ export class OllamaProcess {
     if (await this.isHealthy()) return; // up (owned or attached) — leave it alone
     this.recordRespawn(); // throws once the crash-loop budget is spent
     this.log.warn('Ollama daemon is unreachable mid-session — respawning.');
+    // Reap any child we still hold before replacing it. The daemon is unreachable
+    // but its process may still be alive (hung, not yet exited); dropping the
+    // reference alone would orphan it and let it fight the replacement for
+    // OLLAMA_HOST. Best-effort — if the `exit` handler already nulled it, there is
+    // nothing to kill.
+    const stale = this.child;
     this.child = undefined;
+    if (stale) stale.kill('SIGKILL');
     this.owned = false;
     this.spawn();
     await this.waitUntilReady();
@@ -134,7 +141,7 @@ export class OllamaProcess {
     const command = this.resolveCommand('ollama');
     this.log.info(`Spawning \`${command} serve\`…`);
     this.spawnError = undefined;
-    this.child = this.spawnImpl(command, ['serve'], {
+    const child = this.spawnImpl(command, ['serve'], {
       env: {
         ...process.env,
         OLLAMA_HOST: this.config.ollamaHost,
@@ -143,19 +150,25 @@ export class OllamaProcess {
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    this.child.stderr?.on('data', (d: Buffer) => this.log.warn(`[ollama] ${d.toString().trim()}`));
+    this.child = child;
+    child.stderr?.on('data', (d: Buffer) => this.log.warn(`[ollama] ${d.toString().trim()}`));
     // A spawn failure (ENOENT — the binary isn't on PATH, e.g. a Finder-launched
     // .app) emits an `error` event; WITHOUT this listener it is an *uncaught*
     // exception that crashes the Electron main process. Record it so the readiness
     // wait can reject cleanly and the caller can degrade gracefully.
-    this.child.on('error', (err: Error) => {
+    child.on('error', (err: Error) => {
       this.spawnError = err;
-      this.child = undefined;
+      // Only clear our handle if `child` is still the tracked process — a late
+      // event from a replaced child must not wipe out its live replacement.
+      if (this.child === child) this.child = undefined;
       this.log.error(`Failed to spawn ollama serve: ${err.message}`);
     });
-    this.child.on('exit', (code) => {
+    child.on('exit', (code) => {
       if (this.owned) this.log.error(`ollama serve exited (code ${code ?? 'null'}).`);
-      this.child = undefined;
+      // Guard against a stale `exit` from a daemon we have already respawned: a
+      // queued event from the old child could otherwise null out the new one,
+      // leaving stop() unable to terminate the live daemon (it would leak).
+      if (this.child === child) this.child = undefined;
     });
   }
 
