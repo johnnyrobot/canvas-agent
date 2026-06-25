@@ -38,9 +38,28 @@ test('rejects loopback in every spelling the URL parser canonicalizes', () => {
     'http://0177.0.0.1/', // octal → 127.0.0.1
     'http://[::1]/', // IPv6 loopback
     'http://[::ffff:127.0.0.1]/', // IPv4-mapped IPv6 loopback
+    'http://localhost./', // trailing root-label dot must not bypass the check
+    'http://127.0.0.1./', // trailing-dot IPv4 must not bypass either
   ]) {
     assert.throws(() => assertSafeIngestUrl(bad), IngestUrlError, `should reject ${bad}`);
   }
+});
+
+test('error message does not leak credentials, path, or query tokens', () => {
+  // The full userinfo (username AND password) must never appear in the message.
+  assert.throws(
+    () => assertSafeIngestUrl('http://user:s3cr3t@example.com/'),
+    (e: unknown) =>
+      e instanceof IngestUrlError && !/user/i.test(e.message) && !/s3cr3t/i.test(e.message) && !/@/.test(e.message),
+    'full userinfo must not leak into the error',
+  );
+  // A blocked host carrying a signed-token query must not echo the token/path.
+  assert.throws(
+    () => assertSafeIngestUrl('http://169.254.169.254/latest/meta-data/?token=AKIASECRET'),
+    (e: unknown) =>
+      e instanceof IngestUrlError && !/AKIASECRET/.test(e.message) && !/meta-data/.test(e.message),
+    'query token and path must not leak into the error',
+  );
 });
 
 test('rejects private and reserved ranges (RFC1918, CGNAT, this-host, IPv6 ULA/link-local)', () => {

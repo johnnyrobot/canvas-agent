@@ -21,8 +21,23 @@ import { isIP } from 'node:net';
 
 export class IngestUrlError extends Error {
   constructor(url: string, reason: string) {
-    super(`Refusing to ingest URL "${url}": ${reason}.`);
+    super(`Refusing to ingest URL "${redactUrlForError(url)}": ${reason}.`);
     this.name = 'IngestUrlError';
+  }
+}
+
+/**
+ * Reduce a URL to scheme + host for safe inclusion in an error message: drops
+ * the path, the query string (which may carry signed tokens), and any embedded
+ * credentials — none of which should reach logs or the UI. `host` retains the
+ * port but never the userinfo.
+ */
+function redactUrlForError(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return '<invalid URL>';
   }
 }
 
@@ -60,6 +75,9 @@ function isBlockedHost(hostname: string): boolean {
   // `URL` brackets IPv6 literals; strip them for `isIP` / range checks.
   let host = hostname;
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  // Strip trailing root-label dot(s) so a fully-qualified form ("localhost.",
+  // "127.0.0.1.") can't slip past the loopback / literal-IP checks below.
+  host = host.replace(/\.+$/, '');
 
   const lower = host.toLowerCase();
   if (lower === 'localhost' || lower.endsWith('.localhost')) return true;
