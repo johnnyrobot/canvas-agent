@@ -1,7 +1,8 @@
 {
   "name": "canvas-agent",
   "version": "0.1.0",
-  "author": "Quang Phung",
+  "author": "JohnnyRobot AI",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "Canvas Course Design & Accessibility Assistant — on-device, single-user macOS app (see PRD).",
