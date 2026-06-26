@@ -188,7 +188,17 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
       const { chromium } = await import('playwright');
       const axeSource = (await import('axe-core')).default.source;
 
-      const browser = await chromium.launch({ headless: true, ...launchOptions });
+      // Use the open-source **chromium-headless-shell** (BSD) rather than the full
+      // "Chrome for Testing" build. The auditor only needs headless rendering +
+      // screenshots, and the shell carries no Widevine CDM (proprietary DRM we may
+      // not redistribute) or Google-proprietary Chrome-for-Testing bits — and it is
+      // ~340MB smaller. Skipped when a caller pins an explicit `executablePath`
+      // (e.g. a test binary); `launchOptions` still overrides everything.
+      const browser = await chromium.launch({
+        headless: true,
+        ...(launchOptions.executablePath ? {} : { channel: 'chromium-headless-shell' }),
+        ...launchOptions,
+      });
       try {
         const context = await browser.newContext({ viewport: { width: viewportWidth, height: viewportHeight } });
         const page = await context.newPage();

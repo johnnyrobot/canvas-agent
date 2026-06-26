@@ -22,7 +22,7 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "install:hooks": "git config core.hooksPath githooks",
     "prepare": "git config core.hooksPath githooks || true",
-    "stage:browsers": "PLAYWRIGHT_BROWSERS_PATH=\"$PWD/resources/ms-playwright\" npx playwright install chromium",
+    "stage:browsers": "PLAYWRIGHT_BROWSERS_PATH=\"$PWD/resources/ms-playwright\" npx playwright install chromium-headless-shell",
     "stage:sidecars": "node scripts/stage-resources.mjs",
     "pre-release": "node scripts/pre-release.mjs",
     "package": "npm run build && node scripts/pre-release.mjs --strict && electron-builder --mac && bash scripts/make-dmg.sh"
@@ -56,7 +56,7 @@
       {
         "from": "resources/ms-playwright",
         "to": "ms-playwright",
-        "filter": ["**/*"]
+        "filter": ["**/*", "!ffmpeg-*", "!ffmpeg-*/**"]
       },
       {
         "from": "resources/sidecars/ollama",

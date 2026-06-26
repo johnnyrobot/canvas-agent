@@ -38,22 +38,32 @@ the dependencies pinned at release time (`package.json`).
   Chromium Authors), **Node.js** (MIT, © Node.js contributors and Joyent, Inc.),
   and **V8** (BSD-3-Clause, © The V8 project authors). Their full notices ship
   inside the Electron framework (`LICENSE`, `LICENSES.chromium.html`).
+- Electron's embedded Chromium includes a dynamically-linked **`libffmpeg.dylib`**
+  (`Contents/Frameworks/Electron Framework.framework/.../Libraries/libffmpeg.dylib`)
+  built from **FFmpeg** (LGPL-2.1-or-later, © the FFmpeg authors). As a separate,
+  dynamically-loaded library it satisfies the LGPL (replaceable by the user); its
+  license is included in Electron's `LICENSES.chromium.html`. This is the standard
+  Electron media library and is distinct from Playwright's standalone FFmpeg, which
+  is **not** bundled (see below).
 
 ## Bundled on-device binaries (staged into `Contents/Resources` at release time)
 
 These are not committed to the repository; they are installed locally and staged by
-the `stage:*` scripts (see `resources/STAGING.md`). They are distributed under their
-own licenses:
+the `stage:*` scripts. They are distributed under their own licenses:
 
-### Chromium (Playwright build)
+### Chromium — headless shell (Playwright `chromium-headless-shell`)
 - **License:** BSD-3-Clause (plus the licenses of its third-party components)
 - **Copyright:** © The Chromium Authors
-- **Use:** the headless browser behind every accessibility audit. Distributed by the
-  Playwright project; full notices accompany the browser build.
-- **Notable bundled component:** **FFmpeg** (`libffmpeg`) — LGPL-2.1-or-later,
-  © the FFmpeg authors — is redistributed as a dynamic library inside the Chromium
-  build. Its full license text ships alongside the browser in
-  `Contents/Resources/ms-playwright`.
+- **Use:** the open-source Chromium **headless shell** behind every accessibility
+  audit (headless rendering + screenshots only). Staged via
+  `npx playwright install chromium-headless-shell`; the full license text ships
+  beside the binary in `Contents/Resources/ms-playwright`
+  (`LICENSE.headless_shell`).
+- **Not bundled:** the full "Google Chrome for Testing" build, its **Widevine CDM**
+  (proprietary), and Playwright's **standalone FFmpeg** binary (used only for video
+  recording, which this app never does) are deliberately excluded — the app only
+  needs headless rendering, so none of those components are staged or redistributed.
+  (This is separate from Electron's own embedded `libffmpeg.dylib`, covered above.)
 
 ### Ollama
 - **License:** MIT
@@ -64,7 +74,7 @@ own licenses:
   links **llama.cpp / ggml** (MIT, © the ggml authors,
   <https://github.com/ggml-org/llama.cpp>) and bundles **MLX** (MIT, © Apple Inc.,
   <https://github.com/ml-explore/mlx>); their full MIT texts are available from
-  those projects.
+  those projects. **No model weights are bundled with Ollama** (see below).
 
 ### Docling / `docling-serve`
 - **License:** MIT
@@ -72,20 +82,35 @@ own licenses:
 - **Use:** the local document-ingestion sidecar. Source:
   <https://github.com/docling-project/docling> and
   <https://github.com/docling-project/docling-serve>. docling-serve is bundled as a
-  Python/PyTorch application; the licenses of its bundled dependencies (BSD,
-  Apache-2.0, and others) ship beside the binary in
+  Python/PyTorch application; the licenses of its bundled Python dependencies (BSD,
+  Apache-2.0, MIT, and others) ship beside the binary in
   `Contents/Resources/sidecars/docling-serve` and are incorporated here by reference.
 
-## On-device model weights (used, not redistributed in this repository)
+## Bundled model weights (redistributed inside the app)
 
-Model weights are pulled and run locally by the bundled inference/ingestion sidecars;
-they are governed by their own terms:
+The document-ingestion sidecar bundles the following models, which are
+redistributed inside the application. All are under permissive licenses:
 
-- **Gemma** model weights — Google **Gemma Terms of Use**
-  (<https://ai.google.dev/gemma/terms>). Run locally via Ollama.
-- **Granite-Docling-258M** — Apache License 2.0, © IBM Corp. — used by Docling for
-  document layout/conversion. Model card:
-  <https://huggingface.co/ibm-granite/granite-docling-258M>.
+| Model | License | Source |
+|---|---|---|
+| `docling-project/CodeFormulaV2` | CDLA-Permissive-2.0 | <https://huggingface.co/docling-project> |
+| `docling-project/docling-layout-heron` | Apache-2.0 | <https://huggingface.co/docling-project> |
+| `docling-project/docling-models` (TableFormer) | CDLA-Permissive-2.0 | <https://huggingface.co/docling-project> |
+| `docling-project/DocumentFigureClassifier-v2.5` | MIT | <https://huggingface.co/docling-project> |
+| RapidOCR (PaddleOCR **PP-OCRv4** weights) | Apache-2.0 | <https://github.com/RapidAI/RapidOCR>, <https://github.com/PaddlePaddle/PaddleOCR> |
+
+Each model's card (`README.md`) ships alongside its weights in
+`Contents/Resources/sidecars/docling-serve/models`.
+
+## Model weights used at runtime (NOT redistributed)
+
+The on-device LLM weights are **pulled and run locally** by Ollama at runtime; they
+are **not** bundled in or redistributed with this application:
+
+- **Gemma** (the app's default model, run via Ollama's MLX runner) — Google
+  **Gemma Terms of Use** (<https://ai.google.dev/gemma/terms>) and the Gemma
+  **Prohibited Use Policy** (<https://ai.google.dev/gemma/prohibited_use_policy>).
+  Users obtain the weights directly through Ollama and are bound by these terms.
 
 ---
 
@@ -95,6 +120,9 @@ they are governed by their own terms:
   attribution and inclusion of the copyright/permission notice.
 - **Apache-2.0** is permissive with an explicit patent grant; modifications must be
   marked and the NOTICE preserved where present.
+- **CDLA-Permissive-2.0** (Community Data License Agreement – Permissive 2.0) is a
+  permissive license for data/model artifacts: redistribution is allowed with the
+  license text retained; it adds no copyleft obligation to the using software.
 - **MPL-2.0** is a weak (file-level) copyleft license; the covered source files must
   remain available under MPL-2.0, which they are at the upstream project and in
   `node_modules/axe-core`.
