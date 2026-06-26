@@ -82,9 +82,16 @@ the `stage:*` scripts. They are distributed under their own licenses:
 - **Use:** the local document-ingestion sidecar. Source:
   <https://github.com/docling-project/docling> and
   <https://github.com/docling-project/docling-serve>. docling-serve is bundled as a
-  Python/PyTorch application; the licenses of its bundled Python dependencies (BSD,
-  Apache-2.0, MIT, and others) ship beside the binary in
-  `Contents/Resources/sidecars/docling-serve` and are incorporated here by reference.
+  Python/PyTorch application. Its bundled Python dependencies (231 packages) were
+  license-scanned: **no GPL or AGPL** packages are present. All are permissive
+  (MIT / Apache-2.0 / BSD / PSF / 0BSD) except:
+  - **certifi** and **tqdm** — MPL-2.0 (weak file-level copyleft; used unmodified);
+  - **paramiko** — LGPL-2.1 (an SSH library, shipped unmodified **as source**, which
+    satisfies the LGPL, and replaceable by the user).
+
+  A full per-package inventory is in `docs/docling-python-licenses.txt`, and each
+  package's own license ships in its `*.dist-info` directory beside the binary in
+  `Contents/Resources/sidecars/docling-serve`.
 
 ## Bundled model weights (redistributed inside the app)
 

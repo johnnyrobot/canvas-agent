@@ -51,15 +51,34 @@ open-source **`chromium-headless-shell`** channel:
   (`RUN_BROWSER_INTEGRATION=1`), including the screenshot-based contrast paths.
 - Side effect: the bundle shrank ~340 MB.
 
-## Residual items for human/legal sign-off
+## Follow-up items — resolved (2026-06-25)
 
-1. **Gemma user-facing terms.** Weights aren't redistributed, but the app defaults
-   to a Gemma model and directs users to obtain it. Best practice (and arguably
-   required) is to surface the Gemma Terms of Use + Prohibited Use Policy to the
-   user in-app or in docs. *Recommended: add a first-run/about notice.*
-2. **docling-serve Python dependency tree.** The 2.8 GB sidecar bundles a large
-   PyTorch dependency set assumed permissive (BSD/Apache/MIT). *Recommended:
-   run a license scan (e.g. `pip-licenses`) over the bundled environment to confirm
-   no copyleft (GPL/LGPL) package slipped in.*
-3. **Final legal review.** This is an engineering review; a human/lawyer should give
-   the distribution sign-off, especially regarding the Gemma Terms pass-through.
+1. **Gemma user-facing terms — DONE.** The app's renderer now shows a persistent,
+   accessible footer notice that it runs Google's Gemma on-device and that use is
+   subject to the Gemma Terms of Use and Prohibited Use Policy (links to
+   `ai.google.dev/gemma/terms` and `…/prohibited_use_policy`), and that the app is
+   Apache-2.0 with third-party components in `THIRD-PARTY-NOTICES.md`
+   (`src/app/renderer/index.html`).
+2. **docling-serve Python dependency scan — DONE.** All 231 bundled packages were
+   license-scanned (`*.dist-info` METADATA, incl. PEP 639 `License-Expression`).
+   Result: **no GPL or AGPL**. Findings: `certifi` + `tqdm` (MPL-2.0, weak file-level
+   copyleft); `paramiko` (LGPL-2.1 — SSH lib, shipped unmodified as source → LGPL
+   satisfied, replaceable, and almost certainly an unused transitive dep). Everything
+   else MIT/Apache-2.0/BSD/PSF. Full inventory: `docs/docling-python-licenses.txt`.
+
+## Final attestation & sign-off
+
+**Engineering license review: COMPLETE.** Every component redistributed in the
+`.dmg` has been identified and verified against its actual license; all are
+permissive or weak-copyleft satisfiable as bundled; no GPL/AGPL, no proprietary DRM,
+no Google-binary (Chrome-for-Testing) terms. Required notices and user-facing terms
+are in place.
+
+This remains an **engineering** review. The final distribution **sign-off is a human
+(legal/business) decision** — in particular confirming comfort with the Gemma Terms
+pass-through and the weak-copyleft components (MPL-2.0 `certifi`/`tqdm`, LGPL-2.1
+`paramiko`, Electron's `libffmpeg.dylib`). This document + the inventory are the
+record to support that sign-off.
+
+Reviewer: automated engineering review (Claude). Date: 2026-06-25. Build: `main` @ the
+`chromium-headless-shell` packaging commit.
