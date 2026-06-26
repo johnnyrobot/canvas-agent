@@ -286,6 +286,10 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
         },
       };
     },
+    async pullModel(onProgress): Promise<void> {
+      failIfDown();
+      onProgress?.({ status: 'success' });
+    },
 
     async createSession(init): Promise<Session> {
       failIfDown();

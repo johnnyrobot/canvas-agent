@@ -85,6 +85,10 @@ interface State {
   notice: string | undefined;
   health: 'checking' | 'ready' | 'degraded';
   healthText: string;
+  /** Set when the configured model isn't installed — drives the in-app download affordance. */
+  modelMissingTag: string | undefined;
+  /** Set while a first-run model download is in flight. */
+  modelPull: { text: string; percent: number | undefined } | undefined;
   activeSessionId: string | undefined;
   sessions: Session[];
   sessionsLoaded: boolean;
@@ -165,6 +169,8 @@ const state: State = {
   notice: undefined,
   health: 'checking',
   healthText: 'Local runtime checking',
+  modelMissingTag: undefined,
+  modelPull: undefined,
   activeSessionId: undefined,
   sessions: [],
   sessionsLoaded: false,
@@ -364,7 +370,28 @@ function progressBar(width: number): El {
 
 function healthStatus(): El {
   const cls = state.health === 'ready' ? 'status' : 'status status--warn';
-  return el('div', { class: cls, 'data-testid': 'health' }, el('span', { class: 'status__dot' }), state.healthText);
+  const children: Array<El | string> = [el('span', { class: 'status__dot' }), state.healthText];
+  if (state.modelPull) {
+    children.push(
+      el(
+        'div',
+        { class: 'progress', 'aria-label': 'Model download progress' },
+        progressBar(state.modelPull.percent ?? 0),
+      ),
+      el('span', { class: 'status__pull' }, state.modelPull.text),
+    );
+  } else if (state.modelMissingTag) {
+    children.push(
+      actionButton(
+        'Download model',
+        () => void downloadModel(),
+        'btn btn--small',
+        `Download model ${state.modelMissingTag}`,
+        'download-model',
+      ),
+    );
+  }
+  return el('div', { class: cls, 'data-testid': 'health' }, ...children);
 }
 
 function screen(...children: El[]): El {
@@ -1298,8 +1325,13 @@ async function refreshHealth(): Promise<void> {
     state.health = ok ? 'ready' : 'degraded';
     if (health.model && !health.model.available) {
       state.health = 'degraded';
-      state.healthText = `Model missing: ${health.model.installCommand}`;
+      // Don't surface a bare CLI command — the app downloads the model itself via
+      // the bundled Ollama (see downloadModel()); the affordance is rendered next
+      // to the status. Skip while a download is already in flight.
+      if (!state.modelPull) state.modelMissingTag = health.model.tag;
+      state.healthText = `Model not installed (${health.model.tag})`;
     } else {
+      state.modelMissingTag = undefined;
       state.healthText = ok
         ? `Local runtime ready${health.model ? ` - ${health.model.tag}` : ''}`
         : `Local runtime: llm ${health.llm ? 'up' : 'down'}, ingest ${health.ingest ? 'up' : 'down'}`;
@@ -1308,6 +1340,39 @@ async function refreshHealth(): Promise<void> {
     state.health = 'degraded';
     state.healthText = 'Local runtime unavailable';
   } finally {
+    render();
+  }
+}
+
+/**
+ * First-run model provisioning: download the configured model into the bundled
+ * Ollama, streaming progress into the status indicator. On success, re-probe
+ * health (which clears the missing-model state); on failure, surface the error.
+ */
+async function downloadModel(): Promise<void> {
+  if (state.modelPull) return; // a download is already running
+  state.error = undefined;
+  state.modelPull = { text: 'Starting download…', percent: undefined };
+  render();
+  try {
+    await api().pullModel((p) => {
+      const percent = typeof p.percent === 'number' ? p.percent : undefined;
+      const text =
+        p.status === 'success'
+          ? 'Finishing…'
+          : percent !== undefined
+            ? `${p.status} ${percent}%`
+            : p.status;
+      state.modelPull = { text, percent };
+      render();
+    });
+    state.modelPull = undefined;
+    state.modelMissingTag = undefined;
+    state.notice = 'Model downloaded.';
+    await refreshHealth();
+  } catch (err) {
+    state.modelPull = undefined;
+    state.error = `Model download failed: ${(err as Error).message}`;
     render();
   }
 }

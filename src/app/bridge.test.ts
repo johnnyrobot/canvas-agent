@@ -111,6 +111,7 @@ test('createBridge exposes exactly the AppApi methods', () => {
     'listScreenshotSources',
     'listSessions',
     'loadSession',
+    'pullModel',
     'resolveBrandTheme',
     'runTurn',
     'saveBrandKit',

@@ -143,3 +143,16 @@ export interface LLMConfig {
   /** If false, never spawn `ollama serve` — assume an externally-managed daemon. */
   manageProcess: boolean;
 }
+
+/**
+ * Normalized progress for a model pull (`/api/pull`), emitted by the sidecar to
+ * higher layers as it downloads. `completed`/`total` are bytes for the layer
+ * currently transferring; `percent` is derived [0..100] when both are known.
+ */
+export interface PullProgress {
+  /** Ollama status line: 'pulling manifest' | 'downloading' | 'verifying' | 'success' | … */
+  status: string;
+  completed?: number;
+  total?: number;
+  percent?: number;
+}

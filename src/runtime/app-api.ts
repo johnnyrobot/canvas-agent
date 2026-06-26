@@ -68,6 +68,8 @@ import type {
   GateResult,
   IssueFix,
   KbRetriever,
+  ModelPullProgress,
+  OnModelPullProgress,
   OnTurnChunk,
   ProductMode,
   RemediateResult,
@@ -84,6 +86,8 @@ import type {
 export interface LlmRuntime extends LlmDescriber {
   isHealthy(): Promise<boolean>;
   modelStatus?(): Promise<{ available: boolean }>;
+  /** Download the configured model, reporting progress. First-run provisioning. */
+  pullModel?(onProgress?: (p: ModelPullProgress) => void): Promise<void>;
 }
 
 /** Docling capability the runtime needs: conversion + a health probe. */
@@ -674,6 +678,16 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
         ingest: await reachable(() => ingest.isHealthy()),
         model,
       };
+    },
+
+    async pullModel(onProgress?: OnModelPullProgress): Promise<void> {
+      // First-run provisioning: download the configured model into the bundled
+      // Ollama. Throws a clear error if the active runtime can't self-install
+      // (e.g. an injected test double, or an externally-managed daemon shape).
+      if (typeof llm.pullModel !== 'function') {
+        throw new Error('In-app model download is not available in this runtime.');
+      }
+      await llm.pullModel(onProgress);
     },
 
     // ── Sessions (storage-backed; the runtime persists each turn) ──

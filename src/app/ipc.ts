@@ -30,6 +30,8 @@ import {
   SAVE_CANVAS_AUTH,
   IMPORT_CANVAS,
   HEALTH,
+  PULL_MODEL,
+  PULL_PROGRESS,
   CREATE_SESSION,
   LIST_SESSIONS,
   LOAD_SESSION,
@@ -118,6 +120,18 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
   );
 
   ipcMain.handle(HEALTH, () => envelope(() => api.health()));
+
+  // First-run model download: payload is `{ pullId? }`. With a `pullId`, stream
+  // each progress update back over the PULL_PROGRESS event tagged with that id;
+  // the final reply (void on success, error envelope on failure) returns normally.
+  ipcMain.handle(PULL_MODEL, (event, payload) => {
+    const { pullId } = (payload ?? {}) as { pullId?: string };
+    return envelope(() => {
+      if (pullId === undefined) return api.pullModel();
+      const sender = (event as IpcEventLike).sender;
+      return api.pullModel((progress) => sender.send(PULL_PROGRESS, { pullId, progress }));
+    });
+  });
 
   // ── Sessions ───────────────────────────────────────────────────────────────
   ipcMain.handle(CREATE_SESSION, (_event, init) =>

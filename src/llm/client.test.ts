@@ -107,3 +107,35 @@ test('chat() surfaces done_reason so a truncated completion is detectable (C11 n
   const res = await client.chat({ messages: [{ role: 'user', content: 'x' }] });
   assert.equal(res.doneReason, 'length');
 });
+
+test('pullModel streams /api/pull progress lines and completes on success', async () => {
+  const client = new OllamaClient(
+    config,
+    ndjsonFetch([
+      { status: 'pulling manifest' },
+      { status: 'downloading', digest: 'sha256:abc', total: 1000, completed: 250 },
+      { status: 'downloading', digest: 'sha256:abc', total: 1000, completed: 1000 },
+      { status: 'success' },
+    ]),
+  );
+  const seen: Array<{ status?: string; completed?: number; total?: number }> = [];
+  for await (const p of client.pullModel('gemma4:12b-mlx')) seen.push(p);
+  assert.deepEqual(
+    seen.map((p) => p.status),
+    ['pulling manifest', 'downloading', 'downloading', 'success'],
+  );
+  assert.equal(seen[1]?.completed, 250);
+  assert.equal(seen.at(-1)?.status, 'success');
+});
+
+test('pullModel throws on an Ollama error line (e.g. an unknown tag)', async () => {
+  const client = new OllamaClient(
+    config,
+    ndjsonFetch([{ status: 'pulling manifest' }, { error: 'model "nope" not found' }]),
+  );
+  await assert.rejects(async () => {
+    for await (const _p of client.pullModel('nope')) {
+      /* drain */
+    }
+  }, /not found/);
+});

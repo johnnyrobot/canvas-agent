@@ -6,7 +6,13 @@
  * orchestrator (PRD §13/§15); the deterministic accessibility gate lives
  * elsewhere — this module is transport only.
  */
-export { createOllamaSidecar, OllamaSidecar, OllamaJsonError, stripCodeFences } from './sidecar.js';
+export {
+  createOllamaSidecar,
+  OllamaSidecar,
+  OllamaJsonError,
+  stripCodeFences,
+  normalizePullProgress,
+} from './sidecar.js';
 export { OllamaClient, OllamaError } from './client.js';
 export { OllamaProcess } from './process.js';
 export { loadLLMConfig, deriveNativeUrl, uniqueModels } from './config.js';
@@ -23,5 +29,6 @@ export type {
   ToolDefinition,
   ToolCall,
   LLMConfig,
+  PullProgress,
 } from './types.js';
 export { MODEL_ROLES } from './types.js';

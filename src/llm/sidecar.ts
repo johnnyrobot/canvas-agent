@@ -9,6 +9,7 @@ import type {
   ChatResult,
   DescribeImageOptions,
   LLMConfig,
+  PullProgress,
 } from './types.js';
 import { loadLLMConfig, type Env } from './config.js';
 import { OllamaClient, OllamaError, type FetchLike } from './client.js';
@@ -89,6 +90,21 @@ export class OllamaSidecar {
     }
   }
 
+  /**
+   * Download the configured text model into the local Ollama, reporting progress.
+   * First-run provisioning: the bundled daemon is brought up if needed, then the
+   * model is pulled via `/api/pull`. Resolves once the pull completes; rejects on
+   * a pull error (e.g. an unknown tag or a network failure). Not serialized
+   * against chat — there is nothing to chat with until this finishes.
+   */
+  async pullModel(onProgress?: (p: PullProgress) => void): Promise<void> {
+    await this.process.ensureAlive(); // make sure the bundled `ollama serve` is up
+    const tag = this.config.models.text;
+    for await (const raw of this.client.pullModel(tag)) {
+      onProgress?.(normalizePullProgress(raw));
+    }
+  }
+
   /** Non-streaming chat, serialized against other heavy calls. */
   chat(opts: ChatOptions): Promise<ChatResult> {
     return this.mutex.run(async () => {
@@ -163,6 +179,21 @@ export class OllamaSidecar {
       ],
     });
   }
+}
+
+/** Normalize a native `/api/pull` progress line into the layer-agnostic `PullProgress`. */
+export function normalizePullProgress(raw: {
+  status?: string;
+  completed?: number;
+  total?: number;
+}): PullProgress {
+  const p: PullProgress = { status: raw.status ?? 'working' };
+  if (typeof raw.completed === 'number') p.completed = raw.completed;
+  if (typeof raw.total === 'number') p.total = raw.total;
+  if (typeof raw.completed === 'number' && typeof raw.total === 'number' && raw.total > 0) {
+    p.percent = Math.min(100, Math.max(0, Math.round((raw.completed / raw.total) * 100)));
+  }
+  return p;
 }
 
 /** Strip a ```json … ``` (or ``` … ```) fence the model may have wrapped JSON in. */

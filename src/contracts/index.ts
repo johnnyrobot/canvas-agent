@@ -365,6 +365,21 @@ export type TurnChunk =
 /** In-process streaming callback passed to AppApi.runTurn. */
 export type OnTurnChunk = (chunk: TurnChunk) => void;
 
+/**
+ * Progress of an in-app model download (mirrors the LLM sidecar's `PullProgress`).
+ * `completed`/`total` are bytes for the layer currently transferring; `percent`
+ * is derived [0..100] when both are known.
+ */
+export interface ModelPullProgress {
+  status: string;
+  completed?: number;
+  total?: number;
+  percent?: number;
+}
+
+/** In-process streaming callback passed to AppApi.pullModel. */
+export type OnModelPullProgress = (progress: ModelPullProgress) => void;
+
 export interface TurnRequest {
   /** The user's message for this turn. */
   user: string;
@@ -427,6 +442,12 @@ export interface AppApi {
   saveCanvasAuth(auth: CanvasConfig): Promise<void>;
   importCanvas(baseUrl: string, courseId: string): Promise<CanvasImportResult>;
   health(): Promise<RuntimeHealth>;
+  /**
+   * Download the configured local model into the bundled Ollama, streaming
+   * progress to `onProgress`. Resolves once the model is present; rejects on
+   * failure. Used by first-run setup when `health().model.available` is false.
+   */
+  pullModel(onProgress?: OnModelPullProgress): Promise<void>;
 
   // ── Sessions (storage-backed; the runtime persists each turn) ──
   createSession(init: { title: string; mode: ProductMode }): Promise<Session>;

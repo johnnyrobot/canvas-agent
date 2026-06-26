@@ -47,6 +47,16 @@ interface NativeChatResponse {
   error?: string;
 }
 
+/** One NDJSON progress line from `/api/pull` (the fields we consume). */
+interface NativePullProgress {
+  status?: string;
+  digest?: string;
+  total?: number;
+  completed?: number;
+  /** Ollama emits a standalone `{"error":…}` line if the pull fails. */
+  error?: string;
+}
+
 /** Combine an optional caller signal with a per-request timeout. */
 function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -116,6 +126,38 @@ export class OllamaClient {
         yield chunk;
       }
       if (done) return;
+    }
+  }
+
+  /**
+   * Pull a model into the local Ollama store, yielding native progress lines.
+   *
+   * Unlike chat, a pull is a multi-GB, many-minute download — so it deliberately
+   * BYPASSES `post()`'s per-request `timeoutMs`; only the caller's `signal` can
+   * cancel it. Streams Ollama's NDJSON progress (`{status,total,completed}`); a
+   * standalone `{"error":…}` line (e.g. an unknown tag) is surfaced as a rejection.
+   */
+  async *pullModel(name: string, signal?: AbortSignal): AsyncGenerator<NativePullProgress> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.config.nativeUrl + '/api/pull', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, stream: true }),
+        signal: signal ?? null, // NO withTimeout — a model download legitimately runs for minutes
+      });
+    } catch (err) {
+      throw new OllamaError(`Request to /api/pull failed: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new OllamaError(`Ollama /api/pull returned ${res.status}`, res.status, text);
+    }
+    for await (const obj of parseNdjson<NativePullProgress>(res.body)) {
+      if (typeof obj.error === 'string' && obj.error !== '') {
+        throw new OllamaError(`Ollama pull error: ${obj.error}`);
+      }
+      yield obj;
     }
   }
 

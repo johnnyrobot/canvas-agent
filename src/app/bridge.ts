@@ -17,7 +17,7 @@
  * with that id, and forwards them to `onChunk`; the subscription is always torn
  * down once the turn's reply resolves (or rejects).
  */
-import type { AppApi, TurnChunk } from '../contracts/index.js';
+import type { AppApi, TurnChunk, ModelPullProgress } from '../contracts/index.js';
 import type { IpcResult } from './ipc.js';
 import {
   RUN_TURN,
@@ -39,6 +39,8 @@ import {
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
   CHUNK,
+  PULL_MODEL,
+  PULL_PROGRESS,
 } from './channels.js';
 
 /** Mirrors `ipcRenderer.invoke`: send on a channel, await the main-process reply. */
@@ -87,6 +89,24 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
     },
     async health() {
       return unwrap(await invoke(HEALTH));
+    },
+    async pullModel(onProgress) {
+      // No callback ⇒ fire-and-await the download with no progress subscription.
+      if (!onProgress) {
+        return unwrap(await invoke(PULL_MODEL, {}));
+      }
+      // Streaming: mint a pullId, subscribe to PULL_PROGRESS, route matching
+      // updates to `onProgress`, and always unsubscribe once the reply settles.
+      const pullId = crypto.randomUUID();
+      const off = subscribe(PULL_PROGRESS, (payload) => {
+        const p = payload as { pullId: string; progress: ModelPullProgress };
+        if (p.pullId === pullId) onProgress(p.progress);
+      });
+      try {
+        return unwrap(await invoke(PULL_MODEL, { pullId }));
+      } finally {
+        off();
+      }
     },
 
     // ── Sessions ───────────────────────────────────────────────────────────────

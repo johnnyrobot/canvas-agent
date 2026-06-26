@@ -28,6 +28,9 @@ export function createUnavailableApi(reason: string): AppApi {
     async health(): Promise<RuntimeHealth> {
       return { llm: false, ingest: false };
     },
+    async pullModel() {
+      return fail();
+    },
     async runTurn() {
       return fail();
     },

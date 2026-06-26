@@ -80,3 +80,26 @@ test('decodedBase64Bytes approximates decoded size and strips a data: prefix', (
   assert.equal(decodedBase64Bytes('data:image/png;base64,QUJD'), 3);
   assert.equal(decodedBase64Bytes(''), 0);
 });
+
+test('pullModel brings the daemon up, then streams normalized progress (percent derived)', async () => {
+  const config = loadLLMConfig(baseEnv);
+  const proc = new CountingProcess(config);
+  const pullFetch: FetchLike = async () =>
+    new Response(
+      [
+        '{"status":"pulling manifest"}',
+        '{"status":"downloading","total":1000,"completed":500}',
+        '{"status":"success"}',
+      ].join('\n') + '\n',
+      { status: 200 },
+    );
+  const sidecar = createOllamaSidecar({ env: baseEnv, fetch: pullFetch, process: proc });
+  const seen: Array<{ status: string; percent?: number }> = [];
+  await sidecar.pullModel((p) => seen.push(p));
+  assert.equal(proc.ensureAliveCalls, 1, 'ensures the bundled daemon is up before pulling');
+  assert.deepEqual(
+    seen.map((p) => p.status),
+    ['pulling manifest', 'downloading', 'success'],
+  );
+  assert.equal(seen[1]?.percent, 50, 'derives percent from completed/total');
+});

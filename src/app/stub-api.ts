@@ -208,6 +208,11 @@ export function createStubApi(): AppApi {
         model: { tag: 'gemma4:31b', available: true, installCommand: 'ollama pull gemma4:31b' },
       };
     },
+    async pullModel(onProgress): Promise<void> {
+      // The stub model is always "available"; demo a quick progress sweep anyway.
+      onProgress?.({ status: 'downloading', total: 100, completed: 100, percent: 100 });
+      onProgress?.({ status: 'success' });
+    },
 
     // ── Sessions ───────────────────────────────────────────────────────────────
     async createSession(init): Promise<Session> {
