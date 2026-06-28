@@ -284,9 +284,14 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
           available: scenario !== 'runtime-down',
           installCommand: 'CANVAS_AGENT_E2E_API=scripted',
         },
+        ingestModel: { available: scenario !== 'runtime-down' },
       };
     },
     async pullModel(onProgress): Promise<void> {
+      failIfDown();
+      onProgress?.({ status: 'success' });
+    },
+    async pullIngestModel(onProgress): Promise<void> {
       failIfDown();
       onProgress?.({ status: 'success' });
     },

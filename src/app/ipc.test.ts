@@ -155,6 +155,10 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
       calls.push({ method: 'pullModel', args: [] });
       onProgress?.({ status: 'success' });
     },
+    async pullIngestModel(onProgress) {
+      calls.push({ method: 'pullIngestModel', args: [] });
+      onProgress?.({ status: 'success' });
+    },
     async createSession(init) {
       calls.push({ method: 'createSession', args: [init] });
       return SESSION;

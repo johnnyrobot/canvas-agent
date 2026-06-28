@@ -13,6 +13,7 @@ export const SAVE_CANVAS_AUTH = 'canvasAgent:saveCanvasAuth';
 export const IMPORT_CANVAS = 'canvasAgent:importCanvas';
 export const HEALTH = 'canvasAgent:health';
 export const PULL_MODEL = 'canvasAgent:pullModel';
+export const PULL_INGEST_MODEL = 'canvasAgent:pullIngestModel';
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 export const CREATE_SESSION = 'canvasAgent:createSession';
@@ -52,6 +53,14 @@ export const CHUNK = 'canvasAgent:chunk';
  */
 export const PULL_PROGRESS = 'canvasAgent:pullProgress';
 
+/**
+ * One-way event channel carrying streamed `pullIngestModel` progress (the
+ * Docling first-run download) from main → renderer. Like `PULL_PROGRESS`, it is
+ * a `send`, not a `handle`, so it is excluded from `CHANNELS` and routed in
+ * `bridge.ts` by the minted `pullId`.
+ */
+export const INGEST_PULL_PROGRESS = 'canvasAgent:ingestPullProgress';
+
 /** All request/response IPC channels, keyed by the `AppApi` method they back. */
 export const CHANNELS = {
   runTurn: RUN_TURN,
@@ -59,6 +68,7 @@ export const CHANNELS = {
   importCanvas: IMPORT_CANVAS,
   health: HEALTH,
   pullModel: PULL_MODEL,
+  pullIngestModel: PULL_INGEST_MODEL,
   createSession: CREATE_SESSION,
   listSessions: LIST_SESSIONS,
   loadSession: LOAD_SESSION,

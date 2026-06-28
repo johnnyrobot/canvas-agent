@@ -11,6 +11,7 @@ test('default layout sits under ~/Library/Application Support/CanvasAgent', () =
   assert.equal(p.dbPath, join(dataDir, 'canvas-agent.sqlite'));
   assert.equal(p.uploadsDir, join(dataDir, 'uploads'));
   assert.equal(p.exportsDir, join(dataDir, 'exports'));
+  assert.equal(p.modelsDir, join(dataDir, 'docling-models'));
 });
 
 test('every resolved path is absolute', () => {
@@ -19,6 +20,7 @@ test('every resolved path is absolute', () => {
   assert.ok(isAbsolute(p.dbPath));
   assert.ok(isAbsolute(p.uploadsDir));
   assert.ok(isAbsolute(p.exportsDir));
+  assert.ok(isAbsolute(p.modelsDir));
 });
 
 test('overriding dataDir re-bases the derived paths under it', () => {

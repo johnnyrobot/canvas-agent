@@ -39,3 +39,7 @@ PRD_Canvas_Course_Design_Accessibility_Assistant.md
 /docs/ship-audit/
 /docs/superpowers/
 /docs/research/
+
+# Python bytecode from build scripts
+__pycache__/
+*.pyc

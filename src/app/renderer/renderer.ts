@@ -89,6 +89,10 @@ interface State {
   modelMissingTag: string | undefined;
   /** Set while a first-run model download is in flight. */
   modelPull: { text: string; percent: number | undefined } | undefined;
+  /** Set when the Docling conversion models aren't installed (PDF/scanned-doc support). */
+  ingestModelMissing: boolean;
+  /** Set while a first-run Docling model download is in flight. */
+  ingestPull: { text: string; percent: number | undefined } | undefined;
   activeSessionId: string | undefined;
   sessions: Session[];
   sessionsLoaded: boolean;
@@ -171,6 +175,8 @@ const state: State = {
   healthText: 'Local runtime checking',
   modelMissingTag: undefined,
   modelPull: undefined,
+  ingestModelMissing: false,
+  ingestPull: undefined,
   activeSessionId: undefined,
   sessions: [],
   sessionsLoaded: false,
@@ -388,6 +394,28 @@ function healthStatus(): El {
         'btn btn--small',
         `Download model ${state.modelMissingTag}`,
         'download-model',
+      ),
+    );
+  }
+  // Docling document models (independent of the LLM): offer a first-run download
+  // for PDF/scanned-doc support. Office/web docs convert without them.
+  if (state.ingestPull) {
+    children.push(
+      el(
+        'div',
+        { class: 'progress', 'aria-label': 'Document model download progress' },
+        progressBar(state.ingestPull.percent ?? 0),
+      ),
+      el('span', { class: 'status__pull' }, state.ingestPull.text),
+    );
+  } else if (state.ingestModelMissing) {
+    children.push(
+      actionButton(
+        'Download document models',
+        () => void downloadIngestModel(),
+        'btn btn--small',
+        'Download Docling document-conversion models (for PDF and scanned documents)',
+        'download-ingest-model',
       ),
     );
   }
@@ -1336,6 +1364,13 @@ async function refreshHealth(): Promise<void> {
         ? `Local runtime ready${health.model ? ` - ${health.model.tag}` : ''}`
         : `Local runtime: llm ${health.llm ? 'up' : 'down'}, ingest ${health.ingest ? 'up' : 'down'}`;
     }
+    // Docling document models are independent of the LLM: missing them only
+    // blocks PDF/scanned-image conversion (office/web docs still work), so this
+    // surfaces a download affordance without marking the whole runtime degraded.
+    // Skip while a download is already in flight.
+    if (!state.ingestPull) {
+      state.ingestModelMissing = health.ingestModel ? !health.ingestModel.available : false;
+    }
   } catch {
     state.health = 'degraded';
     state.healthText = 'Local runtime unavailable';
@@ -1373,6 +1408,41 @@ async function downloadModel(): Promise<void> {
   } catch (err) {
     state.modelPull = undefined;
     state.error = `Model download failed: ${(err as Error).message}`;
+    render();
+  }
+}
+
+/**
+ * First-run document-model provisioning: download the Docling conversion models
+ * (layout, TableFormer, OCR, code/formula, picture-classifier + Granite-Docling)
+ * into the per-user store, streaming progress into the status indicator. Mirrors
+ * downloadModel(); names the current model in the progress text.
+ */
+async function downloadIngestModel(): Promise<void> {
+  if (state.ingestPull) return; // a download is already running
+  state.error = undefined;
+  state.ingestPull = { text: 'Starting download…', percent: undefined };
+  render();
+  try {
+    await api().pullIngestModel((p) => {
+      const percent = typeof p.percent === 'number' ? p.percent : undefined;
+      const label = p.model ? `${p.status} ${p.model}` : p.status;
+      const text =
+        p.status === 'success'
+          ? 'Finishing…'
+          : percent !== undefined
+            ? `${label} ${percent}%`
+            : label;
+      state.ingestPull = { text, percent };
+      render();
+    });
+    state.ingestPull = undefined;
+    state.ingestModelMissing = false;
+    state.notice = 'Document models downloaded.';
+    await refreshHealth();
+  } catch (err) {
+    state.ingestPull = undefined;
+    state.error = `Document-model download failed: ${(err as Error).message}`;
     render();
   }
 }

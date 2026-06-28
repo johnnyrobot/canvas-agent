@@ -206,11 +206,16 @@ export function createStubApi(): AppApi {
         llm: true,
         ingest: true,
         model: { tag: 'gemma4:31b', available: true, installCommand: 'ollama pull gemma4:31b' },
+        ingestModel: { available: true },
       };
     },
     async pullModel(onProgress): Promise<void> {
       // The stub model is always "available"; demo a quick progress sweep anyway.
       onProgress?.({ status: 'downloading', total: 100, completed: 100, percent: 100 });
+      onProgress?.({ status: 'success' });
+    },
+    async pullIngestModel(onProgress): Promise<void> {
+      onProgress?.({ status: 'downloading', model: 'granite_docling', total: 6, completed: 6, percent: 100 });
       onProgress?.({ status: 'success' });
     },
 

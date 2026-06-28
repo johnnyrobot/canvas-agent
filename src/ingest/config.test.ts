@@ -9,6 +9,23 @@ test('defaults match PRD Appendix H', () => {
   assert.equal(c.ocrEnabled, true);
   assert.equal(c.manageProcess, true);
   assert.equal(c.ocrEngine, undefined); // omitted unless set
+  // Classic pipeline stays the default workhorse; the Granite-Docling VLM is
+  // one env var away (deep-research 2026-06-27: VLM does NOT replace classic).
+  assert.equal(c.pipeline, 'standard');
+  assert.equal(c.vlmPreset, 'granite_docling');
+});
+
+test('INGEST_PIPELINE selects the VLM pipeline', () => {
+  assert.equal(loadIngestConfig({ INGEST_PIPELINE: 'vlm' }).pipeline, 'vlm');
+  assert.equal(loadIngestConfig({ INGEST_PIPELINE: 'standard' }).pipeline, 'standard');
+});
+
+test('INGEST_PIPELINE rejects an unknown pipeline', () => {
+  assert.throws(() => loadIngestConfig({ INGEST_PIPELINE: 'legacy' }), /Unknown INGEST_PIPELINE: legacy/);
+});
+
+test('INGEST_VLM_PRESET overrides the VLM preset (e.g. speed tier)', () => {
+  assert.equal(loadIngestConfig({ INGEST_VLM_PRESET: 'smoldocling' }).vlmPreset, 'smoldocling');
 });
 
 test('trailing slash is stripped from the base URL', () => {

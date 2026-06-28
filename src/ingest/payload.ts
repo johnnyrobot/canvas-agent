@@ -18,6 +18,14 @@ export interface ConvertRequest {
     do_ocr: boolean;
     force_ocr: boolean;
     ocr_engine?: string;
+    /** `'standard'` (classic) or `'vlm'`. Omitted = docling-serve's default (standard). */
+    pipeline?: string;
+    /**
+     * VLM preset ID for the `vlm` pipeline, e.g. `'granite_docling'`. This is the
+     * non-deprecated docling-serve field (`vlm_pipeline_model` is deprecated in
+     * the bundled version). Only sent when `pipeline === 'vlm'`.
+     */
+    vlm_pipeline_preset?: string;
   };
   http_sources?: { url: string }[];
   file_sources?: { base64_string: string; filename: string }[];
@@ -30,6 +38,14 @@ export function buildConvertOptions(opts: ConvertOptions, config: IngestConfig):
     force_ocr: opts.forceOcr ?? false,
   };
   if (config.ocrEngine) options.ocr_engine = config.ocrEngine;
+  // Only attach pipeline fields for the VLM path; for `standard` (the server's
+  // own default) we send nothing, keeping the request identical to before and
+  // avoiding a needless VLM model load.
+  const pipeline = opts.pipeline ?? config.pipeline;
+  if (pipeline === 'vlm') {
+    options.pipeline = 'vlm';
+    options.vlm_pipeline_preset = opts.vlmPreset ?? config.vlmPreset;
+  }
   return options;
 }
 

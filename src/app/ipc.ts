@@ -32,6 +32,8 @@ import {
   HEALTH,
   PULL_MODEL,
   PULL_PROGRESS,
+  PULL_INGEST_MODEL,
+  INGEST_PULL_PROGRESS,
   CREATE_SESSION,
   LIST_SESSIONS,
   LOAD_SESSION,
@@ -130,6 +132,17 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
       if (pullId === undefined) return api.pullModel();
       const sender = (event as IpcEventLike).sender;
       return api.pullModel((progress) => sender.send(PULL_PROGRESS, { pullId, progress }));
+    });
+  });
+
+  // First-run Docling model download — same streaming shape as PULL_MODEL,
+  // tagged over the INGEST_PULL_PROGRESS event channel.
+  ipcMain.handle(PULL_INGEST_MODEL, (event, payload) => {
+    const { pullId } = (payload ?? {}) as { pullId?: string };
+    return envelope(() => {
+      if (pullId === undefined) return api.pullIngestModel();
+      const sender = (event as IpcEventLike).sender;
+      return api.pullIngestModel((progress) => sender.send(INGEST_PULL_PROGRESS, { pullId, progress }));
     });
   });
 

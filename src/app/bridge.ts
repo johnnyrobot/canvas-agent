@@ -41,6 +41,8 @@ import {
   CHUNK,
   PULL_MODEL,
   PULL_PROGRESS,
+  PULL_INGEST_MODEL,
+  INGEST_PULL_PROGRESS,
 } from './channels.js';
 
 /** Mirrors `ipcRenderer.invoke`: send on a channel, await the main-process reply. */
@@ -104,6 +106,22 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
       });
       try {
         return unwrap(await invoke(PULL_MODEL, { pullId }));
+      } finally {
+        off();
+      }
+    },
+    async pullIngestModel(onProgress) {
+      // Same streaming shape as pullModel, over the INGEST_PULL_PROGRESS channel.
+      if (!onProgress) {
+        return unwrap(await invoke(PULL_INGEST_MODEL, {}));
+      }
+      const pullId = crypto.randomUUID();
+      const off = subscribe(INGEST_PULL_PROGRESS, (payload) => {
+        const p = payload as { pullId: string; progress: ModelPullProgress };
+        if (p.pullId === pullId) onProgress(p.progress);
+      });
+      try {
+        return unwrap(await invoke(PULL_INGEST_MODEL, { pullId }));
       } finally {
         off();
       }

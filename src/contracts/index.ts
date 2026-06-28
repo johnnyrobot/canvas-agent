@@ -161,6 +161,13 @@ export interface AppPaths {
   uploadsDir: string;
   /** Directory for local exports. */
   exportsDir: string;
+  /**
+   * Directory for the Docling conversion models (layout, TableFormer, OCR,
+   * code/formula, picture-classifier + the Granite-Docling VLM). NOT bundled in
+   * the app — downloaded here on first run, then served fully offline
+   * (`DOCLING_SERVE_ARTIFACTS_PATH`). Empty until the first-run download.
+   */
+  modelsDir: string;
 }
 
 // ── Knowledge (knowledge track; consumes Database) ───────────────────────────
@@ -375,6 +382,8 @@ export interface ModelPullProgress {
   completed?: number;
   total?: number;
   percent?: number;
+  /** For the Docling pull, the model currently downloading (e.g. 'granite_docling'). */
+  model?: string;
 }
 
 /** In-process streaming callback passed to AppApi.pullModel. */
@@ -427,6 +436,13 @@ export interface RuntimeHealth {
   ingest: boolean;
   /** Local Ollama model tag selected for text turns, plus availability. */
   model?: ModelHealth;
+  /**
+   * Whether the Docling conversion models are present. Office/web docs convert
+   * without them; PDFs and scanned images need them, so the UI offers a
+   * first-run download when `available` is false. Absent when the runtime can't
+   * report it (e.g. an externally-managed sidecar).
+   */
+  ingestModel?: { available: boolean };
 }
 
 /** The single surface the Electron main process exposes to the renderer via IPC. */
@@ -448,6 +464,14 @@ export interface AppApi {
    * failure. Used by first-run setup when `health().model.available` is false.
    */
   pullModel(onProgress?: OnModelPullProgress): Promise<void>;
+  /**
+   * Download the Docling conversion models (layout, TableFormer, OCR,
+   * code/formula, picture-classifier + the Granite-Docling VLM) into the
+   * per-user store, streaming progress to `onProgress`. No-op if already present.
+   * Used by first-run setup when `health().ingestModel.available` is false.
+   * Rejects outside the packaged app (no bundled Python) or on a download error.
+   */
+  pullIngestModel(onProgress?: OnModelPullProgress): Promise<void>;
 
   // ── Sessions (storage-backed; the runtime persists each turn) ──
   createSession(init: { title: string; mode: ProductMode }): Promise<Session>;

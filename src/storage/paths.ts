@@ -21,6 +21,7 @@ function deriveFrom(dataDir: string): AppPaths {
     dbPath: join(dataDir, 'canvas-agent.sqlite'),
     uploadsDir: join(dataDir, 'uploads'),
     exportsDir: join(dataDir, 'exports'),
+    modelsDir: join(dataDir, 'docling-models'),
   };
 }
 
@@ -38,6 +39,7 @@ export function resolveAppPaths(override?: Partial<AppPaths>): AppPaths {
     dbPath: override?.dbPath ? resolve(override.dbPath) : derived.dbPath,
     uploadsDir: override?.uploadsDir ? resolve(override.uploadsDir) : derived.uploadsDir,
     exportsDir: override?.exportsDir ? resolve(override.exportsDir) : derived.exportsDir,
+    modelsDir: override?.modelsDir ? resolve(override.modelsDir) : derived.modelsDir,
   };
   return merged;
 }
@@ -48,7 +50,7 @@ export function resolveAppPaths(override?: Partial<AppPaths>): AppPaths {
  * so creating these three dirs is sufficient.
  */
 export async function ensureAppDirs(paths: AppPaths): Promise<void> {
-  for (const dir of [paths.dataDir, paths.uploadsDir, paths.exportsDir]) {
+  for (const dir of [paths.dataDir, paths.uploadsDir, paths.exportsDir, paths.modelsDir]) {
     if (!isAbsolute(dir)) throw new Error(`ensureAppDirs requires absolute paths, got: ${dir}`);
     await mkdir(dir, { recursive: true });
   }

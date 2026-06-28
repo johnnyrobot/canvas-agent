@@ -20,6 +20,7 @@ import { createE2eAppApi } from './e2e-api.js';
 import { isInAppUrl, externalOpenTarget } from './navigation.js';
 import { withScreenshotCapture } from './screenshot.js';
 import { createAppApi } from '../runtime/index.js';
+import { resolveAppPaths } from '../storage/index.js';
 import type { ScreenshotPermissionStatus } from '../contracts/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -79,6 +80,13 @@ app.on('web-contents-created', (_event, contents) => {
 function createRuntimeApi() {
   if (process.env.CANVAS_AGENT_E2E_API === 'scripted') {
     return createE2eAppApi(process.env.CANVAS_AGENT_E2E_SCENARIO);
+  }
+  // Packaged app only: point Docling at the per-user model store so the (un-bundled)
+  // conversion models download there on first run and are then served fully offline.
+  // In dev we leave it unset so the bundled `docling-serve` launcher's own defaults
+  // (its `models/` dir or the HF cache) apply unchanged.
+  if (app.isPackaged && !process.env.DOCLING_MODELS_DIR) {
+    process.env.DOCLING_MODELS_DIR = resolveAppPaths().modelsDir;
   }
   return withScreenshotCapture(createAppApi(), {
     permissionStatus: () =>

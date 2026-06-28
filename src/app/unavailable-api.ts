@@ -31,6 +31,9 @@ export function createUnavailableApi(reason: string): AppApi {
     async pullModel() {
       return fail();
     },
+    async pullIngestModel() {
+      return fail();
+    },
     async runTurn() {
       return fail();
     },

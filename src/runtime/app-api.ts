@@ -94,6 +94,10 @@ export interface LlmRuntime extends LlmDescriber {
 export interface IngestRuntime extends DocConverter {
   isHealthy(): Promise<boolean>;
   convert?(file: FileSource): Promise<ConvertedDocument>;
+  /** Whether the conversion models are present locally (first-run provisioning). */
+  modelStatus?(): Promise<{ available: boolean }>;
+  /** Download the conversion models, reporting progress. First-run provisioning. */
+  pullModel?(onProgress?: (p: ModelPullProgress) => void): Promise<void>;
 }
 
 export interface AppApiOptions {
@@ -673,11 +677,21 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
 
     async health(): Promise<RuntimeHealth> {
       const model = await modelHealth(llm, configuredModel);
-      return {
+      const health: RuntimeHealth = {
         llm: await reachable(() => llm.isHealthy()),
         ingest: await reachable(() => ingest.isHealthy()),
         model,
       };
+      // Report whether the Docling models are present so the UI can offer a
+      // first-run download. Only when the runtime can answer (real sidecar).
+      if (typeof ingest.modelStatus === 'function') {
+        try {
+          health.ingestModel = { available: (await ingest.modelStatus()).available };
+        } catch {
+          health.ingestModel = { available: false };
+        }
+      }
+      return health;
     },
 
     async pullModel(onProgress?: OnModelPullProgress): Promise<void> {
@@ -688,6 +702,16 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
         throw new Error('In-app model download is not available in this runtime.');
       }
       await llm.pullModel(onProgress);
+    },
+
+    async pullIngestModel(onProgress?: OnModelPullProgress): Promise<void> {
+      // First-run provisioning: download the Docling conversion models into the
+      // per-user store. Throws a clear error if the active runtime can't
+      // self-install (e.g. a test double or an externally-managed sidecar).
+      if (typeof ingest.pullModel !== 'function') {
+        throw new Error('In-app document-model download is not available in this runtime.');
+      }
+      await ingest.pullModel(onProgress);
     },
 
     // ── Sessions (storage-backed; the runtime persists each turn) ──

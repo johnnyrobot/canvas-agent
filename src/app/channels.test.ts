@@ -8,6 +8,8 @@ import {
   IMPORT_CANVAS,
   HEALTH,
   PULL_MODEL,
+  PULL_INGEST_MODEL,
+  INGEST_PULL_PROGRESS,
   CREATE_SESSION,
   LIST_SESSIONS,
   LOAD_SESSION,
@@ -37,6 +39,7 @@ test('CHANNELS bundles every request/response channel, keyed by AppApi method', 
     importCanvas: IMPORT_CANVAS,
     health: HEALTH,
     pullModel: PULL_MODEL,
+    pullIngestModel: PULL_INGEST_MODEL,
     createSession: CREATE_SESSION,
     listSessions: LIST_SESSIONS,
     loadSession: LOAD_SESSION,
@@ -70,5 +73,13 @@ test('CHUNK is a separate one-way event channel, NOT part of CHANNELS', () => {
   assert.ok(
     !Object.values(CHANNELS).includes(CHUNK as (typeof CHANNELS)[keyof typeof CHANNELS]),
     'CHUNK must not be a request/response handler channel',
+  );
+});
+
+test('INGEST_PULL_PROGRESS is a separate one-way event channel, NOT part of CHANNELS', () => {
+  assert.equal(INGEST_PULL_PROGRESS, 'canvasAgent:ingestPullProgress');
+  assert.ok(
+    !Object.values(CHANNELS).includes(INGEST_PULL_PROGRESS as (typeof CHANNELS)[keyof typeof CHANNELS]),
+    'INGEST_PULL_PROGRESS must not be a request/response handler channel',
   );
 });

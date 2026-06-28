@@ -13,6 +13,28 @@ test('buildConvertOptions maps config + overrides to docling fields', () => {
   assert.equal(opts.ocr_engine, 'ocrmac');
 });
 
+test('buildConvertOptions omits pipeline fields under the default (standard) pipeline', () => {
+  // Standard is docling-serve's own default; sending nothing keeps the request
+  // shape identical to today and avoids a needless VLM model load.
+  const opts = buildConvertOptions({}, config);
+  assert.equal(opts.pipeline, undefined);
+  assert.equal(opts.vlm_pipeline_preset, undefined);
+});
+
+test('buildConvertOptions emits pipeline:vlm + vlm_pipeline_preset when VLM is configured', () => {
+  const vlmConfig = loadIngestConfig({ INGEST_PIPELINE: 'vlm' });
+  const opts = buildConvertOptions({}, vlmConfig);
+  assert.equal(opts.pipeline, 'vlm');
+  assert.equal(opts.vlm_pipeline_preset, 'granite_docling');
+});
+
+test('a per-call pipeline override beats the config default', () => {
+  // config is standard here; the call asks for VLM and gets the config preset.
+  const opts = buildConvertOptions({ pipeline: 'vlm' }, config);
+  assert.equal(opts.pipeline, 'vlm');
+  assert.equal(opts.vlm_pipeline_preset, 'granite_docling');
+});
+
 test('buildFileRequest uses file_sources with base64 + filename', () => {
   const req = buildFileRequest({ base64: 'QUJD', filename: 'syllabus.docx' }, {}, config);
   assert.deepEqual(req.file_sources, [{ base64_string: 'QUJD', filename: 'syllabus.docx' }]);

@@ -63,24 +63,44 @@ find "$OUT/python" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/n
 find "$OUT/python" -type d -name 'tests' -path '*/site-packages/*' -prune -exec rm -rf {} + 2>/dev/null || true
 cat > "$OUT/docling-serve" <<'WRAP'
 #!/bin/sh
-# Relocatable, OFFLINE launcher: run the bundled CPython's docling_serve from this
-# dir, using the bundled model artifacts and never reaching the network. $DIR is
-# resolved at runtime, so the bundle works at any path (no absolute shebang).
+# Relocatable launcher: run the bundled CPython's docling_serve from this dir.
+# $DIR is resolved at runtime, so the bundle works at any path (no absolute shebang).
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
-[ -d "$DIR/models" ] && export DOCLING_SERVE_ARTIFACTS_PATH="$DIR/models"
-# HF/torch may want a writable cache even offline; default to a writable temp unless
-# the spawning app already pointed HF_HOME at a writable (userData) location.
+if [ -d "$DIR/models" ] && [ -n "$(ls -A "$DIR/models" 2>/dev/null)" ]; then
+  # Models EMBEDDED in the sidecar (DOCLING_BUNDLE_MODELS=1 build): serve fully
+  # OFFLINE against them.
+  export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+  export DOCLING_SERVE_ARTIFACTS_PATH="$DIR/models"
+fi
+# Default build: models live in the app's per-user store; the spawning app sets
+# DOCLING_SERVE_ARTIFACTS_PATH + HF_HUB_OFFLINE for offline serving after the
+# first-run download. Provide a writable HF cache default either way.
 export HF_HOME="${HF_HOME:-${TMPDIR:-/tmp}/canvas-agent-hf}"
 exec "$DIR/python/bin/python3" -m docling_serve run "$@"
 WRAP
 chmod +x "$OUT/docling-serve"
 
-echo "==> [7/8] pre-stage docling pipeline models for OFFLINE conversion"
-if [ -d "$OUT/models" ] && [ -n "$(ls -A "$OUT/models" 2>/dev/null)" ]; then
-  echo "    models already present — skipping (delete $OUT/models to refetch)"
+# Ship the first-run model-download driver beside the launcher. The app spawns it
+# with the bundled python (src/ingest/model-download.ts resolves <dir>/download-models.py).
+cp "$ROOT/scripts/docling-download-models.py" "$OUT/download-models.py"
+chmod +x "$OUT/download-models.py"
+
+echo "==> [7/8] models: first-run download by default (DOCLING_BUNDLE_MODELS=1 to embed)"
+# By default the models are NOT bundled — they download into the app's per-user
+# store on first run (keeps the DMG ~1.2GB smaller; see scripts/docling-download-models.py).
+# Set DOCLING_BUNDLE_MODELS=1 for a fully-offline-out-of-the-box build that embeds
+# the classic pipeline (layout, tableformer, code_formula, picture_classifier,
+# rapidocr) + the Granite-Docling MLX VLM (with_granitedocling_mlx defaults to
+# False upstream, so we opt in explicitly).
+if [ "${DOCLING_BUNDLE_MODELS:-0}" = "1" ]; then
+  if [ -d "$OUT/models" ] && [ -n "$(ls -A "$OUT/models" 2>/dev/null)" ]; then
+    echo "    models already present — skipping (delete $OUT/models to refetch)"
+  else
+    echo "    embedding models (DOCLING_BUNDLE_MODELS=1) — classic + granite_docling MLX"
+    "$PYBIN" -c "from docling.utils.model_downloader import download_models; from pathlib import Path; download_models(output_dir=Path('$OUT/models'), progress=False, with_granitedocling_mlx=True); print('    models downloaded (classic + granite_docling MLX)')"
+  fi
 else
-  "$PYBIN" -c "from docling.utils.model_downloader import download_models; from pathlib import Path; download_models(output_dir=Path('$OUT/models'), progress=False); print('    models downloaded')"
+  echo "    skipping embed — models download on first run into the app's per-user store."
 fi
 
 echo "==> [8/8] verify: in-place import + RELOCATED interpreter import"
