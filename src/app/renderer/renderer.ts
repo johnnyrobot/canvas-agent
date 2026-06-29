@@ -13,7 +13,22 @@ import { composeAlignmentPrompt } from './alignment.js';
 import { previewFrame, previewSrcdoc } from './preview.js';
 import { api, byId, copyText, el, errorMessage, later, onReady, type El } from './ui.js';
 import { turnViewToVm, type FragmentVm } from '../view.js';
+import { createRemediationPanel, type RemediationIssue, type RemediationView } from './remediation.js';
+import {
+  createInstHome,
+  createInstAsk,
+  createInstBrand,
+  createInstIngest,
+  type InstDeps,
+  type InstTarget,
+  type InstAskData,
+  type InstBrandData,
+  type InstIngestData,
+  type InstRole,
+} from './institutional-screens.js';
 import type {
+  AuditIssue,
+  Severity as GateSeverity,
   BrandKit,
   CanvasPage,
   DocumentConversionResult,
@@ -43,7 +58,12 @@ type Screen =
   | 'guidance-answer'
   | 'alignment'
   | 'brand-manager'
-  | 'saved-work';
+  | 'saved-work'
+  | 'remediate-review'
+  | 'inst-home'
+  | 'inst-ask'
+  | 'inst-brand'
+  | 'inst-ingest';
 
 type SourceMode = 'paste' | 'canvas' | 'document';
 type ArtifactView = 'preview' | 'code';
@@ -315,7 +335,115 @@ function renderScreen(): ScreenParts {
         header: simpleHeader('Saved work and more', 'New session', 'blue', state.previousScreen, () => newSession()),
         main: renderSavedWork(),
       };
+    case 'remediate-review':
+      return {
+        header: simpleHeader('Accessibility review', 'Institutional preview', 'blue', 'home'),
+        main: renderRemediationReview(),
+      };
+    case 'inst-home':
+      return { header: simpleHeader('Redesign preview', 'Home', 'blue', 'home'), main: renderInstHome() };
+    case 'inst-ask':
+      return { header: simpleHeader('Ask & Answer', 'Redesign', 'blue', 'inst-home'), main: renderInstAsk() };
+    case 'inst-brand':
+      return { header: simpleHeader('Brand kit', 'Redesign', 'blue', 'inst-home'), main: renderInstBrand() };
+    case 'inst-ingest':
+      return { header: simpleHeader('Document ingest', 'Redesign', 'blue', 'inst-home'), main: renderInstIngest() };
   }
+}
+
+function institutionalDeps(): InstDeps {
+  return {
+    onNavigate: (target: InstTarget) => {
+      if (target === 'remediation') go('remediate-review');
+      else if (target === 'ask') go('inst-ask');
+      else if (target === 'brand') go('inst-brand');
+      else go('inst-ingest');
+    },
+  };
+}
+
+function renderInstHome(): El {
+  return createInstHome(institutionalDeps()).element;
+}
+
+// The inst-* preview screens bind to whatever real state exists (the latest
+// guidance answer, the current brand kit + resolved theme, the last document
+// conversion), falling back to their representative seed when none is present.
+function instAskData(): InstAskData | undefined {
+  const view = state.guidanceView;
+  const answer = view?.text.trim();
+  if (!answer) return undefined;
+  const toolCount = view?.toolsUsed?.length ?? 0;
+  const tools = toolCount > 0 ? ` · ${toolCount} ${toolCount === 1 ? 'tool' : 'tools'}` : '';
+  return {
+    question: state.guidanceQuestion.trim() || 'Your question',
+    meta: `Answered on-device · Gemma${tools}`,
+    answer,
+  };
+}
+
+function instBrandData(): InstBrandData | undefined {
+  void ensureCurrentTheme();
+  const theme = state.theme;
+  if (!theme || theme.colors.length === 0) return undefined;
+  const kit = currentBrandKit();
+  const roles: InstRole[] = theme.colors.map((c) => ({
+    sample: c.background,
+    name: roleName(c.role),
+    ratio: `${c.contrast.ratio.toFixed(2)} : 1`,
+    level: c.contrast.level === 'AAA' ? 'AAA' : 'AA',
+  }));
+  const c0 = theme.colors[0];
+  const c1 = theme.colors[1] ?? c0;
+  return {
+    primary: kit.palette.primary,
+    secondary: kit.palette.secondary,
+    roles,
+    note:
+      theme.warnings.length > 0
+        ? { ok: false, text: theme.warnings[0]! }
+        : { ok: true, text: 'Every role passes WCAG AA — this palette is safe to ship.' },
+    kits: allBrandKits().map((k) => ({
+      name: k.name,
+      gradient: `linear-gradient(90deg, ${k.palette.primary} 50%, ${k.palette.secondary} 50%)`,
+      meta: `${theme.colors.length} roles`,
+    })),
+    preview: {
+      bannerBg: c0?.background ?? kit.palette.primary,
+      bannerFg: c0?.foreground ?? '#FFFFFF',
+      calloutBg: c1?.background ?? kit.palette.secondary,
+      calloutFg: c1?.foreground ?? '#FFFFFF',
+      btnBg: c0?.background ?? kit.palette.primary,
+      btnFg: c0?.foreground ?? '#FFFFFF',
+    },
+  };
+}
+
+function instIngestData(): InstIngestData | undefined {
+  const conv = state.documentConversion;
+  if (!conv) return undefined;
+  const content = conv.markdown ?? conv.text ?? conv.html ?? '(no text output)';
+  const ext = (conv.filename.split('.').pop() ?? 'DOC').toUpperCase().slice(0, 4);
+  const hasOutput = Boolean(conv.html || conv.markdown || conv.text);
+  const kind = conv.html ? 'HTML' : conv.markdown ? 'Markdown' : 'Text';
+  return {
+    fileName: conv.filename,
+    ext,
+    status: conv.status,
+    statusColor: hasOutput ? 'var(--color-forest)' : 'var(--color-oak)',
+    content,
+    meta: `${conv.processingTimeMs} ms · ${kind}`,
+  };
+}
+
+function renderInstAsk(): El {
+  return createInstAsk(institutionalDeps(), instAskData()).element;
+}
+function renderInstBrand(): El {
+  return createInstBrand(institutionalDeps(), instBrandData()).element;
+}
+function renderInstIngest(): El {
+  return createInstIngest(institutionalDeps(), instIngestData()).element;
 }
 
 function homeHeader(): El {
@@ -488,6 +616,8 @@ function quickLinks(): El {
       go('remediate-provide');
     }, 'chip', undefined, 'quick-canvas-token'),
     actionButton('Saved work', () => go('saved-work'), 'chip', undefined, 'quick-saved-work'),
+    actionButton('Accessibility review', () => go('remediate-review'), 'chip', undefined, 'quick-remediation-review'),
+    actionButton('Preview redesign', () => go('inst-home'), 'chip', undefined, 'quick-inst-home'),
   );
 }
 
@@ -749,6 +879,7 @@ function renderRemediateResult(): El {
       fragment ? fragmentCard(fragment, 'Repaired Canvas page') : emptyPanel('Run a fix first to see the preview and HTML code.'),
       ...(fragment ? fragmentIssuesPanels(fragment) : []),
       btnRow(
+        actionButton('Accessibility review', () => go('remediate-review'), 'btn btn--secondary', undefined, 'open-remediation-review'),
         actionButton('More', () => {
           state.previousScreen = 'remediate-result';
           go('saved-work');
@@ -758,6 +889,185 @@ function renderRemediateResult(): El {
       ),
     ),
   );
+}
+
+// ── Institutional accessibility-review screen ────────────────────────────────
+// A navigable, in-app rendering of the redesigned remediation panel (ported
+// from the Paper design "02 · Accessibility remediation" via remediation.ts).
+// Seeded with representative data; binding to live TurnView remediation results
+// (state.remediateView) is a deliberate follow-up.
+let reviewSelectedId = 'contrast';
+
+const REVIEW_ISSUES: RemediationIssue[] = [
+  { id: 'contrast', title: 'Low-contrast heading', element: 'Heading · 2.9:1', severity: 'fail' },
+  { id: 'alt', title: 'Image missing alt text', element: 'Image · banner.png', severity: 'fail' },
+  { id: 'link', title: 'Link text not descriptive', element: 'Link · "click here"', severity: 'fail' },
+  { id: 'small', title: 'Body text too small', element: 'Paragraph · 13px', severity: 'warn' },
+  { id: 'table', title: 'Ambiguous table header', element: 'Table · schedule', severity: 'warn' },
+];
+
+function seedRemediationView(): RemediationView {
+  const idx = REVIEW_ISSUES.findIndex((i) => i.id === reviewSelectedId);
+  return {
+    page: { title: 'Module 1 — Welcome', path: '/courses/204/pages/welcome' },
+    summary: { fail: 3, warn: 2, pass: 9 },
+    issues: REVIEW_ISSUES,
+    selectedId: reviewSelectedId,
+    detail: {
+      tag: 'Fails AA',
+      severity: 'fail',
+      wcag: 'WCAG 1.4.3 · Contrast (Minimum)',
+      position: `Issue ${Math.max(0, idx) + 1} of ${REVIEW_ISSUES.length}`,
+      title: 'Low-contrast heading',
+      description:
+        'The module heading sets Canvas blue on white at a contrast ratio of 2.9 : 1 — below the 4.5 : 1 minimum for normal text. Learners with low vision may be unable to read it.',
+      selector: '.module-heading',
+      before: { ratio: '2.9 : 1 · Fail', level: 'fail', headingColor: '#8FB9DE' },
+      after: { ratio: '8.1 : 1 · Pass', level: 'pass', headingColor: '#1B2A4A' },
+      fix: {
+        removed: '-   color: #5B9BD5;   /* 2.9 : 1 on #fff */',
+        added: '+   color: #1B2A4A;   /* 8.1 : 1 on #fff */',
+      },
+    },
+  };
+}
+
+// Map a live remediation run (state.remediateView) into the panel's view model.
+// Real findings carry id/severity/message/category — but no per-element contrast
+// tiles or CSS diff — so the panel renders the page-level before/after HTML
+// instead. Returns undefined when there is no usable run (→ fall back to seed).
+function gateSeverityToPanel(severity: GateSeverity): 'fail' | 'warn' {
+  return severity === 'blocker' || severity === 'error' ? 'fail' : 'warn';
+}
+
+function auditCategoryLabel(category: AuditIssue['category']): string {
+  switch (category) {
+    case 'contrast':
+      return 'Contrast';
+    case 'aria':
+      return 'ARIA';
+    case 'structure':
+      return 'Structure';
+    case 'error':
+      return 'Error';
+    case 'alert':
+      return 'Alert';
+    case 'feature':
+      return 'Feature';
+    default:
+      return 'Issue';
+  }
+}
+
+function reviewPageContext(): { title: string; path: string } {
+  if (state.sourceMode === 'canvas') {
+    const page = state.canvasPages.find((p) => p.id === state.selectedCanvasPageId);
+    return { title: page?.title ?? 'Imported Canvas page', path: state.canvasBaseUrl || 'canvas' };
+  }
+  if (state.sourceMode === 'document') {
+    return { title: state.documentFileName ?? 'Converted document', path: 'document' };
+  }
+  return { title: 'Pasted HTML', path: 'pasted-source' };
+}
+
+function realRemediationView(): RemediationView | undefined {
+  const view = state.remediateView;
+  if (!view) return undefined;
+  const frag = view.fragments.find((f) => f.remediateResult) ?? view.fragments[0];
+  if (!frag) return undefined;
+  const conf = frag.gate.conformance;
+  const toIssue = (i: AuditIssue): RemediationIssue => ({
+    id: i.id,
+    title: i.message,
+    element: auditCategoryLabel(i.category),
+    severity: gateSeverityToPanel(i.severity),
+  });
+  const issues: RemediationIssue[] = [
+    ...conf.blockers.map(toIssue),
+    ...conf.warnings.map(toIssue),
+    ...conf.needsHumanReview.map(toIssue),
+  ];
+  const remediate = frag.remediateResult;
+  if (issues.length === 0 && !remediate) return undefined;
+  const fixedCount = remediate ? remediate.issueDiffs.filter((d) => d.fixed).length : 0;
+  const fixedNote = `${fixedCount} ${fixedCount === 1 ? 'issue was' : 'issues were'} auto-fixed by the gate.`;
+  const htmlBefore = remediate?.before ?? '';
+  const htmlAfter = remediate?.after ?? frag.html;
+  const page = reviewPageContext();
+  const summary = {
+    fail: conf.blockers.length,
+    warn: conf.warnings.length + conf.needsHumanReview.length,
+    pass: fixedCount,
+  };
+
+  if (issues.length === 0) {
+    return {
+      page,
+      summary,
+      issues: [],
+      selectedId: '',
+      detail: {
+        tag: 'Audit clear',
+        severity: 'warn',
+        wcag: 'On-device audit',
+        position: 'No blocking issues',
+        title: 'No blocking issues found',
+        description: `The repaired page passed the on-device accessibility audit. ${fixedNote}`,
+        htmlBefore,
+        htmlAfter,
+      },
+    };
+  }
+
+  const selected = issues.find((i) => i.id === reviewSelectedId) ?? issues[0]!;
+  const idx = issues.findIndex((i) => i.id === selected.id);
+  return {
+    page,
+    summary,
+    issues,
+    selectedId: selected.id,
+    detail: {
+      tag: selected.severity === 'fail' ? 'Fails checks' : 'Needs review',
+      severity: selected.severity,
+      wcag: `On-device audit · ${selected.element}`,
+      position: `Issue ${idx + 1} of ${issues.length}`,
+      title: selected.title,
+      description: `Surfaced by the on-device accessibility audit. The repaired, Canvas-safe page is shown below; ${fixedNote}`,
+      htmlBefore,
+      htmlAfter,
+    },
+  };
+}
+
+function remediationReviewView(): RemediationView {
+  return realRemediationView() ?? seedRemediationView();
+}
+
+function renderRemediationReview(): El {
+  const panel = createRemediationPanel(remediationReviewView(), {
+    onSelect: (id) => {
+      reviewSelectedId = id;
+      render();
+    },
+    onApply: (id) => {
+      const issue = remediationReviewView().issues.find((i) => i.id === id);
+      state.notice = issue ? `Fix for "${issue.title}" is in the repaired page.` : 'Repaired page is ready.';
+      render();
+    },
+    onSkip: () => {
+      state.notice = 'Issue skipped.';
+      render();
+    },
+    onCopyFix: () => {
+      const { detail } = remediationReviewView();
+      const text = detail.fix ? `${detail.fix.removed}\n${detail.fix.added}` : detail.htmlAfter ?? '';
+      void copyText(text).then((ok) => {
+        state.notice = ok ? 'Copied to clipboard.' : 'Clipboard unavailable.';
+        render();
+      });
+    },
+  });
+  return el('main', { class: 'remed-screen' }, panel.element);
 }
 
 function renderGuidanceAsk(): El {
