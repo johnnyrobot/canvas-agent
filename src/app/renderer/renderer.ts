@@ -21,6 +21,10 @@ import {
   createInstIngest,
   type InstDeps,
   type InstTarget,
+  type InstAskData,
+  type InstBrandData,
+  type InstIngestData,
+  type InstRole,
 } from './institutional-screens.js';
 import type {
   AuditIssue,
@@ -361,14 +365,85 @@ function institutionalDeps(): InstDeps {
 function renderInstHome(): El {
   return createInstHome(institutionalDeps()).element;
 }
+
+// The inst-* preview screens bind to whatever real state exists (the latest
+// guidance answer, the current brand kit + resolved theme, the last document
+// conversion), falling back to their representative seed when none is present.
+function instAskData(): InstAskData | undefined {
+  const view = state.guidanceView;
+  const answer = view?.text.trim();
+  if (!answer) return undefined;
+  const toolCount = view?.toolsUsed?.length ?? 0;
+  const tools = toolCount > 0 ? ` · ${toolCount} ${toolCount === 1 ? 'tool' : 'tools'}` : '';
+  return {
+    question: state.guidanceQuestion.trim() || 'Your question',
+    meta: `Answered on-device · Gemma${tools}`,
+    answer,
+  };
+}
+
+function instBrandData(): InstBrandData | undefined {
+  void ensureCurrentTheme();
+  const theme = state.theme;
+  if (!theme || theme.colors.length === 0) return undefined;
+  const kit = currentBrandKit();
+  const roles: InstRole[] = theme.colors.map((c) => ({
+    sample: c.background,
+    name: roleName(c.role),
+    ratio: `${c.contrast.ratio.toFixed(2)} : 1`,
+    level: c.contrast.level === 'AAA' ? 'AAA' : 'AA',
+  }));
+  const c0 = theme.colors[0];
+  const c1 = theme.colors[1] ?? c0;
+  return {
+    primary: kit.palette.primary,
+    secondary: kit.palette.secondary,
+    roles,
+    note:
+      theme.warnings.length > 0
+        ? { ok: false, text: theme.warnings[0]! }
+        : { ok: true, text: 'Every role passes WCAG AA — this palette is safe to ship.' },
+    kits: allBrandKits().map((k) => ({
+      name: k.name,
+      gradient: `linear-gradient(90deg, ${k.palette.primary} 50%, ${k.palette.secondary} 50%)`,
+      meta: `${theme.colors.length} roles`,
+    })),
+    preview: {
+      bannerBg: c0?.background ?? kit.palette.primary,
+      bannerFg: c0?.foreground ?? '#FFFFFF',
+      calloutBg: c1?.background ?? kit.palette.secondary,
+      calloutFg: c1?.foreground ?? '#FFFFFF',
+      btnBg: c0?.background ?? kit.palette.primary,
+      btnFg: c0?.foreground ?? '#FFFFFF',
+    },
+  };
+}
+
+function instIngestData(): InstIngestData | undefined {
+  const conv = state.documentConversion;
+  if (!conv) return undefined;
+  const content = conv.markdown ?? conv.text ?? conv.html ?? '(no text output)';
+  const ext = (conv.filename.split('.').pop() ?? 'DOC').toUpperCase().slice(0, 4);
+  const hasOutput = Boolean(conv.html || conv.markdown || conv.text);
+  const kind = conv.html ? 'HTML' : conv.markdown ? 'Markdown' : 'Text';
+  return {
+    fileName: conv.filename,
+    ext,
+    status: conv.status,
+    statusColor: hasOutput ? 'var(--color-forest)' : 'var(--color-oak)',
+    content,
+    meta: `${conv.processingTimeMs} ms · ${kind}`,
+  };
+}
+
 function renderInstAsk(): El {
-  return createInstAsk(institutionalDeps()).element;
+  return createInstAsk(institutionalDeps(), instAskData()).element;
 }
 function renderInstBrand(): El {
-  return createInstBrand(institutionalDeps()).element;
+  return createInstBrand(institutionalDeps(), instBrandData()).element;
 }
 function renderInstIngest(): El {
-  return createInstIngest(institutionalDeps()).element;
+  return createInstIngest(institutionalDeps(), instIngestData()).element;
 }
 
 function homeHeader(): El {

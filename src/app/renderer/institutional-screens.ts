@@ -22,6 +22,52 @@ export interface InstScreen {
   element: El;
 }
 
+// ── Live-data view models (omit → the screen renders its representative seed) ──
+
+export interface InstAskData {
+  question: string;
+  /** Meta line, e.g. "Answered on-device · Gemma · 2 tools". */
+  meta: string;
+  /** The answer prose; split on blank lines into paragraphs. */
+  answer: string;
+}
+
+export interface InstRole {
+  /** Background colour of the role's sample chip. */
+  sample: string;
+  name: string;
+  ratio: string;
+  level: 'AA' | 'AAA';
+}
+
+export interface InstPreviewColors {
+  bannerBg: string;
+  bannerFg: string;
+  calloutBg: string;
+  calloutFg: string;
+  btnBg: string;
+  btnFg: string;
+}
+
+export interface InstBrandData {
+  primary: string;
+  secondary: string;
+  roles: InstRole[];
+  note: { ok: boolean; text: string };
+  kits: { name: string; gradient: string; meta: string }[];
+  preview: InstPreviewColors;
+}
+
+export interface InstIngestData {
+  fileName: string;
+  ext: string;
+  status: string;
+  statusColor: string;
+  /** Converted markdown/text/HTML, rendered as escaped text. */
+  content: string;
+  meta: string;
+}
+
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 function col(wide: boolean, ...children: El[]): El {
@@ -142,47 +188,56 @@ function sourceCard(src: SourceDef): El {
   );
 }
 
-export function createInstAsk(_deps: InstDeps): InstScreen {
+export function createInstAsk(_deps: InstDeps, data?: InstAskData): InstScreen {
   const question = el(
     'div',
     { class: 'inst-hero' },
     el('span', { class: 'inst-eyebrow' }, 'Question'),
-    el('h1', { class: 'inst-question' }, 'How do I make a data table accessible in Canvas?'),
+    el('h1', { class: 'inst-question' }, data ? data.question : 'How do I make a data table accessible in Canvas?'),
     el(
       'div',
       { class: 'inst-meta' },
       el('span', { class: 'inst-dot' }),
-      el('span', {}, 'Answered on-device · Gemma · 1.2s · 3 sources cited'),
+      el('span', {}, data ? data.meta : 'Answered on-device · Gemma · 1.2s · 3 sources cited'),
     ),
   );
 
-  const answer = el(
-    'div',
-    { class: 'inst-answer' },
-    el('p', { class: 'inst-answer__lead' }, 'Canvas’s table tools can produce WCAG-compliant markup once a few properties are set. Work through these in the page editor:'),
-    el('div', { class: 'inst-steps' }, ...ASK_STEPS.map(stepRow)),
-  );
+  // Real guidance output is prose (no structured steps/sources), so bound data
+  // renders the answer as paragraphs; the seed shows the designed steps+sources.
+  const answer = data
+    ? el(
+        'div',
+        { class: 'inst-answer' },
+        ...data.answer.split(/\n{2,}/).map((p) => el('p', { class: 'inst-answer__p' }, p.trim())),
+      )
+    : el(
+        'div',
+        { class: 'inst-answer' },
+        el('p', { class: 'inst-answer__lead' }, 'Canvas’s table tools can produce WCAG-compliant markup once a few properties are set. Work through these in the page editor:'),
+        el('div', { class: 'inst-steps' }, ...ASK_STEPS.map(stepRow)),
+      );
 
-  const sources = el(
-    'div',
-    { class: 'inst-hero' },
-    sectionLabel('Sources · 3'),
-    el('div', { class: 'inst-cards' }, ...ASK_SOURCES.map(sourceCard)),
-  );
-
-  const followup = el(
-    'div',
-    { class: 'inst-hero' },
-    el('div', { class: 'inst-chips' }, ...ASK_CHIPS.map((c) => el('span', { class: 'inst-chip' }, c))),
+  const sections: El[] = [question, answer];
+  if (!data) {
+    sections.push(
+      el('div', { class: 'inst-hero' }, sectionLabel('Sources · 3'), el('div', { class: 'inst-cards' }, ...ASK_SOURCES.map(sourceCard))),
+    );
+  }
+  sections.push(
     el(
       'div',
-      { class: 'inst-field' },
-      el('span', { class: 'inst-field__ph' }, 'Ask a follow-up question…'),
-      el('span', { class: 'inst-btn inst-btn--primary inst-btn--field' }, 'Ask'),
+      { class: 'inst-hero' },
+      el('div', { class: 'inst-chips' }, ...ASK_CHIPS.map((c) => el('span', { class: 'inst-chip' }, c))),
+      el(
+        'div',
+        { class: 'inst-field' },
+        el('span', { class: 'inst-field__ph' }, 'Ask a follow-up question…'),
+        el('span', { class: 'inst-btn inst-btn--primary inst-btn--field' }, 'Ask'),
+      ),
     ),
   );
 
-  return { element: el('div', { class: 'inst' }, col(false, question, answer, sources, followup)) };
+  return { element: el('div', { class: 'inst' }, col(false, ...sections)) };
 }
 
 // ── Brand kit ────────────────────────────────────────────────────────────────
@@ -239,7 +294,16 @@ function savedKit(name: string, gradient: string, meta: string): El {
   );
 }
 
-function brandPreview(): El {
+const SEED_PREVIEW: InstPreviewColors = {
+  bannerBg: '#0374B5', bannerFg: '#FFFFFF', calloutBg: '#2D3B45', calloutFg: '#FFFFFF', btnBg: '#0374B5', btnFg: '#FFFFFF',
+};
+
+function styled(node: El, css: string): El {
+  node.setAttribute('style', css);
+  return node;
+}
+
+function brandPreview(p: InstPreviewColors): El {
   return el(
     'div',
     { class: 'inst-prev' },
@@ -251,63 +315,79 @@ function brandPreview(): El {
       el('div', { class: 'inst-prev__dot' }),
       el('span', {}, 'Module page · sample'),
     ),
-    el(
-      'div',
-      { class: 'inst-prev__banner' },
-      el('span', { class: 'inst-prev__h' }, 'Module 1 — Welcome'),
-      el('span', { class: 'inst-prev__sub' }, 'Biology 204 · Cellular foundations'),
+    styled(
+      el(
+        'div',
+        { class: 'inst-prev__banner' },
+        styled(el('span', { class: 'inst-prev__h' }, 'Module 1 — Welcome'), `color:${p.bannerFg};`),
+        styled(el('span', { class: 'inst-prev__sub' }, 'Biology 204 · Cellular foundations'), `color:${p.bannerFg};`),
+      ),
+      `background:${p.bannerBg};`,
     ),
     el(
       'div',
       { class: 'inst-prev__body' },
       el('p', { class: 'inst-prev__p' }, 'This module introduces cellular biology. Work through the reading, then complete the lab before the weekly check-in.'),
-      el(
-        'div',
-        { class: 'inst-prev__callout' },
-        el('span', { class: 'inst-prev__callout-k' }, 'Due Friday'),
-        el('span', { class: 'inst-prev__callout-t' }, 'Submit your lab notebook before 5:00 PM.'),
+      styled(
+        el(
+          'div',
+          { class: 'inst-prev__callout' },
+          styled(el('span', { class: 'inst-prev__callout-k' }, 'Due Friday'), `color:${p.calloutFg};`),
+          styled(el('span', { class: 'inst-prev__callout-t' }, 'Submit your lab notebook before 5:00 PM.'), `color:${p.calloutFg};`),
+        ),
+        `background:${p.calloutBg};`,
       ),
       el(
         'div',
         { class: 'inst-prev__actions' },
-        el('span', { class: 'inst-prev__btn' }, 'Start module'),
-        el('span', { class: 'inst-prev__link' }, 'View syllabus'),
+        styled(el('span', { class: 'inst-prev__btn' }, 'Start module'), `background:${p.btnBg};color:${p.btnFg};`),
+        styled(el('span', { class: 'inst-prev__link' }, 'View syllabus'), `color:${p.btnBg};`),
       ),
     ),
   );
 }
 
-export function createInstBrand(_deps: InstDeps): InstScreen {
+function brandNote(ok: boolean, text: string): El {
+  return el(
+    'div',
+    { class: ok ? 'inst-note' : 'inst-note inst-note--warn' },
+    el('span', { class: 'inst-note__icon', 'aria-hidden': 'true' }, ok ? '✓' : '!'),
+    el('span', { class: 'inst-note__text' }, text),
+  );
+}
+
+export function createInstBrand(_deps: InstDeps, data?: InstBrandData): InstScreen {
+  const primary = data ? data.primary : '#0374B5';
+  const secondary = data ? data.secondary : '#2D3B45';
+  const roles = data ? data.roles : BRAND_ROLES;
+  const note = data ? data.note : { ok: true, text: 'All five roles pass WCAG AA — this palette is safe to ship.' };
+  const preview = data ? data.preview : SEED_PREVIEW;
+  const kits = data
+    ? data.kits
+    : [
+        { name: 'Biology — Spring', gradient: 'linear-gradient(90deg, #0374B5 50%, #2D3B45 50%)', meta: '5 roles · AA' },
+        { name: 'History — Survey', gradient: 'linear-gradient(90deg, #2E5D3B 50%, #8A5A12 50%)', meta: '5 roles · AAA' },
+      ];
+
   const left = el(
     'div',
     { class: 'inst-cols__left' },
-    el('div', { class: 'inst-hero' }, sectionLabel('Your colours'), colorInput('Primary', '#0374B5'), colorInput('Secondary', '#2D3B45')),
-    el('div', { class: 'inst-hero' }, sectionLabel('Resolved roles'), ...BRAND_ROLES.map(roleRow)),
-    el(
-      'div',
-      { class: 'inst-note' },
-      el('span', { class: 'inst-note__icon', 'aria-hidden': 'true' }, '✓'),
-      el('span', { class: 'inst-note__text' }, 'All five roles pass WCAG AA — this palette is safe to ship.'),
-    ),
+    el('div', { class: 'inst-hero' }, sectionLabel('Your colours'), colorInput('Primary', primary), colorInput('Secondary', secondary)),
+    el('div', { class: 'inst-hero' }, sectionLabel('Resolved roles'), ...roles.map(roleRow)),
+    brandNote(note.ok, note.text),
   );
 
   const right = el(
     'div',
     { class: 'inst-cols__right' },
-    el('div', { class: 'inst-hero' }, sectionLabel('Live preview'), brandPreview()),
+    el('div', { class: 'inst-hero' }, sectionLabel('Live preview'), brandPreview(preview)),
     el(
       'div',
       { class: 'inst-field' },
       el('span', { class: 'inst-field__ph' }, 'Name this kit…'),
       el('span', { class: 'inst-btn inst-btn--primary inst-btn--field' }, 'Save kit'),
     ),
-    el(
-      'div',
-      { class: 'inst-hero' },
-      sectionLabel('Saved kits'),
-      savedKit('Biology — Spring', 'linear-gradient(90deg, #0374B5 50%, #2D3B45 50%)', '5 roles · AA'),
-      savedKit('History — Survey', 'linear-gradient(90deg, #2E5D3B 50%, #8A5A12 50%)', '5 roles · AAA'),
-    ),
+    el('div', { class: 'inst-hero' }, sectionLabel('Saved kits'), ...kits.map((k) => savedKit(k.name, k.gradient, k.meta))),
   );
 
   const element = el(
@@ -354,7 +434,7 @@ const INGEST_BULLETS = [
   'Weeks 10–14 — Systems biology and the final project',
 ];
 
-export function createInstIngest(_deps: InstDeps): InstScreen {
+export function createInstIngest(_deps: InstDeps, data?: InstIngestData): InstScreen {
   const dropzone = el(
     'div',
     { class: 'inst-dropzone' },
@@ -368,11 +448,14 @@ export function createInstIngest(_deps: InstDeps): InstScreen {
     el('div', { class: 'inst-formats' }, ...['PDF', 'DOCX', 'PPTX', 'HTML', 'PNG'].map((f) => el('span', { class: 'inst-fmt' }, f))),
   );
 
+  const files: FileDef[] = data
+    ? [{ ext: data.ext, extColor: 'var(--color-navy)', name: data.fileName, status: data.status, statusColor: data.statusColor, active: true, check: true }]
+    : INGEST_FILES;
   const queue = el(
     'div',
     { class: 'inst-hero' },
-    sectionLabel('This session · 3'),
-    ...INGEST_FILES.map(fileRow),
+    sectionLabel(data ? 'This session · 1' : 'This session · 3'),
+    ...files.map(fileRow),
   );
 
   const left = el('div', { class: 'inst-cols__left' }, dropzone, queue);
@@ -383,7 +466,7 @@ export function createInstIngest(_deps: InstDeps): InstScreen {
     el(
       'div',
       { style: 'display:flex;align-items:center;gap:12px;min-width:0;' },
-      el('span', { class: 'inst-source__host', style: 'font-size:13px;font-weight:600;color:var(--color-ink);' }, 'syllabus.md'),
+      el('span', { class: 'inst-source__host', style: 'font-size:13px;font-weight:600;color:var(--color-ink);' }, data ? data.fileName : 'syllabus.md'),
       el(
         'span',
         { class: 'inst-meta', style: 'font-weight:600;color:var(--color-forest);' },
@@ -399,35 +482,37 @@ export function createInstIngest(_deps: InstDeps): InstScreen {
     ),
   );
 
-  const doc = el(
-    'div',
-    { class: 'inst-doc' },
-    el(
-      'div',
-      { style: 'display:flex;flex-direction:column;gap:6px;' },
-      el('span', { class: 'inst-doc__h' }, 'Biology 204 — Syllabus'),
-      el('span', { class: 'inst-doc__cap' }, 'Heading 1 · detected from title page'),
-    ),
-    el('p', { class: 'inst-doc__p' }, 'This course introduces the molecular and cellular basis of life. Weekly readings pair with lab work; assessment is by three exams and a final project.'),
-    el('span', { class: 'inst-doc__h2' }, 'Course schedule'),
-    el(
-      'div',
-      { style: 'display:flex;flex-direction:column;gap:9px;' },
-      ...INGEST_BULLETS.map((b) => el('div', { class: 'inst-li' }, el('span', { class: 'inst-li__b' }), el('span', { class: 'inst-li__t' }, b))),
-    ),
-    el(
-      'div',
-      { class: 'inst-alt' },
-      el('span', { class: 'inst-alt__icon', 'aria-hidden': 'true' }, '!'),
-      el(
+  const doc = data
+    ? el('div', { class: 'inst-doc' }, el('pre', { class: 'inst-doc__pre' }, data.content))
+    : el(
         'div',
-        { style: 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;' },
-        el('span', { class: 'inst-alt__t' }, '1 image needs alt text'),
-        el('span', { class: 'inst-alt__b' }, 'figure-1.png was extracted without a description. Canvas Agent left a scaffold for you to complete before export.'),
-      ),
-      el('span', { class: 'inst-alt__btn' }, 'Add alt text'),
-    ),
-  );
+        { class: 'inst-doc' },
+        el(
+          'div',
+          { style: 'display:flex;flex-direction:column;gap:6px;' },
+          el('span', { class: 'inst-doc__h' }, 'Biology 204 — Syllabus'),
+          el('span', { class: 'inst-doc__cap' }, 'Heading 1 · detected from title page'),
+        ),
+        el('p', { class: 'inst-doc__p' }, 'This course introduces the molecular and cellular basis of life. Weekly readings pair with lab work; assessment is by three exams and a final project.'),
+        el('span', { class: 'inst-doc__h2' }, 'Course schedule'),
+        el(
+          'div',
+          { style: 'display:flex;flex-direction:column;gap:9px;' },
+          ...INGEST_BULLETS.map((b) => el('div', { class: 'inst-li' }, el('span', { class: 'inst-li__b' }), el('span', { class: 'inst-li__t' }, b))),
+        ),
+        el(
+          'div',
+          { class: 'inst-alt' },
+          el('span', { class: 'inst-alt__icon', 'aria-hidden': 'true' }, '!'),
+          el(
+            'div',
+            { style: 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;' },
+            el('span', { class: 'inst-alt__t' }, '1 image needs alt text'),
+            el('span', { class: 'inst-alt__b' }, 'figure-1.png was extracted without a description. Canvas Agent left a scaffold for you to complete before export.'),
+          ),
+          el('span', { class: 'inst-alt__btn' }, 'Add alt text'),
+        ),
+      );
 
   const right = el(
     'div',
@@ -436,7 +521,7 @@ export function createInstIngest(_deps: InstDeps): InstScreen {
     el(
       'div',
       { class: 'inst-split' },
-      el('span', { class: 'inst-kit__meta' }, '12 elements · 1 table · 1 image'),
+      el('span', { class: 'inst-kit__meta' }, data ? data.meta : '12 elements · 1 table · 1 image'),
       el(
         'div',
         { style: 'display:flex;align-items:center;gap:10px;' },
