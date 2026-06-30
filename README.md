@@ -24,6 +24,43 @@ plus the app's own HTML allowlist/sanitizer engine; document import (DOCX/PPTX/
 XLSX/PDF/images → structured content) runs through a local
 [Docling](https://github.com/docling-project/docling) sidecar.
 
+## Screens
+
+A bookish, higher-ed visual language — Source Serif headings, a calm paper
+ground, and a contrast-safe palette throughout.
+
+### Home
+
+The app opens to a single prompt and four tasks.
+
+![Home screen — "Design accessible courses, start to finish." with the four task options](docs/assets/screens/01-home.png)
+
+### Check accessibility & remediate
+
+Findings grouped by pass/warn/fail, each with a before/after preview and a
+guided, revertable fix.
+
+![Accessibility remediation screen showing a low-contrast heading finding with a before/after preview and suggested CSS fix](docs/assets/screens/02-accessibility-remediation.png)
+
+### Ask a question
+
+Cited, step-by-step guidance on accessible course design — answered on-device.
+
+![Ask & Answer screen — an on-device answer to "How do I make a data table accessible in Canvas?" with numbered steps and cited sources](docs/assets/screens/03-ask-and-answer.png)
+
+### Build a brand kit
+
+Resolve a contrast-safe palette from two brand colours, with a live template
+preview.
+
+![Brand kit screen — two brand colours resolved into five contrast-safe course roles with WCAG AA/AAA badges, beside a live module-page preview](docs/assets/screens/04-brand-kit.png)
+
+### Ingest a document
+
+Convert PDFs, Word, and slides into structured, accessible text and markdown.
+
+![Document ingest screen — a drop zone and conversion queue beside a converted syllabus preview with an alt-text scaffold prompt](docs/assets/screens/05-document-ingest.png)
+
 ## Requirements
 
 - **macOS** on **Apple Silicon (arm64)**
