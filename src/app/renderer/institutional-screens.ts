@@ -11,11 +11,69 @@
  */
 import { el, type El } from './ui.js';
 
-/** Where an institutional task card / nav can lead. */
-export type InstTarget = 'ask' | 'brand' | 'ingest' | 'remediation';
+/**
+ * Where an institutional task card / nav can lead. The first four are the
+ * home task cards; the rest are secondary destinations surfaced as compact
+ * links so every place reachable from the classic home stays reachable here.
+ */
+export type InstTarget =
+  | 'ask'
+  | 'brand'
+  | 'ingest'
+  | 'remediation'
+  | 'build'
+  | 'fix'
+  | 'saved'
+  | 'alignment'
+  | 'brand-manager';
 
 export interface InstDeps {
   onNavigate(target: InstTarget): void;
+}
+
+/** A screenshot already attached to the pending question. */
+export interface InstAskScreenshot {
+  id: string;
+  label: string;
+  dataUrl: string;
+}
+
+/** A capturable screen/window source, surfaced after `onAttachScreenshot` resolves. */
+export interface InstAskSource {
+  id: string;
+  label: string;
+  kind: 'screen' | 'window';
+  thumbnailDataUrl: string;
+}
+
+/** Interactive plumbing for the Ask & Answer screen's live question input. */
+export interface InstAskDeps {
+  onAsk(question: string): void;
+  /** True while a guidance turn is running — disables the submit + shows "Asking…". */
+  busy?: boolean;
+  /** The half-typed question, if any — restored into the input on re-render. */
+  draft?: string;
+  /** Fired on every input edit so the caller can preserve the draft across re-renders. */
+  onDraftChange?(value: string): void;
+  /** Screenshots already attached to the pending question. */
+  screenshots?: InstAskScreenshot[];
+  /** Starts the capture flow (permission check + source listing). Omit to hide the affordance entirely. */
+  onAttachScreenshot?(): void;
+  /** Removes an attached screenshot by id. */
+  onRemoveScreenshot?(id: string): void;
+  /** Capture sources surfaced after `onAttachScreenshot` resolves; pick one to capture. */
+  screenshotSources?: InstAskSource[];
+  /** Captures from the given source id. */
+  onCaptureSource?(id: string): void;
+  /** Permission-state (or reassurance) copy shown under the attach affordance. */
+  screenshotHint?: string;
+}
+
+/** Interactive plumbing for the Document ingest screen's file picker. */
+export interface InstIngestDeps {
+  /** Fired with the native file-input change event when a document is chosen. */
+  onFile(event: unknown): void;
+  busy?: boolean;
 }
 
 export interface InstScreen {
@@ -99,11 +157,26 @@ interface TaskDef {
 }
 
 const HOME_TASKS: TaskDef[] = [
-  { num: '01', title: 'Check accessibility', desc: 'Scan a Canvas page against WCAG 2.2 AA, then remediate each issue with a guided fix.', target: 'remediation', primary: true },
-  { num: '02', title: 'Ask a question', desc: 'Get cited, step-by-step guidance on accessible course design — answered on-device.', target: 'ask' },
-  { num: '03', title: 'Build a brand kit', desc: 'Resolve a contrast-safe palette from two brand colours, with a live template preview.', target: 'brand' },
-  { num: '04', title: 'Ingest a document', desc: 'Convert PDFs, Word, and slides into structured, accessible text and markdown.', target: 'ingest' },
+  { num: '01', title: 'Build a Canvas page', desc: 'Create a page from a guided template and get checked, Canvas-ready HTML.', target: 'build', primary: true },
+  { num: '02', title: 'Check accessibility', desc: 'Scan a Canvas page against WCAG 2.2 AA, then remediate each issue with a guided fix.', target: 'remediation' },
+  { num: '03', title: 'Ask a question', desc: 'Get cited, step-by-step guidance on accessible course design — answered on-device.', target: 'ask' },
+  { num: '04', title: 'Build a brand kit', desc: 'Resolve a contrast-safe palette from two brand colours, with a live template preview.', target: 'brand' },
+  { num: '05', title: 'Ingest a document', desc: 'Convert PDFs, Word, and slides into structured, accessible text and markdown.', target: 'ingest' },
 ];
+
+// Secondary destinations from the classic home that aren't task cards; rendered
+// as compact chips so nothing that used to be reachable from home is orphaned.
+const HOME_LINKS: { label: string; target: InstTarget }[] = [
+  { label: 'Fix an existing page', target: 'fix' },
+  { label: 'Saved work', target: 'saved' },
+  { label: 'Alignment coach', target: 'alignment' },
+];
+
+function linkChip(link: { label: string; target: InstTarget }, deps: InstDeps): El {
+  const chip = el('button', { type: 'button', class: 'inst-chip', 'data-testid': `inst-link-${link.target}` }, link.label);
+  chip.addEventListener('click', () => deps.onNavigate(link.target));
+  return chip;
+}
 
 function taskRow(task: TaskDef, deps: InstDeps): El {
   const row = el(
@@ -129,6 +202,12 @@ export function createInstHome(deps: InstDeps): InstScreen {
     sectionLabel('Choose a task'),
     ...HOME_TASKS.map((t) => taskRow(t, deps)),
   );
+  const links = el(
+    'div',
+    { class: 'inst-hero' },
+    sectionLabel('More'),
+    el('div', { class: 'inst-chips' }, ...HOME_LINKS.map((l) => linkChip(l, deps))),
+  );
   const element = el(
     'div',
     { class: 'inst' },
@@ -140,6 +219,7 @@ export function createInstHome(deps: InstDeps): InstScreen {
         'A private studio for Canvas course content — review pages against WCAG, remediate issues, build contrast-safe brand kits, and turn documents into structured, accessible text. Nothing leaves this machine.',
       ),
       tasks,
+      links,
     ),
   );
   return { element };
@@ -188,7 +268,113 @@ function sourceCard(src: SourceDef): El {
   );
 }
 
-export function createInstAsk(_deps: InstDeps, data?: InstAskData): InstScreen {
+/** One attached-screenshot chip, with a remove control. */
+function screenshotChip(shot: InstAskScreenshot, ask: InstAskDeps): El {
+  const remove = el(
+    'button',
+    {
+      type: 'button',
+      class: 'inst-shot-chip__remove',
+      'aria-label': `Remove ${shot.label} screenshot`,
+      'data-testid': 'inst-ask-shot-remove',
+    },
+    '×',
+  );
+  remove.addEventListener('click', () => ask.onRemoveScreenshot?.(shot.id));
+  return el(
+    'div',
+    { class: 'inst-shot-chip' },
+    el('img', { src: shot.dataUrl, alt: `${shot.label} screenshot preview`, class: 'inst-shot-chip__img' }),
+    el('span', { class: 'inst-shot-chip__label' }, shot.label),
+    remove,
+  );
+}
+
+/** One capturable source, offered after `onAttachScreenshot` lists them. */
+function screenshotSourceCard(source: InstAskSource, ask: InstAskDeps): El {
+  const btn = el(
+    'button',
+    { type: 'button', class: 'inst-shot-source', 'data-testid': `inst-ask-source-${source.id}` },
+    el('img', { src: source.thumbnailDataUrl, alt: `${source.label} preview`, class: 'inst-shot-source__img' }),
+    el('span', { class: 'inst-shot-source__label' }, source.label),
+  );
+  btn.addEventListener('click', () => ask.onCaptureSource?.(source.id));
+  return btn;
+}
+
+/**
+ * Compact "Attach screenshot" affordance + attached thumbnails, near the
+ * question input. Only rendered when the caller wires `onAttachScreenshot`
+ * (the seed/unwired render has no screenshot capability to offer).
+ */
+function screenshotAttach(ask: InstAskDeps): El {
+  const hint =
+    ask.screenshotHint ??
+    'Screenshots are summarized on-device for this question; raw pixels are not stored in the session.';
+  const attachBtn = el(
+    'button',
+    { type: 'button', class: 'inst-btn inst-btn--ghost inst-btn--small', 'data-testid': 'inst-ask-attach' },
+    ask.busy ? 'Capturing…' : 'Attach screenshot',
+  );
+  attachBtn.disabled = Boolean(ask.busy);
+  attachBtn.addEventListener('click', () => ask.onAttachScreenshot?.());
+  const children: El[] = [
+    el('div', { class: 'inst-shot-toolbar' }, el('span', { class: 'inst-shot-hint' }, hint), attachBtn),
+  ];
+  const screenshots = ask.screenshots ?? [];
+  if (screenshots.length > 0) {
+    children.push(
+      el(
+        'div',
+        { class: 'inst-shot-rail', 'aria-label': 'Attached screenshots' },
+        ...screenshots.map((shot) => screenshotChip(shot, ask)),
+      ),
+    );
+  }
+  const sources = ask.screenshotSources ?? [];
+  if (sources.length > 0) {
+    children.push(
+      el(
+        'div',
+        { class: 'inst-shot-sources', 'aria-label': 'Screenshot sources' },
+        ...sources.map((source) => screenshotSourceCard(source, ask)),
+      ),
+    );
+  }
+  return el('div', { class: 'inst-shot' }, ...children);
+}
+
+/** The live question input + submit button (replaces the seed's static field). */
+function askField(ask: InstAskDeps, hasAnswer: boolean): El {
+  const input = el('input', {
+    class: 'inst-field__input',
+    type: 'text',
+    'aria-label': 'Ask a question',
+    placeholder: hasAnswer ? 'Ask a follow-up question…' : 'Ask a question about accessible course design…',
+    'data-testid': 'inst-ask-input',
+  });
+  // The renderer replaces the whole DOM subtree on every render(), so the
+  // draft must round-trip through the caller or attach/capture re-renders
+  // would wipe a half-typed question.
+  input.value = ask.draft ?? '';
+  input.addEventListener('input', () => ask.onDraftChange?.(input.value));
+  const submit = el(
+    'button',
+    { type: 'button', class: 'inst-btn inst-btn--primary inst-btn--field', 'data-testid': 'inst-ask-submit' },
+    ask.busy ? 'Asking…' : 'Ask',
+  );
+  submit.disabled = Boolean(ask.busy);
+  const run = (): void => {
+    if (!ask.busy) ask.onAsk(input.value);
+  };
+  submit.addEventListener('click', run);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') run();
+  });
+  return el('div', { class: 'inst-field' }, input, submit);
+}
+
+export function createInstAsk(_deps: InstDeps, data?: InstAskData, ask?: InstAskDeps): InstScreen {
   const question = el(
     'div',
     { class: 'inst-hero' },
@@ -228,12 +414,17 @@ export function createInstAsk(_deps: InstDeps, data?: InstAskData): InstScreen {
       'div',
       { class: 'inst-hero' },
       el('div', { class: 'inst-chips' }, ...ASK_CHIPS.map((c) => el('span', { class: 'inst-chip' }, c))),
-      el(
-        'div',
-        { class: 'inst-field' },
-        el('span', { class: 'inst-field__ph' }, 'Ask a follow-up question…'),
-        el('span', { class: 'inst-btn inst-btn--primary inst-btn--field' }, 'Ask'),
-      ),
+      // Screenshot attach affordance, only when the caller wires it up.
+      ...(ask?.onAttachScreenshot ? [screenshotAttach(ask)] : []),
+      // Live input when wired to a guidance turn; otherwise the static seed field.
+      ask
+        ? askField(ask, Boolean(data))
+        : el(
+            'div',
+            { class: 'inst-field' },
+            el('span', { class: 'inst-field__ph' }, 'Ask a follow-up question…'),
+            el('span', { class: 'inst-btn inst-btn--primary inst-btn--field' }, 'Ask'),
+          ),
     ),
   );
 
@@ -356,7 +547,18 @@ function brandNote(ok: boolean, text: string): El {
   );
 }
 
-export function createInstBrand(_deps: InstDeps, data?: InstBrandData): InstScreen {
+/** "Manage brand kits" action → the full brand-manager screen. */
+function manageKitsButton(deps: InstDeps): El {
+  const btn = el(
+    'button',
+    { type: 'button', class: 'inst-btn inst-btn--ghost', 'data-testid': 'inst-brand-manage' },
+    'Manage brand kits',
+  );
+  btn.addEventListener('click', () => deps.onNavigate('brand-manager'));
+  return btn;
+}
+
+export function createInstBrand(deps: InstDeps, data?: InstBrandData): InstScreen {
   const primary = data ? data.primary : '#0374B5';
   const secondary = data ? data.secondary : '#2D3B45';
   const roles = data ? data.roles : BRAND_ROLES;
@@ -387,7 +589,13 @@ export function createInstBrand(_deps: InstDeps, data?: InstBrandData): InstScre
       el('span', { class: 'inst-field__ph' }, 'Name this kit…'),
       el('span', { class: 'inst-btn inst-btn--primary inst-btn--field' }, 'Save kit'),
     ),
-    el('div', { class: 'inst-hero' }, sectionLabel('Saved kits'), ...kits.map((k) => savedKit(k.name, k.gradient, k.meta))),
+    el(
+      'div',
+      { class: 'inst-hero' },
+      sectionLabel('Saved kits'),
+      ...kits.map((k) => savedKit(k.name, k.gradient, k.meta)),
+      manageKitsButton(deps),
+    ),
   );
 
   const element = el(
@@ -434,19 +642,36 @@ const INGEST_BULLETS = [
   'Weeks 10–14 — Systems biology and the final project',
 ];
 
-export function createInstIngest(_deps: InstDeps, data?: InstIngestData): InstScreen {
-  const dropzone = el(
-    'div',
-    { class: 'inst-dropzone' },
+/** Accept list mirrors the classic document-provide file input. */
+const INGEST_ACCEPT = '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.html,.htm,.md,.txt,.rtf,image/*';
+
+export function createInstIngest(_deps: InstDeps, data?: InstIngestData, ingest?: InstIngestDeps): InstScreen {
+  const dropzoneBody: El[] = [
     el('div', { class: 'inst-dropzone__icon', 'aria-hidden': 'true' }, '↑'),
     el(
       'div',
       { class: 'inst-hero', style: 'align-items:center;gap:4px;text-align:center;' },
-      el('span', { class: 'inst-dropzone__title' }, 'Drop a document here'),
+      el('span', { class: 'inst-dropzone__title' }, ingest?.busy ? 'Converting…' : 'Drop a document here'),
       el('span', { class: 'inst-dropzone__sub' }, 'or click to browse your files'),
     ),
     el('div', { class: 'inst-formats' }, ...['PDF', 'DOCX', 'PPTX', 'HTML', 'PNG'].map((f) => el('span', { class: 'inst-fmt' }, f))),
-  );
+  ];
+  // When wired, the dropzone is a <label> wrapping a hidden file input, so a
+  // click browses and a chosen file reuses the renderer's convert path.
+  let dropzone: El;
+  if (ingest) {
+    const fileInput = el('input', {
+      type: 'file',
+      accept: INGEST_ACCEPT,
+      'aria-label': 'Choose document to convert',
+      'data-testid': 'inst-ingest-file',
+      style: 'position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;',
+    });
+    fileInput.addEventListener('change', (event: unknown) => ingest.onFile(event));
+    dropzone = el('label', { class: 'inst-dropzone', 'data-testid': 'inst-ingest-upload' }, fileInput, ...dropzoneBody);
+  } else {
+    dropzone = el('div', { class: 'inst-dropzone' }, ...dropzoneBody);
+  }
 
   const files: FileDef[] = data
     ? [{ ext: data.ext, extColor: 'var(--color-navy)', name: data.fileName, status: data.status, statusColor: data.statusColor, active: true, check: true }]

@@ -78,6 +78,14 @@ export interface RemediationDeps {
   onSkip(issueId: string): void;
   /** Copy the suggested-fix CSS to the clipboard. */
   onCopyFix(): void;
+  /**
+   * Download the corrected page HTML. Optional so the demo/seed usage keeps a
+   * clean footer; when present (live remediation) it renders a footer button —
+   * the equivalent of the old remediate-result "Download HTML" affordance.
+   */
+  onDownload?(): void;
+  /** Open the saved-work screen (the old remediate-result "More" affordance). */
+  onOpenSaved?(): void;
 }
 
 export interface RemediationPanel {
@@ -167,9 +175,9 @@ function htmlEvidence(before: string, after: string, copyBtn: El): El {
       'div',
       { class: 'remed-html' },
       el('span', { class: 'remed-html__label' }, 'Before'),
-      el('pre', { class: 'remed-html__pre' }, before),
+      el('pre', { class: 'remed-html__pre', 'data-testid': 'remed-html-before' }, before),
       el('span', { class: 'remed-html__label' }, 'After'),
-      el('pre', { class: 'remed-html__pre' }, after),
+      el('pre', { class: 'remed-html__pre', 'data-testid': 'remed-html-after' }, after),
     ),
   );
 }
@@ -205,7 +213,7 @@ export function createRemediationPanel(view: RemediationView, deps: RemediationD
   const sidebar = el('aside', { class: 'remed-sidebar', 'aria-label': 'Issues' }, context, summary, issues);
 
   // ── Main ─────────────────────────────────────────────────────────────────────
-  const copyBtn = el('button', { type: 'button', class: 'remed-fix__copy' }, 'Copy');
+  const copyBtn = el('button', { type: 'button', class: 'remed-fix__copy', 'data-testid': 'remed-copy-fix' }, 'Copy');
   copyBtn.addEventListener('click', () => deps.onCopyFix());
 
   const header = el(
@@ -214,13 +222,13 @@ export function createRemediationPanel(view: RemediationView, deps: RemediationD
     el(
       'div',
       { class: 'remed-tags' },
-      el('span', { class: `remed-tag remed-tag--${d.severity}` }, d.tag),
+      el('span', { class: `remed-tag remed-tag--${d.severity}`, 'data-testid': 'remed-tag' }, d.tag),
       el('span', { class: 'remed-wcag' }, d.wcag),
       el('span', { class: 'remed-spacer' }),
       el('span', { class: 'remed-position' }, d.position),
     ),
-    el('h1', { class: 'remed-title' }, d.title),
-    el('p', { class: 'remed-desc' }, d.description),
+    el('h1', { class: 'remed-title', 'data-testid': 'remed-title' }, d.title),
+    el('p', { class: 'remed-desc', 'data-testid': 'remed-desc' }, d.description),
   );
 
   // Before/after evidence: contrast tiles for the demo seed, OR the real
@@ -261,6 +269,17 @@ export function createRemediationPanel(view: RemediationView, deps: RemediationD
         )
       : undefined;
 
+  const footerBtns: El[] = [];
+  if (deps.onOpenSaved) {
+    const moreBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost', 'data-testid': 'remed-open-saved' }, 'More');
+    moreBtn.addEventListener('click', () => deps.onOpenSaved!());
+    footerBtns.push(moreBtn);
+  }
+  if (deps.onDownload) {
+    const downloadBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost', 'data-testid': 'remed-download-html' }, 'Download HTML');
+    downloadBtn.addEventListener('click', () => deps.onDownload!());
+    footerBtns.push(downloadBtn);
+  }
   const skipBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost' }, 'Skip');
   skipBtn.addEventListener('click', () => deps.onSkip(view.selectedId));
   const applyBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--primary' }, '✓ Apply fix');
@@ -270,7 +289,7 @@ export function createRemediationPanel(view: RemediationView, deps: RemediationD
     'div',
     { class: 'remed-actions' },
     el('span', { class: 'remed-actions__note' }, 'Applies to the live Canvas page · fully revertable'),
-    el('div', { class: 'remed-actions__btns' }, skipBtn, applyBtn),
+    el('div', { class: 'remed-actions__btns' }, ...footerBtns, skipBtn, applyBtn),
   );
 
   const main = el(
@@ -282,6 +301,6 @@ export function createRemediationPanel(view: RemediationView, deps: RemediationD
     actions,
   );
 
-  const element = el('div', { class: 'remed' }, sidebar, main);
+  const element = el('div', { class: 'remed', 'data-testid': 'remediation-panel' }, sidebar, main);
   return { element };
 }

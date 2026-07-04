@@ -14,7 +14,7 @@ import { previewFrame, previewSrcdoc } from './preview.js';
 import { api, byId, copyText, el, errorMessage, later, onReady, readStorage, writeStorage, type El } from './ui.js';
 import { turnViewToVm, type FragmentVm } from '../view.js';
 import { themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
-import { createRemediationPanel, type RemediationIssue, type RemediationView } from './remediation.js';
+import { createRemediationPanel, type RemediationDeps, type RemediationIssue, type RemediationView } from './remediation.js';
 import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
 import {
   createInstHome,
@@ -24,8 +24,10 @@ import {
   type InstDeps,
   type InstTarget,
   type InstAskData,
+  type InstAskDeps,
   type InstBrandData,
   type InstIngestData,
+  type InstIngestDeps,
   type InstRole,
 } from './institutional-screens.js';
 import type {
@@ -50,16 +52,12 @@ import type {
 } from '../../contracts/index.js';
 
 type Screen =
-  | 'home'
   | 'build-template'
   | 'build-details'
   | 'build-brand'
   | 'build-result'
   | 'remediate-source'
   | 'remediate-provide'
-  | 'remediate-result'
-  | 'guidance-ask'
-  | 'guidance-answer'
   | 'alignment'
   | 'brand-manager'
   | 'saved-work'
@@ -146,6 +144,8 @@ interface State {
   selectedCanvasPageId: string | undefined;
   remediateView: TurnView | undefined;
   guidanceQuestion: string;
+  /** Half-typed inst-ask question, preserved across attach/capture re-renders. */
+  askDraft: string;
   guidanceView: TurnView | undefined;
   screenshotPermission: ScreenshotPermissionStatus | undefined;
   screenshotSources: ScreenshotSource[];
@@ -211,8 +211,8 @@ function loadUiTheme(): UiTheme {
 }
 
 const state: State = {
-  screen: 'home',
-  previousScreen: 'home',
+  screen: 'inst-home',
+  previousScreen: 'inst-home',
   busy: false,
   error: undefined,
   notice: undefined,
@@ -251,6 +251,7 @@ const state: State = {
   selectedCanvasPageId: undefined,
   remediateView: undefined,
   guidanceQuestion: 'How do I make a table accessible in Canvas?',
+  askDraft: '',
   guidanceView: undefined,
   screenshotPermission: undefined,
   screenshotSources: [],
@@ -325,11 +326,9 @@ interface ScreenParts {
 
 function renderScreen(): ScreenParts {
   switch (state.screen) {
-    case 'home':
-      return { header: homeHeader(), main: renderHome() };
     case 'build-template':
       return {
-        header: flowHeader('Build a Canvas page', 'Step 1 of 4', 25, 'home'),
+        header: flowHeader('Build a Canvas page', 'Step 1 of 4', 25, 'inst-home'),
         main: renderBuildTemplate(),
       };
     case 'build-details':
@@ -349,7 +348,7 @@ function renderScreen(): ScreenParts {
       };
     case 'remediate-source':
       return {
-        header: simpleHeader('Fix an existing page', 'Remediate', 'amber', 'home'),
+        header: simpleHeader('Fix an existing page', 'Remediate', 'amber', 'inst-home'),
         main: renderRemediateSource(),
       };
     case 'remediate-provide':
@@ -363,24 +362,9 @@ function renderScreen(): ScreenParts {
         ),
         main: renderRemediateProvide(),
       };
-    case 'remediate-result':
-      return {
-        header: simpleHeader('Remediation result', remediateHeaderBadge(), remediateHeaderKind(), 'remediate-provide'),
-        main: renderRemediateResult(),
-      };
-    case 'guidance-ask':
-      return {
-        header: simpleHeader('Course design guidance', 'Saved guidance', 'neutral', 'home', () => go('saved-work')),
-        main: renderGuidanceAsk(),
-      };
-    case 'guidance-answer':
-      return {
-        header: simpleHeader('Guidance answer', 'Grounded', 'green', 'guidance-ask'),
-        main: renderGuidanceAnswer(),
-      };
     case 'alignment':
       return {
-        header: simpleHeader('Alignment coach', 'Guidance mode', 'blue', 'home'),
+        header: simpleHeader('Alignment coach', 'Guidance mode', 'blue', 'inst-home'),
         main: renderAlignment(),
       };
     case 'brand-manager':
@@ -395,11 +379,11 @@ function renderScreen(): ScreenParts {
       };
     case 'remediate-review':
       return {
-        header: simpleHeader('Accessibility review', 'Institutional preview', 'blue', 'home'),
+        header: simpleHeader('Accessibility review', 'Institutional preview', 'blue', 'inst-home'),
         main: renderRemediationReview(),
       };
     case 'inst-home':
-      return { header: simpleHeader('Redesign preview', 'Home', 'blue', 'home'), main: renderInstHome() };
+      return { header: instHomeHeader(), main: renderInstHome() };
     case 'inst-ask':
       return { header: simpleHeader('Ask & Answer', 'Redesign', 'blue', 'inst-home'), main: renderInstAsk() };
     case 'inst-brand':
@@ -412,10 +396,26 @@ function renderScreen(): ScreenParts {
 function institutionalDeps(): InstDeps {
   return {
     onNavigate: (target: InstTarget) => {
-      if (target === 'remediation') go('remediate-review');
-      else if (target === 'ask') go('inst-ask');
-      else if (target === 'brand') go('inst-brand');
-      else go('inst-ingest');
+      switch (target) {
+        case 'build':
+          return go('build-template');
+        case 'remediation':
+          return go('remediate-review');
+        case 'ask':
+          return go('inst-ask');
+        case 'brand':
+          return go('inst-brand');
+        case 'ingest':
+          return go('inst-ingest');
+        case 'fix':
+          return go('remediate-source');
+        case 'saved':
+          return go('saved-work');
+        case 'alignment':
+          return go('alignment');
+        case 'brand-manager':
+          return go('brand-manager');
+      }
     },
   };
 }
@@ -494,17 +494,59 @@ function instIngestData(): InstIngestData | undefined {
   };
 }
 
+/** Permission-state copy for the screenshot attach affordance (mirrors the retired panel's hint). */
+function screenshotHint(): string {
+  return state.screenshotPermission && state.screenshotPermission !== 'granted'
+    ? `Screen recording permission: ${state.screenshotPermission}. macOS may ask before the first capture.`
+    : 'Screenshots are summarized on-device for this question; raw pixels are not stored in the session.';
+}
+
+function instAskDeps(): InstAskDeps {
+  return {
+    onAsk: (question: string) => {
+      state.guidanceQuestion = question.trim();
+      state.askDraft = '';
+      void runGuidance(state.guidanceQuestion);
+    },
+    busy: state.busy,
+    draft: state.askDraft,
+    // State-only; the DOM already shows the text, so no render() here.
+    onDraftChange: (value: string) => {
+      state.askDraft = value;
+    },
+    screenshots: state.screenshots.map((shot) => ({ id: shot.id, label: shot.label, dataUrl: shot.dataUrl })),
+    onAttachScreenshot: () => void loadScreenshotSources(),
+    onRemoveScreenshot: (id: string) => removeScreenshot(id),
+    screenshotSources: state.screenshotSources.map((source) => ({
+      id: source.id,
+      label: source.label,
+      kind: source.kind,
+      thumbnailDataUrl: source.thumbnailDataUrl,
+    })),
+    onCaptureSource: (id: string) => void captureScreenshot(id),
+    screenshotHint: screenshotHint(),
+  };
+}
+
+function instIngestDeps(): InstIngestDeps {
+  return {
+    onFile: (event: unknown) => void ingestDocument(event),
+    busy: state.busy,
+  };
+}
+
 function renderInstAsk(): El {
-  return createInstAsk(institutionalDeps(), instAskData()).element;
+  return createInstAsk(institutionalDeps(), instAskData(), instAskDeps()).element;
 }
 function renderInstBrand(): El {
   return createInstBrand(institutionalDeps(), instBrandData()).element;
 }
 function renderInstIngest(): El {
-  return createInstIngest(institutionalDeps(), instIngestData()).element;
+  return createInstIngest(institutionalDeps(), instIngestData(), instIngestDeps()).element;
 }
 
-function homeHeader(): El {
+/** Boot/hub header for inst-home: brand mark + health, no back button. */
+function instHomeHeader(): El {
   return el(
     'header',
     { class: 'appbar' },
@@ -641,41 +683,6 @@ function statusBanner(message: string, kind: 'error' | 'notice'): El {
       },
       message,
     ),
-  );
-}
-
-function renderHome(): El {
-  return screen(
-    stack(
-      intro('What are you doing today?', 'Pick one job. The app will ask only the next required question.', true),
-      el(
-        'div',
-        { class: 'choice-list' },
-        choice('1', 'Build a Canvas page', 'Create a page from a guided template and get checked HTML.', () => go('build-template'), 'primary', 'Start', 'home-build'),
-        choice('2', 'Fix an existing page', 'Paste HTML or import a read-only Canvas page.', () => go('remediate-source'), 'warn', undefined, 'home-remediate'),
-        choice('3', 'Ask how Canvas works', 'Ask a Canvas question, with or without a screenshot.', () => go('guidance-ask'), 'plain', undefined, 'home-guidance'),
-      ),
-      quickLinks(),
-    ),
-  );
-}
-
-function quickLinks(): El {
-  return el(
-    'section',
-    { class: 'quick-links' },
-    el('div', { class: 'quick-links__label' }, 'Shortcuts'),
-    actionButton('Upload document', () => {
-      state.sourceMode = 'document';
-      go('remediate-provide');
-    }, 'chip', undefined, 'quick-upload-document'),
-    actionButton('Canvas API token', () => {
-      state.sourceMode = 'canvas';
-      go('remediate-provide');
-    }, 'chip', undefined, 'quick-canvas-token'),
-    actionButton('Saved work', () => go('saved-work'), 'chip', undefined, 'quick-saved-work'),
-    actionButton('Accessibility review', () => go('remediate-review'), 'chip', undefined, 'quick-remediation-review'),
-    actionButton('Preview redesign', () => go('inst-home'), 'chip', undefined, 'quick-inst-home'),
   );
 }
 
@@ -980,39 +987,6 @@ function canvasPageRow(page: CanvasPage): El {
   return row;
 }
 
-function renderRemediateResult(): El {
-  const passed = firstPassedFragment(state.remediateView);
-  const fragment = passed ?? firstFragment(state.remediateView);
-  const fixedDiffs = remediateFixedDiffs(state.remediateView);
-  return screen(
-    wideStack(
-      intro(
-        passed ? 'Your page is ready to copy.' : fragment ? 'Your page still needs review.' : 'No repaired page is ready yet.',
-        passed
-          ? 'The repaired HTML passed the output gate.'
-          : fragment
-            ? 'Canvas Agent fixed what it could and is keeping blockers separate from copied HTML.'
-            : 'Run a fix first to see the preview, issues, and HTML code.',
-      ),
-      fixedDiffs.length > 0
-        ? el('section', { class: 'panel panel--green steps', 'data-testid': 'remediate-diff-list' }, ...fixedDiffs.map((d) => checkRow(d)))
-        : el('section', { class: 'panel', 'data-testid': 'remediate-diff-list' }, el('p', { class: 'panel__body' }, fragment ? 'No issues were marked fixed by the gate diff.' : 'No remediation run yet.')),
-      ...(fragment?.remediateResult ? [remediateEvidencePanel(fragment)] : []),
-      fragment ? fragmentCard(fragment, 'Repaired Canvas page') : emptyPanel('Run a fix first to see the preview and HTML code.'),
-      ...(fragment ? fragmentIssuesPanels(fragment) : []),
-      btnRow(
-        actionButton('Accessibility review', () => go('remediate-review'), 'btn btn--secondary', undefined, 'open-remediation-review'),
-        actionButton('More', () => {
-          state.previousScreen = 'remediate-result';
-          go('saved-work');
-        }, 'btn btn--secondary'),
-        downloadButton('Download HTML', passed, 'download-repaired-html'),
-        copyButton('Copy repaired HTML', passed),
-      ),
-    ),
-  );
-}
-
 // ── Institutional accessibility-review screen ────────────────────────────────
 // A navigable, in-app rendering of the redesigned remediation panel (ported
 // from the Paper design "02 · Accessibility remediation" via remediation.ts).
@@ -1166,7 +1140,12 @@ function remediationReviewView(): RemediationView {
 }
 
 function renderRemediationReview(): El {
-  const panel = createRemediationPanel(remediationReviewView(), {
+  const view = remediationReviewView();
+  // Only offer the corrected-HTML download when the run left no failures — the
+  // same safety invariant the retired remediate-result screen enforced by
+  // disabling its download/copy affordances on a withheld result.
+  const passed = view.summary.fail === 0;
+  const deps: RemediationDeps = {
     onSelect: (id) => {
       reviewSelectedId = id;
       render();
@@ -1188,130 +1167,15 @@ function renderRemediationReview(): El {
         render();
       });
     },
-  });
+    // "More" (jump to saved work) carried over from the retired remediate-result screen.
+    onOpenSaved: () => {
+      state.previousScreen = 'remediate-review';
+      go('saved-work');
+    },
+  };
+  if (passed) deps.onDownload = () => downloadHtml(remediationReviewView().detail.htmlAfter ?? '');
+  const panel = createRemediationPanel(view, deps);
   return el('main', { class: 'remed-screen' }, panel.element);
-}
-
-function renderGuidanceAsk(): El {
-  const prompt = textarea('Guidance question', state.guidanceQuestion, 'field', 'guidance-question');
-  return screen(
-    stack(
-      intro('What do you want to understand?', 'Ask about Canvas, accessibility, course design, or the rubric. Add a screenshot when the screen itself matters.'),
-      prompt,
-      el(
-        'div',
-        { class: 'chips' },
-        chip('Canvas tables', () => {
-          state.guidanceQuestion = 'How do I make a table accessible in Canvas?';
-          render();
-        }),
-        chip('Rubric gaps', () => {
-          state.guidanceQuestion = 'How can I tell if this module has rubric gaps?';
-          render();
-        }),
-        chip('Accessible images', () => {
-          state.guidanceQuestion = 'How should I write alt text for Canvas course images?';
-          render();
-        }),
-        chip('Check alignment', () => go('alignment')),
-      ),
-      screenshotCapturePanel(),
-      btnRow(actionButton(state.busy ? 'Asking' : 'Ask', () => {
-        state.guidanceQuestion = prompt.value.trim();
-        void runGuidance(state.guidanceQuestion);
-      }, 'btn', undefined, 'guidance-ask')),
-    ),
-  );
-}
-
-function screenshotCapturePanel(): El {
-  const permissionCopy = state.screenshotPermission && state.screenshotPermission !== 'granted'
-    ? `Screen recording permission: ${state.screenshotPermission}. macOS may ask before the first capture.`
-    : 'Screenshots are summarized on-device for this question; raw pixels are not stored in the session.';
-  const children: El[] = [
-    el(
-      'div',
-      { class: 'screenshot__toolbar' },
-      el('p', { class: 'hint' }, permissionCopy),
-      actionButton(state.busy ? 'Capturing' : 'Take screenshot', () => void loadScreenshotSources(), 'btn btn--secondary btn--small'),
-    ),
-  ];
-  if (state.screenshots.length > 0) {
-    children.push(
-      el(
-        'div',
-        { class: 'screenshot-rail', 'aria-label': 'Attached screenshots' },
-        ...state.screenshots.map((shot) => screenshotThumb(shot)),
-      ),
-    );
-  }
-  if (state.screenshotSources.length > 0) {
-    children.push(
-      el(
-        'div',
-        { class: 'source-grid', 'aria-label': 'Screenshot sources' },
-        ...state.screenshotSources.map((source) => screenshotSourceButton(source)),
-      ),
-    );
-  }
-  return el('section', { class: 'panel screenshot' }, ...children);
-}
-
-function screenshotThumb(shot: ScreenshotAttachment): El {
-  const img = el('img', { src: shot.dataUrl, alt: `${shot.label} screenshot preview`, class: 'screenshot-thumb__img' });
-  return el(
-    'article',
-    { class: 'screenshot-thumb' },
-    img,
-    el(
-      'div',
-      { class: 'screenshot-thumb__meta' },
-      el('span', { class: 'screenshot-thumb__label' }, shot.label),
-      actionButton('Remove', () => removeScreenshot(shot.id), 'link-btn'),
-    ),
-  );
-}
-
-function screenshotSourceButton(source: ScreenshotSource): El {
-  const btn = actionButton('', () => void captureScreenshot(source.id), 'source-card');
-  btn.replaceChildren(
-    el('img', { src: source.thumbnailDataUrl, alt: `${source.label} preview`, class: 'source-card__img' }),
-    el('span', { class: 'source-card__label' }, source.label),
-    el('span', { class: 'source-card__kind' }, source.kind === 'screen' ? 'Screen' : 'Window'),
-  );
-  return btn;
-}
-
-function renderGuidanceAnswer(): El {
-  const answer = state.guidanceView?.text.trim();
-  return screen(
-    wideStack(
-      el(
-        'article',
-        { class: 'answer' },
-        intro(
-          'Here is the guidance.',
-          answer || 'Use a real table only for data, add a caption, and mark header cells so screen readers can map relationships.',
-        ),
-        el(
-          'section',
-          { class: 'panel steps' },
-          el('h2', { class: 'panel__title' }, 'In Canvas'),
-          step('1', 'Use the table tool for tabular data only.'),
-          step('2', 'Add a short caption and header row.'),
-          step('3', 'Run the Canvas Accessibility Checker before publishing.'),
-        ),
-        el('div', { class: 'chips' }, el('span', { class: 'chip chip--blue' }, 'Rubric D4'), el('span', { class: 'chip chip--blue' }, 'WCAG 1.3.1'), el('span', { class: 'chip chip--blue' }, 'Canvas checker')),
-        btnRow(
-          actionButton('Ask another', () => go('guidance-ask'), 'btn btn--secondary'),
-          actionButton('Build a table', () => {
-            state.selectedTemplate = 'page-content';
-            go('build-details');
-          }),
-        ),
-      ),
-    ),
-  );
 }
 
 function renderAlignment(): El {
@@ -1328,6 +1192,8 @@ function renderAlignment(): El {
           state.alignmentContent = content.value.trim();
           state.alignmentObjectives = objectives.value.trim();
           state.alignmentRubric = rubric.value.trim();
+          // The answer lands on inst-ask; give it a readable question label.
+          state.guidanceQuestion = 'Does this content align with its objectives?';
           void runGuidance(composeAlignmentPrompt({
             content: state.alignmentContent,
             objectives: state.alignmentObjectives,
@@ -1475,13 +1341,6 @@ function fileInput(): El {
   return input;
 }
 
-function chip(label: string, onClick: () => void): El {
-  return actionButton(label, onClick, 'chip');
-}
-
-function step(num: string, text: string): El {
-  return el('div', { class: 'step' }, el('span', { class: 'step__num' }, num), el('span', {}, text));
-}
 
 function swatches(primary: string, secondary: string): El {
   const a = el('span', { class: 'swatch' });
@@ -1508,10 +1367,6 @@ function contrastPanel(): El {
     el('h2', { class: 'panel__title' }, 'Resolved accessible roles'),
     ...colors.slice(0, 3).map((c) => splitRow(el('span', {}, roleName(c.role)), el('span', { class: 'status' }, `${c.contrast.ratio.toFixed(1)} ${c.contrast.level}`))),
   );
-}
-
-function checkRow(text: string): El {
-  return el('div', { class: 'check-row' }, el('span', { class: 'check-row__icon' }, 'OK'), el('span', {}, text));
 }
 
 function copyButton(label: string, fragment: FragmentVm | undefined): El {
@@ -1548,30 +1403,6 @@ function fragmentIssuesPanels(fragment: FragmentVm): El[] {
     panels.push(el('section', { class: 'panel', 'data-testid': 'review-list' }, el('h2', { class: 'panel__title' }, 'Needs human review'), ...fragment.needsReview.map((w) => el('p', { class: 'panel__body' }, w))));
   }
   return panels;
-}
-
-function remediateEvidencePanel(fragment: FragmentVm): El {
-  const result = fragment.remediateResult!;
-  const beforeCode = el('code');
-  beforeCode.textContent = result.before;
-  const afterCode = el('code');
-  afterCode.textContent = result.after;
-  return el(
-    'section',
-    { class: 'panel two-col', 'data-testid': 'remediate-before-after' },
-    el(
-      'div',
-      {},
-      el('h2', { class: 'panel__title' }, 'Before'),
-      el('pre', { class: 'code-panel', 'data-testid': 'remediate-before-html' }, beforeCode),
-    ),
-    el(
-      'div',
-      {},
-      el('h2', { class: 'panel__title' }, 'After'),
-      el('pre', { class: 'code-panel', 'data-testid': 'remediate-after-html' }, afterCode),
-    ),
-  );
 }
 
 function documentStatusPanel(): El {
@@ -1728,26 +1559,6 @@ function buildHeaderKind(): 'blue' | 'green' | 'amber' | 'neutral' {
   if (firstPassedFragment(state.buildView)) return 'green';
   if (firstBlockedFragment(state.buildView)) return 'amber';
   return 'neutral';
-}
-
-function remediateHeaderBadge(): string {
-  if (firstPassedFragment(state.remediateView)) return 'Ready';
-  if (firstFragment(state.remediateView)) return 'Checks withheld';
-  return 'Review';
-}
-
-function remediateHeaderKind(): 'blue' | 'green' | 'amber' | 'neutral' {
-  if (firstPassedFragment(state.remediateView)) return 'green';
-  if (firstFragment(state.remediateView)) return 'amber';
-  return 'neutral';
-}
-
-function remediateFixedDiffs(view: TurnView | undefined): string[] {
-  const diffs = turnViewToVm(view ?? { text: '', fragments: [], toolsUsed: [], iterations: 0 }).fragments
-    .flatMap((fragment) => fragment.remediateResult?.issueDiffs ?? [])
-    .filter((diff) => diff.fixed)
-    .map((diff) => diff.message);
-  return diffs;
 }
 
 function activeHtml(): string {
@@ -1927,10 +1738,10 @@ async function openSession(session: Session): Promise<void> {
       go('build-result');
     } else if (session.mode === 'remediate') {
       state.remediateView = view;
-      go('remediate-result');
+      go('remediate-review');
     } else {
       state.guidanceView = view;
-      go('guidance-answer');
+      go('inst-ask');
     }
   } catch (err) {
     state.error = errorMessage(err);
@@ -2044,6 +1855,36 @@ async function convertUploadedDocument(): Promise<void> {
   }
 }
 
+/**
+ * inst-ingest upload: reuse the classic file-pick (`selectDocument`) and the
+ * `convertDocument` path, but stay on inst-ingest and surface the result via
+ * `state.documentConversion` (instIngestData reads it). Unlike
+ * `convertUploadedDocument`, this does NOT chain into remediation/navigation —
+ * that path belongs to the untouched remediate-provide document flow.
+ */
+async function ingestDocument(event: unknown): Promise<void> {
+  await selectDocument(event);
+  if (!state.documentFileName || !state.documentDataUrl) return; // size/read error already surfaced
+  const document: UploadedDocument = {
+    filename: state.documentFileName,
+    mime: state.documentMime || 'application/octet-stream',
+    sizeBytes: state.documentSizeBytes,
+    dataUrl: state.documentDataUrl,
+  };
+  state.busy = true;
+  state.error = undefined;
+  render();
+  try {
+    state.documentConversion = await api().convertDocument(document);
+    state.documentDataUrl = undefined;
+  } catch (err) {
+    state.error = errorMessage(err);
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
 async function ensureCurrentTheme(): Promise<void> {
   const kit = currentBrandKit();
   const key = `${kit.palette.primary}:${kit.palette.secondary}`;
@@ -2139,7 +1980,7 @@ async function runRemediate(sourceHtml: string): Promise<void> {
   });
   if (view) {
     state.remediateView = view;
-    go('remediate-result');
+    go('remediate-review');
   }
 }
 
@@ -2180,7 +2021,7 @@ async function runGuidance(prompt: string): Promise<void> {
     state.guidanceView = view;
     state.screenshots = [];
     state.screenshotSources = [];
-    go('guidance-answer');
+    go('inst-ask');
   }
 }
 
