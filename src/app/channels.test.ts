@@ -24,6 +24,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CATALOG_AVAILABLE,
+  CATALOG_SEARCH,
+  CATALOG_GET,
 } from './channels.js';
 
 test('exposes the original three IPC channel names', () => {
@@ -54,6 +57,9 @@ test('CHANNELS bundles every request/response channel, keyed by AppApi method', 
     screenshotPermissionStatus: SCREENSHOT_PERMISSION_STATUS,
     listScreenshotSources: LIST_SCREENSHOT_SOURCES,
     captureScreenshot: CAPTURE_SCREENSHOT,
+    catalogAvailable: CATALOG_AVAILABLE,
+    catalogSearch: CATALOG_SEARCH,
+    catalogGet: CATALOG_GET,
   });
 });
 

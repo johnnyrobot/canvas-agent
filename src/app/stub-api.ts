@@ -24,6 +24,8 @@ import type {
   BrandKit,
   CanvasImportResult,
   CanvasPage,
+  CatalogCourse,
+  CatalogCourseSummary,
   ContrastResult,
   GateResult,
   RuntimeHealth,
@@ -156,6 +158,28 @@ const CANNED_CANVAS_PAGES: CanvasPage[] = [
     updatedAt: '2026-05-25T08:00:00.000Z',
   },
 ];
+
+const CANNED_CATALOG_SUMMARIES: CatalogCourseSummary[] = [
+  { id: 40830, code: 'ACCTG001', title: 'Introductory Accounting I', college: 'wlac.elumenapp.com' },
+  { id: 37988, code: 'ACCTG001', title: 'Introductory Accounting I', college: 'lavc.elumenapp.com' },
+];
+
+const CANNED_CATALOG_COURSE: CatalogCourse = {
+  id: 40830,
+  code: 'ACCTG001',
+  title: 'Introductory Accounting I',
+  college: 'wlac.elumenapp.com',
+  units: 5,
+  description:
+    'This course is the study of accounting as an information system, examining why it is important ' +
+    'and how it is used by investors, creditors, and others to make decisions.',
+  slos: [
+    'Complete an accounting cycle for a corporation according to GAAP.',
+    'Prepare basic financial statements.',
+  ],
+  objectives: ['1 - Explain the nature and purpose of GAAP and IFRS.'],
+  source: 'mirror',
+};
 
 /** Build a plausible, internally-consistent ContrastResult for the stub theme. */
 function contrast(ratio: number, size: TextSize = 'normal'): ContrastResult {
@@ -335,6 +359,19 @@ export function createStubApi(): AppApi {
         label: sourceId === 'screen:stub:0' ? 'Entire Screen' : sourceId,
         capturedAt: new Date().toISOString(),
       };
+    },
+
+    // ── Catalog enrichment (OPTIONAL; laccd-courses-pp-cli) ─────────────────────
+    async catalogAvailable() {
+      return true;
+    },
+    async catalogSearch(_query) {
+      return CANNED_CATALOG_SUMMARIES.map((s) => ({ ...s }));
+    },
+    async catalogGet(id) {
+      // Keep the detail consistent with whichever summary row was picked.
+      const summary = CANNED_CATALOG_SUMMARIES.find((s) => s.id === id);
+      return summary ? { ...CANNED_CATALOG_COURSE, ...summary } : { ...CANNED_CATALOG_COURSE, id };
     },
   };
 }

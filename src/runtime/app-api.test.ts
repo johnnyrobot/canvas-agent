@@ -6,11 +6,14 @@ import type {
   AuditIssue,
   Auditor,
   CanvasImportResult,
+  CatalogCourse,
+  CatalogCourseSummary,
   GateDeps,
   IssueSet,
   KbResult,
   TurnChunk,
 } from '../contracts/index.js';
+import type { CatalogClient } from '../catalog/index.js';
 import { validateAllowlist } from '../engine/index.js';
 import type { ChatRunner } from '../orchestrator/index.js';
 import { createInMemorySecretStore, migrate, openDatabase } from '../storage/index.js';
@@ -726,4 +729,73 @@ test('a residual blocker still withholds the badge in remediate mode (gate stays
   const frag = view.fragments[0]!;
   assert.equal(frag.gate.badgeWithheld, true);
   assert.equal(frag.gate.conformance.passedChecks, false);
+});
+
+// ── Catalog enrichment wiring (OPTIONAL; src/catalog) ───────────────────────
+
+const CATALOG_SUMMARIES: CatalogCourseSummary[] = [
+  { id: 40830, code: 'ACCTG001', title: 'Introductory Accounting I', college: 'wlac.elumenapp.com' },
+];
+
+const CATALOG_COURSE: CatalogCourse = {
+  id: 40830,
+  code: 'ACCTG001',
+  title: 'Introductory Accounting I',
+  slos: ['Complete an accounting cycle.'],
+  objectives: ['1 - Explain GAAP.'],
+  source: 'live',
+};
+
+/** A fake CatalogClient that records calls and returns canned data — no real spawn. */
+function fakeCatalogClient(overrides: Partial<CatalogClient> = {}): CatalogClient {
+  return {
+    available: async () => true,
+    searchCourses: async () => CATALOG_SUMMARIES,
+    getCourse: async () => CATALOG_COURSE,
+    ...overrides,
+  };
+}
+
+test('catalogAvailable delegates to the injected CatalogClient', async () => {
+  const runner = new ScriptedRunner([]);
+  const available = await api(runner, { catalog: fakeCatalogClient({ available: async () => false }) }).catalogAvailable();
+  assert.equal(available, false);
+});
+
+test('catalogSearch delegates to the injected CatalogClient with the query', async () => {
+  const runner = new ScriptedRunner([]);
+  let seenQuery: string | undefined;
+  const catalog = fakeCatalogClient({
+    searchCourses: async (query) => {
+      seenQuery = query;
+      return CATALOG_SUMMARIES;
+    },
+  });
+  const results = await api(runner, { catalog }).catalogSearch('accounting');
+  assert.equal(seenQuery, 'accounting');
+  assert.deepEqual(results, CATALOG_SUMMARIES);
+});
+
+test('catalogGet delegates to the injected CatalogClient with the numeric id', async () => {
+  const runner = new ScriptedRunner([]);
+  let seenId: number | undefined;
+  const catalog = fakeCatalogClient({
+    getCourse: async (id) => {
+      seenId = id;
+      return CATALOG_COURSE;
+    },
+  });
+  const course = await api(runner, { catalog }).catalogGet(40830);
+  assert.equal(seenId, 40830);
+  assert.deepEqual(course, CATALOG_COURSE);
+});
+
+test('catalogGet propagates a CatalogClient rejection rather than swallowing it', async () => {
+  const runner = new ScriptedRunner([]);
+  const catalog = fakeCatalogClient({
+    getCourse: async () => {
+      throw new Error('course not found');
+    },
+  });
+  await assert.rejects(() => api(runner, { catalog }).catalogGet(1), /course not found/);
 });

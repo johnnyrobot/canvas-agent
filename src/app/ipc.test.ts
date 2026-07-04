@@ -6,6 +6,8 @@ import type {
   CanvasConfig,
   CanvasImportResult,
   CanvasPage,
+  CatalogCourse,
+  CatalogCourseSummary,
   RuntimeHealth,
   ScreenshotAttachment,
   ScreenshotSource,
@@ -37,6 +39,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CATALOG_AVAILABLE,
+  CATALOG_SEARCH,
+  CATALOG_GET,
   CHUNK,
   CHANNELS,
 } from './channels.js';
@@ -132,6 +137,22 @@ const DOCUMENT: UploadedDocument = {
   dataUrl: 'data:application/octet-stream;base64,QUJD',
 };
 
+const CATALOG_SUMMARIES: CatalogCourseSummary[] = [
+  { id: 40830, code: 'ACCTG001', title: 'Introductory Accounting I', college: 'wlac.elumenapp.com' },
+];
+
+const CATALOG_COURSE: CatalogCourse = {
+  id: 40830,
+  code: 'ACCTG001',
+  title: 'Introductory Accounting I',
+  college: 'wlac.elumenapp.com',
+  units: 5,
+  description: 'This course is the study of accounting as an information system.',
+  slos: ['Complete an accounting cycle for a corporation.'],
+  objectives: ['1 - Explain GAAP and IFRS.'],
+  source: 'live',
+};
+
 /** A fake `AppApi` that records its calls and returns canned values. */
 function fakeApi(overrides: Partial<AppApi> = {}) {
   const calls: { method: string; args: unknown[] }[] = [];
@@ -212,6 +233,18 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
     async captureScreenshot(sourceId) {
       calls.push({ method: 'captureScreenshot', args: [sourceId] });
       return SCREENSHOT;
+    },
+    async catalogAvailable() {
+      calls.push({ method: 'catalogAvailable', args: [] });
+      return true;
+    },
+    async catalogSearch(query) {
+      calls.push({ method: 'catalogSearch', args: [query] });
+      return CATALOG_SUMMARIES;
+    },
+    async catalogGet(id) {
+      calls.push({ method: 'catalogGet', args: [id] });
+      return CATALOG_COURSE;
     },
     ...overrides,
   };
@@ -340,6 +373,9 @@ test('every new product-layer channel delegates to its AppApi method and wraps t
     { channel: SCREENSHOT_PERMISSION_STATUS, method: 'screenshotPermissionStatus', args: [] },
     { channel: LIST_SCREENSHOT_SOURCES, method: 'listScreenshotSources', args: [] },
     { channel: CAPTURE_SCREENSHOT, method: 'captureScreenshot', args: [SCREENSHOT_SOURCE.id] },
+    { channel: CATALOG_AVAILABLE, method: 'catalogAvailable', args: [] },
+    { channel: CATALOG_SEARCH, method: 'catalogSearch', args: ['accounting'] },
+    { channel: CATALOG_GET, method: 'catalogGet', args: [40830] },
   ];
 
   for (const { channel, method, args } of cases) {

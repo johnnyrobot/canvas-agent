@@ -48,6 +48,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CATALOG_AVAILABLE,
+  CATALOG_SEARCH,
+  CATALOG_GET,
   CHUNK,
 } from './channels.js';
 
@@ -191,6 +194,15 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
   ipcMain.handle(CONVERT_DOCUMENT, (_event, document) =>
     envelope(() => api.convertDocument(document as UploadedDocument)),
   );
+
+  // ── Catalog enrichment (OPTIONAL; degrades to absent when the CLI isn't installed) ──
+  ipcMain.handle(CATALOG_AVAILABLE, () => envelope(() => api.catalogAvailable()));
+
+  ipcMain.handle(CATALOG_SEARCH, (_event, query) =>
+    envelope(() => api.catalogSearch(query as string)),
+  );
+
+  ipcMain.handle(CATALOG_GET, (_event, id) => envelope(() => api.catalogGet(id as number)));
 
   // ── Screenshot capture ─────────────────────────────────────────────────────
   ipcMain.handle(SCREENSHOT_PERMISSION_STATUS, () =>

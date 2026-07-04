@@ -215,6 +215,41 @@ export interface CanvasImportResult {
 /** Read-only Canvas importer. MUST perform no write/mutation calls. */
 export type CanvasImporter = (config: CanvasConfig, courseId: string) => Promise<CanvasImportResult>;
 
+// ── Catalog enrichment (catalog track; consumes the laccd-courses-pp-cli binary) ─
+// OPTIONAL enrichment source (see src/catalog/README.md): degrades to absent
+// when the CLI isn't installed, and a search/get call may go live to the
+// public eLumen API when the CLI's local mirror is empty — a user-initiated
+// network call, the same category as the opt-in Canvas import above.
+
+/** One catalog search-result row — enough to let a user pick a course before fetching detail. */
+export interface CatalogCourseSummary {
+  /** Numeric eLumen catalog id (parsed from `_links.self.href`, e.g. "/public/courses/38409"). */
+  id: number;
+  /** Subject + course number code, e.g. "ACCTG001". */
+  code: string;
+  /** Course title. Empty string if the CLI response omitted `name`. */
+  title: string;
+  /** The eLumen tenant host that owns this catalog entry, e.g. "wlac.elumenapp.com". */
+  college?: string;
+}
+
+/** A single course's enrichment detail: units, description, SLOs, objectives. */
+export interface CatalogCourse {
+  id: number;
+  code: string;
+  title: string;
+  college?: string;
+  /** Credit units for the course's default/first credit profile, when present. */
+  units?: number;
+  description?: string;
+  /** Course Student Learning Outcomes (the CLI's `outcomeLevel === "CSLO"` rows). */
+  slos: string[];
+  /** Course objectives, in their authored sequence order. */
+  objectives: string[];
+  /** `'live'` = a real-time public eLumen API call; `'mirror'` = the CLI's local synced mirror. */
+  source: 'live' | 'mirror';
+}
+
 // ── Aggregate engine capabilities (integration wires these into EngineDeps) ──
 
 /**
@@ -490,6 +525,14 @@ export interface AppApi {
   // from the Keychain (see `saveCanvasAuth`), so no secret transits the renderer.
   fetchCanvasPage(baseUrl: string, courseId: string, pageId: string): Promise<string>;
   listCanvasPages(baseUrl: string, courseId: string): Promise<CanvasPage[]>;
+
+  // ── Catalog enrichment (OPTIONAL; degrades to absent when the CLI isn't installed) ──
+  /** True iff the local `laccd-courses-pp-cli` binary is installed and runnable. Never rejects. */
+  catalogAvailable(): Promise<boolean>;
+  /** Search the LACCD eLumen catalog by free-text query. */
+  catalogSearch(query: string): Promise<CatalogCourseSummary[]>;
+  /** Fetch one course's full enrichment detail (units, description, SLOs, objectives) by numeric id. */
+  catalogGet(id: number): Promise<CatalogCourse>;
 
   // ── Local document conversion (Docling sidecar; raw bytes are transient) ──
   convertDocument(document: UploadedDocument): Promise<DocumentConversionResult>;
