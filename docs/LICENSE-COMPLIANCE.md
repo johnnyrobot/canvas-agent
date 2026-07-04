@@ -2,7 +2,9 @@
 
 **Scope:** the components actually bundled in and distributed by the Canvas Agent
 macOS `.app`/`.dmg`, and their redistribution obligations.
-**Last reviewed:** 2026-06-25 (against the `chromium-headless-shell` build).
+**Last reviewed:** 2026-07-04 (updated to reflect the 0.2.0 first-run Docling
+model-download architecture; originally reviewed 2026-06-25 against the
+`chromium-headless-shell` build).
 **Status:** all redistributed components are under permissive licenses; no copyleft
 weights, no proprietary DRM, no Google-binary terms. See residual items at the end.
 
@@ -19,7 +21,6 @@ weights, no proprietary DRM, no Google-binary terms. See residual items at the e
 | Chromium **headless shell** (`chromium-headless-shell`) | BSD-3-Clause | ✅ permissive; `LICENSE.headless_shell` shipped |
 | Ollama runner set (+ llama.cpp/ggml, MLX) | MIT | ✅ permissive; no weights bundled |
 | docling / docling-serve | MIT | ✅ permissive (Python deps: see residual #2) |
-| Docling models ×4 (CodeFormulaV2, layout-heron, docling-models, DocumentFigureClassifier) | CDLA-Permissive-2.0 / Apache-2.0 / MIT | ✅ permissive; redistributable with attribution |
 | RapidOCR / PaddleOCR PP-OCRv4 weights | Apache-2.0 | ✅ permissive |
 
 ## What is NOT redistributed
@@ -27,6 +28,7 @@ weights, no proprietary DRM, no Google-binary terms. See residual items at the e
 | Component | Why it's not an obligation |
 |---|---|
 | **Gemma** LLM weights | Pulled at runtime by Ollama; the user obtains them directly under Google's Gemma Terms. Not bundled. |
+| **Docling models** ×4 (CodeFormulaV2, layout-heron, docling-models, DocumentFigureClassifier) | Pulled at runtime by the first-run Docling model-download step (`src/ingest/model-download.ts`), not shipped in the `.dmg`. Licenses (CDLA-Permissive-2.0 / Apache-2.0 / MIT) remain permissive; there is simply no bundling obligation since 0.2.0. Not bundled. (Moved here 2026-07-04 to match the implementation — see the doc audit.) |
 | **Widevine CDM** (proprietary DRM) | Removed — we ship the BSD headless shell, not "Chrome for Testing." |
 | **"Google Chrome for Testing"** binary | Removed for the same reason. |
 | Playwright's **standalone FFmpeg** (LGPL-2.1+) | Removed — only needed for video recording, which the app never does. Excluded from the bundle (`build.extraResources` filter). |

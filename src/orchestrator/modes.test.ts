@@ -35,6 +35,9 @@ test('every mode has a prompt that keeps the hard rules and specializes', () => 
     assert.match(prompt, /never claim something "passes" yourself/);
     assert.match(prompt, /Never fetch remote resources/);
     assert.match(prompt, /cite/i);
+    // FR-X1: never fabricate institutional facts (SLOs, descriptions, policies).
+    assert.match(prompt, /Never invent institutional facts/);
+    assert.match(prompt, /\[PLACEHOLDER\]/);
     // Mode-specific specialization present.
     assert.match(prompt, new RegExp(`Mode: ${mode.toUpperCase()}`));
   }

@@ -54,8 +54,13 @@ interface Doc {
   getElementById(id: string): El | null;
   addEventListener(type: string, handler: () => void): void;
 }
+interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
 declare const document: Doc;
 declare const window: { canvasAgent: AppApi; navigator: Nav };
+declare const localStorage: StorageLike;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,4 +120,25 @@ export function errorMessage(err: unknown): string {
 /** Run `fn` after `ms` (thin wrapper so modules don't touch globals directly). */
 export function later(fn: () => void, ms: number): void {
   setTimeout(fn, ms);
+}
+
+/**
+ * Read a `localStorage` value, returning `undefined` if the key is absent OR if
+ * storage throws/is unavailable (e.g. a `file://` origin in the packaged app).
+ */
+export function readStorage(key: string): string | undefined {
+  try {
+    return localStorage.getItem(key) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Write a `localStorage` value; silently no-ops if storage throws/is unavailable. */
+export function writeStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Best-effort persistence only — e.g. a `file://` origin may disallow storage.
+  }
 }

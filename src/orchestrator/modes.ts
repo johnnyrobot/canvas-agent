@@ -24,6 +24,9 @@ const HARD_RULES = [
   '- Use the provided tools instead of guessing.',
   '- Never fetch remote resources; only describe user-supplied images.',
   '- Ground claims in the retrieved Knowledge-Pack sources and cite them.',
+  '- Never invent institutional facts: student learning outcomes (SLOs), course',
+  '  descriptions, policies, dates, and names must come from the user or their',
+  '  documents — otherwise emit a clearly marked [PLACEHOLDER] for the author to fill in.',
 ].join('\n');
 
 const GUIDANCE_SPECIALTY = [

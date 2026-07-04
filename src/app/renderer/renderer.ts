@@ -11,8 +11,9 @@
  */
 import { composeAlignmentPrompt } from './alignment.js';
 import { previewFrame, previewSrcdoc } from './preview.js';
-import { api, byId, copyText, el, errorMessage, later, onReady, type El } from './ui.js';
+import { api, byId, copyText, el, errorMessage, later, onReady, readStorage, writeStorage, type El } from './ui.js';
 import { turnViewToVm, type FragmentVm } from '../view.js';
+import { themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
 import { createRemediationPanel, type RemediationIssue, type RemediationView } from './remediation.js';
 import {
   createInstHome,
@@ -151,6 +152,11 @@ interface State {
   alignmentRubric: string;
   showCode: boolean;
   artifactView: ArtifactView;
+  /**
+   * UI chrome theme (light/dark) for the redesign screens — distinct from
+   * `theme` above, which is the resolved brand-kit `ThemeResult`.
+   */
+  uiTheme: UiTheme;
 }
 
 const DEFAULT_BRAND: BrandKit = {
@@ -184,6 +190,13 @@ const TEMPLATE_OPTIONS: TemplateOption[] = [
 ];
 
 const MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+const UI_THEME_STORAGE_KEY = 'canvasAgent.uiTheme';
+
+/** Load the persisted UI theme preference, defaulting to 'light' on any failure. */
+function loadUiTheme(): UiTheme {
+  return readStorage(UI_THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+}
 
 const state: State = {
   screen: 'home',
@@ -235,6 +248,7 @@ const state: State = {
   alignmentRubric: '',
   showCode: false,
   artifactView: 'preview',
+  uiTheme: loadUiTheme(),
 };
 
 let root: El | undefined;
@@ -251,6 +265,11 @@ function mount(): void {
 function render(): void {
   if (!root) return;
   const body = renderScreen();
+  const themedRoot = themedScreenRoot(state.screen);
+  if (themedRoot) {
+    body.main.className = uiThemeRootClass(body.main.className, themedRoot, state.uiTheme);
+    body.header.append(themeToggleButton());
+  }
   const children = [
     body.header,
     ...(state.error ? [statusBanner(state.error, 'error')] : []),
@@ -258,6 +277,27 @@ function render(): void {
     body.main,
   ];
   root.replaceChildren(...children);
+}
+
+/**
+ * Dark-mode toggle shown on the five redesign screens (see `themedScreenRoot`).
+ * Reflects state via `aria-pressed`; the visible label doubles as the accessible
+ * name so there's no separate label/name to keep in sync.
+ */
+function themeToggleButton(): El {
+  const dark = state.uiTheme === 'dark';
+  const btn = el(
+    'button',
+    { type: 'button', class: 'appbar__theme-toggle', 'aria-pressed': String(dark), 'data-testid': 'theme-toggle' },
+    el('span', { 'aria-hidden': 'true' }, dark ? '☀' : '🌙'),
+    'Dark mode',
+  );
+  btn.addEventListener('click', () => {
+    state.uiTheme = dark ? 'light' : 'dark';
+    writeStorage(UI_THEME_STORAGE_KEY, state.uiTheme);
+    render();
+  });
+  return btn;
 }
 
 interface ScreenParts {

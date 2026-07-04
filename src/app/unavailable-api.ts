@@ -85,5 +85,16 @@ export function createUnavailableApi(reason: string): AppApi {
     async captureScreenshot() {
       return fail();
     },
+    async catalogAvailable() {
+      // Honest, like health(): a dead runtime reports the enrichment source as
+      // absent rather than fabricating availability.
+      return false;
+    },
+    async catalogSearch() {
+      return fail();
+    },
+    async catalogGet() {
+      return fail();
+    },
   };
 }

@@ -13,6 +13,8 @@ import type {
   BrandKit,
   CanvasImportResult,
   CanvasPage,
+  CatalogCourse,
+  CatalogCourseSummary,
   ContrastResult,
   DocumentConversionResult,
   GateResult,
@@ -73,6 +75,22 @@ const CANNED_PAGES: CanvasPage[] = [
   { id: 'lab-safety', title: 'Lab Safety Guidelines', updatedAt: '2026-06-01T12:00:00.000Z' },
   { id: 'week-1', title: 'Week 1 Overview', updatedAt: '2026-06-02T12:00:00.000Z' },
 ];
+
+const CANNED_CATALOG_SUMMARIES: CatalogCourseSummary[] = [
+  { id: 40830, code: 'ACCTG001', title: 'Introductory Accounting I', college: 'wlac.elumenapp.com' },
+];
+
+const CANNED_CATALOG_COURSE: CatalogCourse = {
+  id: 40830,
+  code: 'ACCTG001',
+  title: 'Introductory Accounting I',
+  college: 'wlac.elumenapp.com',
+  units: 5,
+  description: 'E2E scripted course description.',
+  slos: ['E2E scripted SLO.'],
+  objectives: ['1 - E2E scripted objective.'],
+  source: 'live',
+};
 
 function contrast(ratio: number, size: TextSize = 'normal'): ContrastResult {
   const passesAA = ratio >= (size === 'large' ? WCAG.AA_LARGE : WCAG.AA_NORMAL);
@@ -398,6 +416,18 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
         label: sourceId,
         capturedAt: '2026-06-15T00:00:00.000Z',
       };
+    },
+
+    async catalogAvailable(): Promise<boolean> {
+      return scenario !== 'runtime-down';
+    },
+    async catalogSearch(): Promise<CatalogCourseSummary[]> {
+      failIfDown();
+      return CANNED_CATALOG_SUMMARIES.map((s) => ({ ...s }));
+    },
+    async catalogGet(id): Promise<CatalogCourse> {
+      failIfDown();
+      return { ...CANNED_CATALOG_COURSE, id };
     },
   };
 }

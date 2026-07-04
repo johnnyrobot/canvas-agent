@@ -230,3 +230,17 @@ test('listCanvasPages returns a non-empty canned list of pages', async () => {
     assert.ok(p.id.length > 0 && p.title.length > 0);
   }
 });
+
+test('catalogGet stays consistent with the catalogSearch summary for the same id', async () => {
+  const api = createStubApi();
+  const summaries = await api.catalogSearch('accounting');
+
+  assert.ok(summaries.length >= 2, 'expected at least two canned summaries');
+  for (const summary of summaries) {
+    const course = await api.catalogGet(summary.id);
+    assert.equal(course.id, summary.id);
+    assert.equal(course.code, summary.code);
+    assert.equal(course.title, summary.title);
+    assert.equal(course.college, summary.college);
+  }
+});

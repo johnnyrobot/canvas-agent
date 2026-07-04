@@ -34,6 +34,11 @@ export const LIST_CANVAS_PAGES = 'canvasAgent:listCanvasPages';
 // ── Local document conversion ───────────────────────────────────────────────
 export const CONVERT_DOCUMENT = 'canvasAgent:convertDocument';
 
+// ── Catalog enrichment (OPTIONAL; laccd-courses-pp-cli) ─────────────────────
+export const CATALOG_AVAILABLE = 'canvasAgent:catalogAvailable';
+export const CATALOG_SEARCH = 'canvasAgent:catalogSearch';
+export const CATALOG_GET = 'canvasAgent:catalogGet';
+
 // ── Screenshot capture ──────────────────────────────────────────────────────
 export const SCREENSHOT_PERMISSION_STATUS = 'canvasAgent:screenshotPermissionStatus';
 export const LIST_SCREENSHOT_SOURCES = 'canvasAgent:listScreenshotSources';
@@ -80,6 +85,9 @@ export const CHANNELS = {
   fetchCanvasPage: FETCH_CANVAS_PAGE,
   listCanvasPages: LIST_CANVAS_PAGES,
   convertDocument: CONVERT_DOCUMENT,
+  catalogAvailable: CATALOG_AVAILABLE,
+  catalogSearch: CATALOG_SEARCH,
+  catalogGet: CATALOG_GET,
   screenshotPermissionStatus: SCREENSHOT_PERMISSION_STATUS,
   listScreenshotSources: LIST_SCREENSHOT_SOURCES,
   captureScreenshot: CAPTURE_SCREENSHOT,

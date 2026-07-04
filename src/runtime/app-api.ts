@@ -18,6 +18,8 @@ import { audit as renderAudit } from '../engine/render/index.js';
 import { createRetriever } from '../knowledge/index.js';
 import { importCourse, fetchPageBody as defaultFetchPageBody, listPages as defaultListPages } from '../canvas/index.js';
 import type { PageReader } from '../canvas/index.js';
+import { createCatalogClient } from '../catalog/index.js';
+import type { CatalogClient } from '../catalog/index.js';
 import { resolveTheme as defaultResolveTheme } from '../theme/index.js';
 import { createOllamaSidecar } from '../llm/index.js';
 import type { ChatMessage, OllamaSidecar } from '../llm/index.js';
@@ -145,6 +147,13 @@ export interface AppApiOptions {
   listPages?: PageReader['listPages'];
   /** Secret store for the Canvas token. Default: the macOS Keychain-backed store. */
   secrets?: SecretStore;
+  /**
+   * Catalog enrichment client (OPTIONAL; see `src/catalog/README.md`). Default:
+   * a real `createCatalogClient()` resolving `laccd-courses-pp-cli` off PATH.
+   * `catalogAvailable()` degrades to `false` rather than throwing when the CLI
+   * isn't installed — this is never a hard runtime dependency.
+   */
+  catalog?: CatalogClient;
 }
 
 /**
@@ -416,6 +425,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const fetchPageBodyFn: PageReader['fetchPageBody'] = opts.fetchPageBody ?? defaultFetchPageBody;
   const listPagesFn: PageReader['listPages'] = opts.listPages ?? defaultListPages;
   const secrets: SecretStore = opts.secrets ?? createKeychainSecretStore();
+  const catalog: CatalogClient = opts.catalog ?? createCatalogClient();
   const configuredModel = sidecar().config.models.text;
 
   // Resolve the saved Canvas token for `baseUrl` from the OS Keychain and build the
@@ -758,6 +768,17 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     },
     async captureScreenshot() {
       throw new Error('Screenshot capture is only available in the Electron app shell.');
+    },
+
+    // ── Catalog enrichment (OPTIONAL; degrades to absent when the CLI isn't installed) ──
+    async catalogAvailable() {
+      return catalog.available();
+    },
+    async catalogSearch(query) {
+      return catalog.searchCourses(query);
+    },
+    async catalogGet(id) {
+      return catalog.getCourse(id);
     },
   };
 }

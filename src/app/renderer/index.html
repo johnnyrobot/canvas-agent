@@ -118,6 +118,34 @@
         flex: 1;
       }
 
+      /* Dark-mode toggle — shown on the redesign screens only (see `themedScreenRoot`
+         in view.ts). Always sits on the light appbar, so it only needs to meet AA
+         contrast against `--surface`, in both its unpressed and pressed states. */
+      .appbar__theme-toggle {
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 12px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 16px;
+        flex-shrink: 0;
+      }
+      .appbar__theme-toggle[aria-pressed="true"] {
+        background: var(--accent-soft);
+        border-color: var(--accent-line);
+        color: var(--accent);
+      }
+      .appbar__theme-toggle:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
       .status {
         display: inline-flex;
         align-items: center;

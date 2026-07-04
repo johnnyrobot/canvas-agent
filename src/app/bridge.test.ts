@@ -5,6 +5,8 @@ import type {
   BrandKit,
   CanvasConfig,
   CanvasPage,
+  CatalogCourse,
+  CatalogCourseSummary,
   ScreenshotAttachment,
   ScreenshotSource,
   Session,
@@ -36,6 +38,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CATALOG_AVAILABLE,
+  CATALOG_SEARCH,
+  CATALOG_GET,
   CHUNK,
 } from './channels.js';
 
@@ -93,12 +98,26 @@ const DOCUMENT: UploadedDocument = {
   sizeBytes: 12,
   dataUrl: 'data:application/octet-stream;base64,QUJD',
 };
+const CATALOG_SUMMARIES: CatalogCourseSummary[] = [
+  { id: 40830, code: 'ACCTG001', title: 'Introductory Accounting I', college: 'wlac.elumenapp.com' },
+];
+const CATALOG_COURSE: CatalogCourse = {
+  id: 40830,
+  code: 'ACCTG001',
+  title: 'Introductory Accounting I',
+  slos: ['Complete an accounting cycle.'],
+  objectives: ['1 - Explain GAAP.'],
+  source: 'live',
+};
 
 test('createBridge exposes exactly the AppApi methods', () => {
   const { invoke } = fakeInvoke({});
   const bridge = createBridge(invoke, noSub);
   assert.deepEqual(Object.keys(bridge).sort(), [
     'captureScreenshot',
+    'catalogAvailable',
+    'catalogGet',
+    'catalogSearch',
     'convertDocument',
     'createSession',
     'deleteBrandKit',
@@ -235,6 +254,9 @@ test('each new method invokes its channel with the right args and unwraps the va
     { channel: SCREENSHOT_PERMISSION_STATUS, value: 'granted', args: [], run: (b) => b.screenshotPermissionStatus() },
     { channel: LIST_SCREENSHOT_SOURCES, value: [SCREENSHOT_SOURCE], args: [], run: (b) => b.listScreenshotSources() },
     { channel: CAPTURE_SCREENSHOT, value: SCREENSHOT, args: [SCREENSHOT_SOURCE.id], run: (b) => b.captureScreenshot(SCREENSHOT_SOURCE.id) },
+    { channel: CATALOG_AVAILABLE, value: true, args: [], run: (b) => b.catalogAvailable() },
+    { channel: CATALOG_SEARCH, value: CATALOG_SUMMARIES, args: ['accounting'], run: (b) => b.catalogSearch('accounting') },
+    { channel: CATALOG_GET, value: CATALOG_COURSE, args: [40830], run: (b) => b.catalogGet(40830) },
   ];
 
   for (const { channel, value, args, run } of cases) {

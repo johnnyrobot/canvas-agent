@@ -38,6 +38,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CATALOG_AVAILABLE,
+  CATALOG_SEARCH,
+  CATALOG_GET,
   CHUNK,
   PULL_MODEL,
   PULL_PROGRESS,
@@ -177,6 +180,17 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
     },
     async captureScreenshot(sourceId) {
       return unwrap(await invoke(CAPTURE_SCREENSHOT, sourceId));
+    },
+
+    // ── Catalog enrichment (OPTIONAL; laccd-courses-pp-cli) ─────────────────
+    async catalogAvailable() {
+      return unwrap(await invoke(CATALOG_AVAILABLE));
+    },
+    async catalogSearch(query) {
+      return unwrap(await invoke(CATALOG_SEARCH, query));
+    },
+    async catalogGet(id) {
+      return unwrap(await invoke(CATALOG_GET, id));
     },
   };
 }
