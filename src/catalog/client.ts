@@ -140,6 +140,10 @@ export function createCatalogClient(opts: CatalogClientOptions = {}): CatalogCli
     },
 
     async getCourse(id: number): Promise<CatalogCourse> {
+      // Enforce the id contract before anything reaches the CLI's argv.
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new CatalogError('parse', `invalid catalog course id: ${String(id)}`);
+      }
       const data = await invoke(['courses', 'get', String(id)]);
       const raw = extractSingle(data);
       if (!raw) {
@@ -294,12 +298,17 @@ function toCourse(raw: Record<string, unknown>, source: string): CatalogCourse {
   const fullRaw = raw.fullCourseInfo;
   if (typeof fullRaw !== 'string' || fullRaw.length === 0) return course;
 
-  let full: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    full = JSON.parse(fullRaw) as Record<string, unknown>;
+    parsed = JSON.parse(fullRaw);
   } catch {
     throw new CatalogError('parse', `course ${id}: fullCourseInfo was not valid JSON`);
   }
+  // JSON.parse can legally return null/arrays/primitives — only an object is usable.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new CatalogError('parse', `course ${id}: fullCourseInfo was not a JSON object`);
+  }
+  const full = parsed as Record<string, unknown>;
 
   if (typeof full.courseTitle === 'string' && full.courseTitle.length > 0) course.title = full.courseTitle;
   if (typeof full.courseDescription === 'string') course.description = full.courseDescription;

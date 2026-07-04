@@ -289,3 +289,38 @@ test('a configured command path is used verbatim as the spawned file', async () 
   await client.searchCourses('x');
   assert.equal(calls[0]!.file, '/opt/homebrew/bin/laccd-courses-pp-cli');
 });
+
+test('getCourse rejects a fullCourseInfo that parses to a non-object with a parse CatalogError', async () => {
+  const { execFile } = fakeExecFile(() =>
+    ok(
+      JSON.stringify({
+        meta: { source: 'live' },
+        results: {
+          code: 'X001',
+          fullCourseInfo: 'null',
+          _links: { self: { href: '/public/courses/5' } },
+        },
+      }),
+    ),
+  );
+  const client = createCatalogClient({ execFile });
+
+  await assert.rejects(
+    () => client.getCourse(5),
+    (err: unknown) => err instanceof CatalogError && err.kind === 'parse',
+  );
+});
+
+test('getCourse rejects invalid ids before anything reaches the CLI argv', async () => {
+  const { execFile, calls } = fakeExecFile(() => ok('{}'));
+  const client = createCatalogClient({ execFile });
+
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 0, -3, 1.5]) {
+    await assert.rejects(
+      () => client.getCourse(bad),
+      (err: unknown) => err instanceof CatalogError && err.kind === 'parse',
+      `expected id ${String(bad)} to be rejected`,
+    );
+  }
+  assert.equal(calls.length, 0, 'no CLI invocation for invalid ids');
+});
