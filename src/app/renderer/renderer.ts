@@ -15,6 +15,7 @@ import { api, byId, copyText, el, errorMessage, later, onReady, readStorage, wri
 import { turnViewToVm, type FragmentVm } from '../view.js';
 import { themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
 import { createRemediationPanel, type RemediationIssue, type RemediationView } from './remediation.js';
+import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
 import {
   createInstHome,
   createInstAsk,
@@ -32,6 +33,8 @@ import type {
   Severity as GateSeverity,
   BrandKit,
   CanvasPage,
+  CatalogCourse,
+  CatalogCourseSummary,
   DocumentConversionResult,
   ProductMode,
   ScreenshotAttachment,
@@ -157,6 +160,15 @@ interface State {
    * `theme` above, which is the resolved brand-kit `ThemeResult`.
    */
   uiTheme: UiTheme;
+
+  // ── Catalog enrichment (optional; see src/catalog/README.md) ───────────────
+  /** Whether the local LACCD catalog CLI is installed. `undefined` = not yet checked. */
+  catalogAvailable: boolean | undefined;
+  catalogQuery: string;
+  catalogResults: CatalogCourseSummary[];
+  catalogSelected: CatalogCourse | undefined;
+  catalogBusy: boolean;
+  catalogError: string | undefined;
 }
 
 const DEFAULT_BRAND: BrandKit = {
@@ -249,6 +261,12 @@ const state: State = {
   showCode: false,
   artifactView: 'preview',
   uiTheme: loadUiTheme(),
+  catalogAvailable: undefined,
+  catalogQuery: '',
+  catalogResults: [],
+  catalogSelected: undefined,
+  catalogBusy: false,
+  catalogError: undefined,
 };
 
 let root: El | undefined;
@@ -705,6 +723,7 @@ function templateRow(template: TemplateOption): El {
 }
 
 function renderBuildDetails(): El {
+  void ensureCatalogAvailable();
   const title = textarea('Page title', state.buildTitle, 'field field--single', 'build-title');
   const rhythm = textarea('Due dates or weekly rhythm', state.buildRhythm, 'field field--single', 'build-rhythm');
   const tasks = textarea('Learner tasks for this week', state.buildTasks, 'field', 'build-tasks');
@@ -712,6 +731,7 @@ function renderBuildDetails(): El {
     stack(
       intro('What should this page say?', 'Add the details you already know. Empty fields can become clear placeholders.'),
       el('div', { class: 'field-stack' }, title, rhythm, tasks),
+      ...(state.catalogAvailable === true ? [catalogPanel()] : []),
       splitRow(
         el('div', { class: 'hint' }, 'The app will not invent course outcomes.'),
         actionButton('Continue', () => {
@@ -721,6 +741,68 @@ function renderBuildDetails(): El {
           go('build-brand');
         }, 'btn', undefined, 'build-details-continue'),
       ),
+    ),
+  );
+}
+
+/**
+ * "Official course outcomes" panel — optional LACCD catalog enrichment.
+ * Only rendered by the caller when `state.catalogAvailable === true`; see
+ * `ensureCatalogAvailable()` and `src/catalog/README.md`.
+ */
+function catalogPanel(): El {
+  if (state.catalogSelected) return catalogSelectedPanel(state.catalogSelected);
+  const search = textarea('Search the LACCD catalog (e.g. course code or title)', state.catalogQuery, 'field field--single', 'catalog-search-input');
+  const runSearch = () => {
+    state.catalogQuery = search.value;
+    void searchCatalog(search.value);
+  };
+  const searchButton = actionButton(state.catalogBusy ? 'Searching' : 'Search catalog', runSearch, 'btn btn--secondary btn--small', undefined, 'catalog-search');
+  searchButton.disabled = state.catalogBusy;
+  return el(
+    'section',
+    { class: 'panel' },
+    el('h2', { class: 'panel__title' }, 'Official course outcomes'),
+    el(
+      'p',
+      { class: 'panel__body' },
+      'Search the local LACCD catalog mirror to attach official student learning outcomes to this page. This may query the public eLumen API when the local mirror has no match.',
+    ),
+    el('div', { class: 'field-stack' }, search),
+    splitRow(
+      el(
+        'div',
+        { class: 'hint' },
+        state.catalogError ?? (state.catalogResults.length > 0 ? `${state.catalogResults.length} result(s)` : ''),
+      ),
+      searchButton,
+    ),
+    ...(state.catalogResults.length > 0
+      ? [el('div', { class: 'list', 'data-testid': 'catalog-results' }, ...state.catalogResults.map((s) => catalogResultRow(s)))]
+      : []),
+  );
+}
+
+function catalogResultRow(summary: CatalogCourseSummary): El {
+  const row = actionButton(catalogSummaryLabel(summary), () => void selectCatalogCourse(summary.id), 'row', undefined, 'catalog-result');
+  row.disabled = state.catalogBusy;
+  return row;
+}
+
+function catalogSelectedPanel(course: CatalogCourse): El {
+  return el(
+    'section',
+    { class: 'panel panel--green' },
+    el('h2', { class: 'panel__title' }, 'Official course outcomes'),
+    el('p', { class: 'panel__body' }, `${course.code} — ${course.title}`),
+    el('p', { class: 'panel__body' }, `${course.slos.length} outcome(s) attached`),
+    ...(course.slos.length > 0 ? [el('div', { class: 'list' }, ...course.slos.map((slo) => el('p', { class: 'panel__body' }, slo)))] : []),
+    splitRow(
+      el('div', { class: 'hint' }, 'These outcomes will be included in the generated page prompt.'),
+      actionButton('Remove', () => {
+        state.catalogSelected = undefined;
+        render();
+      }, 'btn btn--secondary btn--small', undefined, 'catalog-remove'),
     ),
   );
 }
@@ -1976,12 +2058,70 @@ async function ensureCurrentTheme(): Promise<void> {
   }
 }
 
+/**
+ * Lazily probe whether the local LACCD catalog CLI is installed, so the
+ * "Official course outcomes" panel stays invisible until we know the feature
+ * is actually usable. Mirrors `ensureCurrentTheme()`'s once-per-value-change
+ * shape, keyed on "have we checked at all" rather than a value key.
+ */
+let catalogProbe: Promise<void> | undefined;
+
+async function ensureCatalogAvailable(): Promise<void> {
+  if (state.catalogAvailable !== undefined) return;
+  // Re-renders while the probe is in flight must not spawn duplicate CLI checks.
+  catalogProbe ??= (async () => {
+    try {
+      state.catalogAvailable = await api().catalogAvailable();
+    } catch {
+      state.catalogAvailable = false;
+    } finally {
+      render();
+    }
+  })();
+  return catalogProbe;
+}
+
+/** Search the local LACCD catalog mirror (and, when empty, the public eLumen API). */
+async function searchCatalog(query: string): Promise<void> {
+  const trimmed = query.trim();
+  if (!trimmed || state.catalogBusy) return;
+  state.catalogBusy = true;
+  state.catalogError = undefined;
+  render();
+  try {
+    state.catalogResults = (await api().catalogSearch(trimmed)).slice(0, 8);
+  } catch (err) {
+    state.catalogError = errorMessage(err);
+  } finally {
+    state.catalogBusy = false;
+    render();
+  }
+}
+
+/** Fetch full catalog detail (SLOs/objectives/description) for a chosen search result. */
+async function selectCatalogCourse(id: number): Promise<void> {
+  if (state.catalogBusy) return;
+  state.catalogBusy = true;
+  state.catalogError = undefined;
+  render();
+  try {
+    state.catalogSelected = await api().catalogGet(id);
+    state.catalogResults = [];
+  } catch (err) {
+    state.catalogError = errorMessage(err);
+  } finally {
+    state.catalogBusy = false;
+    render();
+  }
+}
+
 async function generateBuild(): Promise<void> {
   const prompt = [
     `Build a ${templateLabel(state.selectedTemplate)} Canvas page.`,
     `Title: ${state.buildTitle || 'Module 1 - Getting Started'}`,
     state.buildRhythm ? `Dates or rhythm: ${state.buildRhythm}` : 'Dates or rhythm: [TBD]',
     state.buildTasks ? `Learner tasks: ${state.buildTasks}` : 'Learner tasks: read chapter 1; post to the introductions discussion.',
+    ...catalogPromptLines(state.catalogSelected),
     `Use the ${currentBrandKit().name} brand kit when accessible.`,
   ].join('\n');
   const view = await runTurn({ user: prompt, mode: 'build' });
