@@ -1209,6 +1209,9 @@
       .inst-chip { display: inline-flex; align-items: center; height: 32px; padding: 0 13px; border: 1px solid var(--color-line); border-radius: 999px; background: var(--color-surface); font-size: 13px; font-weight: 500; color: var(--color-ink); }
       .inst-field { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 18px; border: 1px solid var(--color-line-strong); border-radius: 4px; background: var(--color-surface); }
       .inst-field__ph { flex: 1; min-width: 0; font-size: 15px; color: var(--color-muted); }
+      .inst-field__input { flex: 1; min-width: 0; height: 40px; border: 0; background: transparent; font-family: inherit; font-size: 15px; color: var(--color-ink); }
+      .inst-field__input:focus { outline: none; }
+      .inst-field__input::placeholder { color: var(--color-muted); }
       .inst-btn--field { height: 40px; padding: 0 22px; }
 
       /* Brand kit */
@@ -1291,6 +1294,21 @@
       .inst-note--warn { border-color: var(--color-oak-soft); background: var(--color-oak-soft); }
       .inst-note--warn .inst-note__icon { background: var(--color-oak); }
       .inst-note--warn .inst-note__text { color: var(--color-oak); }
+
+      /* Ask & Answer — screenshot attach */
+      .inst-btn--small { height: 36px; padding: 0 16px; font-size: 13px; }
+      .inst-shot { display: flex; flex-direction: column; gap: 12px; }
+      .inst-shot-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+      .inst-shot-hint { flex: 1; min-width: 220px; font-size: 13px; line-height: 1.5; color: var(--color-muted); }
+      .inst-shot-rail { display: flex; flex-wrap: wrap; gap: 10px; }
+      .inst-shot-chip { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border: 1px solid var(--color-line); border-radius: 999px; background: var(--color-surface); }
+      .inst-shot-chip__img { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; }
+      .inst-shot-chip__label { font-size: 12px; font-weight: 500; color: var(--color-ink); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .inst-shot-chip__remove { width: 20px; height: 20px; flex-shrink: 0; border-radius: 999px; border: 0; background: var(--color-ground); color: var(--color-muted); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+      .inst-shot-sources { display: flex; flex-wrap: wrap; gap: 10px; }
+      .inst-shot-source { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 120px; padding: 10px; border: 1px solid var(--color-line); border-radius: 4px; background: var(--color-surface); }
+      .inst-shot-source__img { width: 100%; height: 68px; border-radius: 2px; object-fit: cover; background: var(--color-ground); }
+      .inst-shot-source__label { font-size: 12px; font-weight: 500; color: var(--color-ink); text-align: center; }
     </style>
   </head>
   <body>

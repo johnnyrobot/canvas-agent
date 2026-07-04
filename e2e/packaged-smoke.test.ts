@@ -62,7 +62,7 @@ test('packaged .app exposes the bridge, resolves health, and gates an emitted fr
   try {
     const win = await app.firstWindow();
     await win.waitForSelector('#app', { timeout: 30_000 });
-    await win.waitForSelector('[data-testid="home-build"]', { timeout: 30_000 });
+    await win.waitForSelector('[data-testid="inst-task-build"]', { timeout: 30_000 });
 
     // 1. The contextBridge preload exposes the AppApi in the packaged renderer.
     const bridge = await win.evaluate(() => {

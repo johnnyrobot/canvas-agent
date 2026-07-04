@@ -12,16 +12,12 @@ test('themedScreenRoot maps exactly the five redesign screens to their root clas
 
 test('themedScreenRoot returns undefined for classic (non-redesign) screens', () => {
   for (const screen of [
-    'home',
     'build-template',
     'build-details',
     'build-brand',
     'build-result',
     'remediate-source',
     'remediate-provide',
-    'remediate-result',
-    'guidance-ask',
-    'guidance-answer',
     'alignment',
     'brand-manager',
     'saved-work',
