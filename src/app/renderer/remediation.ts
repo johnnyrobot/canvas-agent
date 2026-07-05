@@ -15,7 +15,7 @@
  * strict CSP with no `font-src`, so the Paper "Source Serif 4" face cannot be
  * fetched — Georgia carries the same editorial weight on macOS.
  */
-import { el, type El } from './ui.js';
+import { el, openUrl, type El } from './ui.js';
 
 export type Severity = 'fail' | 'warn';
 
@@ -86,6 +86,19 @@ export interface RemediationDeps {
   onDownload?(): void;
   /** Open the saved-work screen (the old remediate-result "More" affordance). */
   onOpenSaved?(): void;
+  /**
+   * Copy the corrected page HTML for pasting into the Canvas rich-content
+   * editor. Optional for the same reason as `onDownload` — present only when
+   * the run left no failures (the panel renders both from the same source).
+   */
+  onCopyForCanvas?(): void;
+  /**
+   * The Canvas page-edit URL for the current remediation source, when it was
+   * a live Canvas import. When present, the footer renders an "Open page in
+   * Canvas" action alongside "Copy for Canvas". Pasted-HTML/document
+   * remediations leave this undefined (copy-only hand-off).
+   */
+  canvasEditUrl?: string;
 }
 
 export interface RemediationPanel {
@@ -279,6 +292,16 @@ export function createRemediationPanel(view: RemediationView, deps: RemediationD
     const downloadBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost', 'data-testid': 'remed-download-html' }, 'Download HTML');
     downloadBtn.addEventListener('click', () => deps.onDownload!());
     footerBtns.push(downloadBtn);
+  }
+  if (deps.onCopyForCanvas) {
+    const copyCanvasBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--primary', 'data-testid': 'remed-copy-canvas' }, 'Copy for Canvas');
+    copyCanvasBtn.addEventListener('click', () => deps.onCopyForCanvas!());
+    footerBtns.push(copyCanvasBtn);
+  }
+  if (deps.canvasEditUrl) {
+    const openCanvasBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost', 'data-testid': 'remed-open-canvas' }, 'Open page in Canvas');
+    openCanvasBtn.addEventListener('click', () => openUrl(deps.canvasEditUrl!));
+    footerBtns.push(openCanvasBtn);
   }
   const skipBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost' }, 'Skip');
   skipBtn.addEventListener('click', () => deps.onSkip(view.selectedId));

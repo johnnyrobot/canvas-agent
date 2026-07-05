@@ -13,7 +13,7 @@ import { composeAlignmentPrompt } from './alignment.js';
 import { previewFrame, previewSrcdoc } from './preview.js';
 import { api, byId, copyText, el, errorMessage, later, onReady, readStorage, writeStorage, type El } from './ui.js';
 import { turnViewToVm, type FragmentVm } from '../view.js';
-import { themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
+import { appChromeClass, themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
 import { createRemediationPanel, type RemediationDeps, type RemediationIssue, type RemediationView } from './remediation.js';
 import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
 import {
@@ -283,6 +283,10 @@ function mount(): void {
 
 function render(): void {
   if (!root) return;
+  // Every screen is chrome-themed now — re-theme the GLOBAL chrome (appbar,
+  // health/status, banners, app footer; see `.app--dark` in index.html)
+  // independently of the per-screen `inst`/`remed`/`classic` root below.
+  root.className = appChromeClass(root.className, state.uiTheme);
   const body = renderScreen();
   const themedRoot = themedScreenRoot(state.screen);
   if (themedRoot) {
@@ -1139,6 +1143,21 @@ function remediationReviewView(): RemediationView {
   return realRemediationView() ?? seedRemediationView();
 }
 
+/**
+ * The Canvas page-edit URL for the current remediation source, when it was a
+ * live Canvas import (source mode is `canvas` AND base URL, course ID, and a
+ * selected page are all present) — else `undefined` (pasted-HTML and
+ * converted-document remediations get copy-only, no "Open in Canvas" link).
+ */
+function currentCanvasEditUrl(): string | undefined {
+  if (state.sourceMode !== 'canvas') return undefined;
+  const baseUrl = state.canvasBaseUrl.trim().replace(/\/+$/, '');
+  const courseId = state.canvasCourseId.trim();
+  const pageId = state.selectedCanvasPageId;
+  if (!baseUrl || !courseId || !pageId) return undefined;
+  return `${baseUrl}/courses/${courseId}/pages/${pageId}/edit`;
+}
+
 function renderRemediationReview(): El {
   const view = remediationReviewView();
   // Only offer the corrected-HTML download when the run left no failures — the
@@ -1173,7 +1192,18 @@ function renderRemediationReview(): El {
       go('saved-work');
     },
   };
-  if (passed) deps.onDownload = () => downloadHtml(remediationReviewView().detail.htmlAfter ?? '');
+  if (passed) {
+    deps.onDownload = () => downloadHtml(remediationReviewView().detail.htmlAfter ?? '');
+    deps.onCopyForCanvas = () => {
+      const text = remediationReviewView().detail.htmlAfter ?? '';
+      void copyText(text).then((ok) => {
+        state.notice = ok ? 'Copied — paste into the Canvas editor' : 'Clipboard unavailable.';
+        render();
+      });
+    };
+  }
+  const canvasEditUrl = currentCanvasEditUrl();
+  if (canvasEditUrl) deps.canvasEditUrl = canvasEditUrl;
   const panel = createRemediationPanel(view, deps);
   return el('main', { class: 'remed-screen' }, panel.element);
 }

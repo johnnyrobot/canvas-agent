@@ -77,7 +77,10 @@
         height: 34px;
         border-radius: 8px;
         background: var(--accent);
-        color: #fff;
+        /* `--accent-ink` is only defined inside `.app--dark` (where `--accent`
+           flips to a light navy tone that needs dark text); light mode falls
+           back to the original white. */
+        color: var(--accent-ink, #fff);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -118,9 +121,11 @@
         flex: 1;
       }
 
-      /* Dark-mode toggle — shown on the redesign screens only (see `themedScreenRoot`
-         in view.ts). Always sits on the light appbar, so it only needs to meet AA
-         contrast against `--surface`, in both its unpressed and pressed states. */
+      /* Dark-mode toggle — shown on every screen (see `themedScreenRoot` in
+         ui-theme.ts). Built entirely from custom properties (`--line`/`--surface`/
+         `--ink`/`--accent*`), so it re-themes automatically with the rest of the
+         appbar under `.app--dark` below and keeps AA contrast in both themes,
+         unpressed and pressed. */
       .appbar__theme-toggle {
         height: 32px;
         display: inline-flex;
@@ -867,6 +872,59 @@
       }
 
       /* ───────────────────────────────────────────────────────────────────────
+         Dark chrome — re-themes the GLOBAL app chrome (appbar, health/status,
+         pills, progress, error/notice banners, app footer), independently of
+         the per-screen `.inst--dark`/`.remed--dark`/`.classic--dark` variants
+         below (every screen has both applied at once — see `render()` and
+         `appChromeClass()` in renderer.ts/ui-theme.ts). Redefines the SAME
+         `:root` custom-property names so every rule above that already reads
+         them (appbar, status, pill, progress, banners, theme-toggle) re-themes
+         for free; only the handful of rules above that use hardcoded literals
+         instead of a custom property need an explicit override here. Same dark
+         token values as `.inst--dark`/`.classic--dark` (named in the comments)
+         — no invented colors. `.app-footer` lives OUTSIDE `#app` (a sibling in
+         `<body>`), hence the `~` selector.
+         ─────────────────────────────────────────────────────────────────────── */
+      .app--dark {
+        color-scheme: dark;
+        --surface: #1c222b; /* color-surface */
+        --pane: #2c3440; /* color-line, used as a recessed neutral fill */
+        --line: #2c3440; /* color-line */
+        --line-strong: #3a4452; /* color-line-strong */
+        --ink: #ece7db; /* color-ink */
+        --muted: #9aa4b2; /* color-muted */
+        --accent: #bfd0e6; /* color-navy */
+        --accent-ink: #14181f; /* color-navy-ink — text atop an `--accent` fill */
+        --accent-soft: #232e40; /* color-navy-soft */
+        --accent-line: #38465c; /* color-navy-line */
+        --success: #6fbf84; /* color-forest */
+        --success-soft: #1e2a22; /* color-forest-soft */
+        --success-line: #1e2a22; /* color-forest-soft (border=bg, matches .inst-note) */
+        --warn: #d2a24a; /* color-oak */
+        --warn-soft: #2a2418; /* color-oak-soft */
+        --warn-line: #2a2418; /* color-oak-soft (border=bg, matches .inst-note) */
+        --danger: #e08a86; /* color-oxblood */
+      }
+      #app.app--dark .appbar { border-bottom-color: #2c3440; } /* color-line */
+      #app.app--dark .progress { background: #2c3440; } /* color-line */
+      #app.app--dark .pill--amber { background: #2a2418; } /* color-oak-soft; text stays var(--warn) */
+      #app.app--dark .error-banner {
+        /* No `--danger-soft`/`--danger-line` at `:root` (the light rule is
+           hardcoded too) — border=bg matches the `.inst-note`/`.remed-tile`
+           convention for a colored callout box. */
+        border-color: #2c1e1e; /* color-oxblood-soft */
+        background: #2c1e1e; /* color-oxblood-soft */
+      }
+      #app.app--dark ~ .app-footer {
+        border-top-color: #2c3440; /* color-line */
+        background: #1c222b; /* color-surface */
+        color: #9aa4b2; /* color-muted */
+      }
+      #app.app--dark ~ .app-footer strong {
+        color: #ece7db; /* color-ink */
+      }
+
+      /* ───────────────────────────────────────────────────────────────────────
          Institutional remediation panel — design-to-code port of the Paper file
          "Canvas Agent — Institutional Redesign" (artboard 02). Tokens are scoped
          to `.remed` so the panel can be dropped in without restyling the rest of
@@ -1122,7 +1180,8 @@
 
       .remed-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 4px; }
       .remed-actions__note { font-size: 13px; font-weight: 500; color: var(--color-muted); }
-      .remed-actions__btns { display: flex; align-items: center; gap: 10px; }
+      /* Labels never wrap inside the fixed-height buttons; crowded footers wrap whole buttons instead. */
+      .remed-actions__btns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
       .remed-btn {
         display: inline-flex;
         align-items: center;
@@ -1132,6 +1191,7 @@
         border-radius: 4px;
         font-size: 15px;
         font-weight: 600;
+        white-space: nowrap;
       }
       .remed-btn--ghost { border: 1px solid var(--color-line-strong); background: var(--color-surface); color: var(--color-ink); }
       .remed-btn--primary { border: 1px solid var(--color-navy); background: var(--color-navy); color: var(--color-navy-ink); }

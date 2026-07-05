@@ -59,7 +59,7 @@ interface StorageLike {
   setItem(key: string, value: string): void;
 }
 declare const document: Doc;
-declare const window: { canvasAgent: AppApi; navigator: Nav };
+declare const window: { canvasAgent: AppApi; navigator: Nav; open(url: string): void };
 declare const localStorage: StorageLike;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,6 +110,16 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Open `url` in the OS browser. Electron main (`main.ts`'s `setWindowOpenHandler`)
+ * intercepts every `window.open` call globally, routes http(s) targets to
+ * `shell.openExternal`, and denies an in-app window — so this never needs a new
+ * IPC channel or preload surface.
+ */
+export function openUrl(url: string): void {
+  window.open(url);
 }
 
 /** Normalize any thrown value to a display string. */
