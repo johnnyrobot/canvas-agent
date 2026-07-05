@@ -135,6 +135,10 @@ test('M13 remediate fixed review shows inert before/after, fixed count, and down
     // Corrected page is downloadable + copyable when the run left no failures.
     assert.equal(await win.getByTestId('remed-download-html').count(), 1);
     assert.equal(await win.getByTestId('remed-copy-fix').count(), 1);
+    // "Copy for Canvas" mirrors the download button's visibility rule; pasted
+    // HTML has no Canvas page to link back to, so "Open page in Canvas" is absent.
+    assert.equal(await win.getByTestId('remed-copy-canvas').count(), 1);
+    assert.equal(await win.getByTestId('remed-open-canvas').count(), 0);
   });
 });
 
@@ -150,6 +154,9 @@ test('M14 remediate residual review surfaces the blocker, fixed count, and withh
     assert.equal(appText.includes('2 fixes passed'), false);
     // No corrected-HTML download offered while a blocker remains.
     assert.equal(await win.getByTestId('remed-download-html').count(), 0);
+    // Same withheld rule applies to the Canvas hand-off actions.
+    assert.equal(await win.getByTestId('remed-copy-canvas').count(), 0);
+    assert.equal(await win.getByTestId('remed-open-canvas').count(), 0);
   });
 });
 
@@ -166,6 +173,12 @@ test('M15 Canvas import remediation reads a page and lands on the review panel',
     await win.getByTestId('remediation-panel').waitFor({ timeout: 10_000 });
     assert.match((await win.getByTestId('remed-html-before').textContent()) ?? '', /lab-safety/);
     assert.match((await win.getByTestId('remed-tag').textContent()) ?? '', /Audit clear/);
+    // A Canvas-import source (passed) gets both hand-off actions: copy AND a
+    // link back to the live page's editor. Not clicked here — clicking would
+    // fire a real `shell.openExternal` in the OS browser; presence is enough
+    // to prove the wiring (see navigation.test.ts for the URL-policy unit tests).
+    assert.equal(await win.getByTestId('remed-copy-canvas').count(), 1);
+    assert.equal(await win.getByTestId('remed-open-canvas').count(), 1);
   });
 });
 
@@ -251,6 +264,27 @@ test('M23 inst-ask surfaces a readable error when screenshot capture is unavaila
     await win.getByTestId('inst-ask-attach').click();
     await waitForText(win.getByTestId('error-banner'), /runtime is down/);
     assert.equal(await win.getByTestId('inst-ask-source-screen:e2e:0').count(), 0);
+  });
+});
+
+test('M24 dark-mode toggle themes the global app chrome, not just the screen body', { skip, timeout: 60_000 }, async () => {
+  await withApp('default', async (win) => {
+    // The uiTheme preference persists across launches (localStorage), so don't
+    // assume a light start — assert the toggle flips it, and back.
+    const app = win.locator('#app');
+    const initialClass = (await app.getAttribute('class')) ?? '';
+    const initialDark = initialClass.split(/\s+/).includes('app--dark');
+    await win.getByTestId('theme-toggle').click();
+    const toggledClass = (await app.getAttribute('class')) ?? '';
+    assert.equal(toggledClass.split(/\s+/).includes('app--dark'), !initialDark);
+    // The chrome-wide marker is on `#app` itself; the existing screen-scoped
+    // modifier is on its child screen root (inst-home renders `.inst`) — both
+    // toggle together.
+    const instClass = (await win.locator('.inst').first().getAttribute('class')) ?? '';
+    assert.equal(instClass.split(/\s+/).includes('inst--dark'), !initialDark);
+    await win.getByTestId('theme-toggle').click();
+    const revertedClass = (await app.getAttribute('class')) ?? '';
+    assert.equal(revertedClass.split(/\s+/).includes('app--dark'), initialDark);
   });
 });
 

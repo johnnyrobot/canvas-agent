@@ -64,3 +64,21 @@ export function uiThemeRootClass(existing: string, root: ThemedScreenRoot, uiThe
   if (uiTheme === 'dark') classes.push(dark);
   return classes.join(' ');
 }
+
+/**
+ * The class string for the `#app` root given its existing classes and the
+ * current `uiTheme` — adds or removes the `app--dark` marker used by
+ * `index.html`'s `.app--dark` block, which re-themes the GLOBAL chrome
+ * (appbar, health/status, pills, progress, error/notice banners, app footer).
+ * This is independent of `uiThemeRootClass` above, which themes only the
+ * per-screen `inst`/`remed`/`classic` body — every screen has both applied at
+ * once, since every screen is chrome-themed now. Preserves every other class
+ * and is idempotent, e.g. `appChromeClass('', 'dark')` → `'app--dark'`,
+ * `appChromeClass('app--dark', 'light')` → `''`.
+ */
+export function appChromeClass(existing: string, uiTheme: UiTheme): string {
+  const dark = 'app--dark';
+  const classes = existing.split(/\s+/).filter((c) => c !== '' && c !== dark);
+  if (uiTheme === 'dark') classes.push(dark);
+  return classes.join(' ');
+}

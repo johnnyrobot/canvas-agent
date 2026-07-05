@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { themedScreenRoot, uiThemeRootClass } from './ui-theme.js';
+import { appChromeClass, themedScreenRoot, uiThemeRootClass } from './ui-theme.js';
 
 test('themedScreenRoot maps the inst/remed redesign screens to their root class', () => {
   assert.equal(themedScreenRoot('inst-home'), 'inst');
@@ -55,4 +55,20 @@ test('uiThemeRootClass base-class insertion is idempotent and preserves existing
   assert.equal(uiThemeRootClass('screen classic', 'classic', 'light'), 'screen classic');
   assert.equal(uiThemeRootClass('screen classic classic--dark', 'classic', 'dark'), 'screen classic classic--dark');
   assert.equal(uiThemeRootClass('screen classic classic--dark', 'classic', 'light'), 'screen classic');
+});
+
+test('appChromeClass adds "app--dark" to the #app root in dark mode, nothing in light mode', () => {
+  assert.equal(appChromeClass('', 'light'), '');
+  assert.equal(appChromeClass('', 'dark'), 'app--dark');
+});
+
+test('appChromeClass is idempotent and preserves unrelated classes', () => {
+  assert.equal(appChromeClass('app--dark', 'dark'), 'app--dark');
+  assert.equal(appChromeClass('some-other-class', 'dark'), 'some-other-class app--dark');
+  assert.equal(appChromeClass('some-other-class app--dark', 'dark'), 'some-other-class app--dark');
+});
+
+test('appChromeClass removes "app--dark" when switching back to light', () => {
+  assert.equal(appChromeClass('app--dark', 'light'), '');
+  assert.equal(appChromeClass('some-other-class app--dark', 'light'), 'some-other-class');
 });
