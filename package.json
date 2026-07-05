@@ -1,6 +1,6 @@
 {
   "name": "canvas-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "JohnnyRobot AI",
   "license": "Apache-2.0",
   "private": true,
@@ -56,17 +56,25 @@
       {
         "from": "resources/ms-playwright",
         "to": "ms-playwright",
-        "filter": ["**/*", "!ffmpeg-*", "!ffmpeg-*/**"]
+        "filter": [
+          "**/*",
+          "!ffmpeg-*",
+          "!ffmpeg-*/**"
+        ]
       },
       {
         "from": "resources/sidecars/ollama",
         "to": "sidecars/ollama",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "resources/sidecars/docling-serve",
         "to": "sidecars/docling-serve",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "THIRD-PARTY-NOTICES.md",
@@ -76,12 +84,19 @@
     "mac": {
       "category": "public.app-category.education",
       "target": [
-        { "target": "zip", "arch": ["arm64"] }
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "notarize": true,
-      "signIgnore": ["/Contents/Resources/sidecars/"],
+      "signIgnore": [
+        "/Contents/Resources/sidecars/"
+      ],
       "entitlements": "build-resources/entitlements.mac.plist",
       "entitlementsInherit": "build-resources/entitlements.mac.plist"
     },
