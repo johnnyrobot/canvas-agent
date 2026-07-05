@@ -568,7 +568,7 @@ function flowHeader(title: string, subtitle: string, pct: number, back: Screen):
     backButton(back),
     el('div', { class: 'appbar__title' }, el('div', { class: 'appbar__title-main' }, title), el('div', { class: 'appbar__title-sub' }, subtitle)),
     el('div', { class: 'appbar__spacer' }),
-    el('div', { class: 'progress', 'aria-label': subtitle }, progressBar(pct)),
+    progressWrap(pct, subtitle),
   );
 }
 
@@ -606,16 +606,33 @@ function progressBar(width: number): El {
   return bar;
 }
 
+/**
+ * A labelled `.progress` track. Plain `<div>`s carry the implicit ARIA role
+ * `generic`, which does not support naming (axe: `aria-prohibited-attr`) — so
+ * `aria-label` alone on a bare `.progress` div is invalid. `role="progressbar"`
+ * both fixes that and gives the indicator a real accessible value it never had.
+ */
+function progressWrap(pct: number, label: string): El {
+  return el(
+    'div',
+    {
+      class: 'progress',
+      role: 'progressbar',
+      'aria-label': label,
+      'aria-valuenow': String(pct),
+      'aria-valuemin': '0',
+      'aria-valuemax': '100',
+    },
+    progressBar(pct),
+  );
+}
+
 function healthStatus(): El {
   const cls = state.health === 'ready' ? 'status' : 'status status--warn';
   const children: Array<El | string> = [el('span', { class: 'status__dot' }), state.healthText];
   if (state.modelPull) {
     children.push(
-      el(
-        'div',
-        { class: 'progress', 'aria-label': 'Model download progress' },
-        progressBar(state.modelPull.percent ?? 0),
-      ),
+      progressWrap(state.modelPull.percent ?? 0, 'Model download progress'),
       el('span', { class: 'status__pull' }, state.modelPull.text),
     );
   } else if (state.modelMissingTag) {
@@ -633,11 +650,7 @@ function healthStatus(): El {
   // for PDF/scanned-doc support. Office/web docs convert without them.
   if (state.ingestPull) {
     children.push(
-      el(
-        'div',
-        { class: 'progress', 'aria-label': 'Document model download progress' },
-        progressBar(state.ingestPull.percent ?? 0),
-      ),
+      progressWrap(state.ingestPull.percent ?? 0, 'Document model download progress'),
       el('span', { class: 'status__pull' }, state.ingestPull.text),
     );
   } else if (state.ingestModelMissing) {

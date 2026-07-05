@@ -33,6 +33,14 @@
         --warn-soft: #fff8ef;
         --warn-line: #eacb9a;
         --danger: #cf222e;
+        /* `.pill--blue`/`.pill--amber` text: `--accent`/`--warn` are 4.45:1 / 4.12:1
+           against `--accent-soft`/`#f4ebdd` — under the 4.5:1 AA floor for the
+           pill's 13px/750-weight label. Scoped, darker overrides so the fix
+           doesn't touch `--accent`/`--warn` (used elsewhere at a passing ratio
+           against `--surface`). Dark mode reuses the existing (passing) dark
+           `--accent`/`--warn` values below, so this is a light-mode-only tweak. */
+        --pill-blue-fg: #045c91;
+        --pill-amber-fg: #805700;
       }
 
       * { box-sizing: border-box; }
@@ -190,7 +198,7 @@
       }
       .pill--blue {
         background: var(--accent-soft);
-        color: var(--accent);
+        color: var(--pill-blue-fg);
       }
       .pill--green {
         background: var(--success-soft);
@@ -198,7 +206,7 @@
       }
       .pill--amber {
         background: #f4ebdd;
-        color: var(--warn);
+        color: var(--pill-amber-fg);
       }
 
       .progress {
@@ -904,10 +912,14 @@
         --warn-soft: #2a2418; /* color-oak-soft */
         --warn-line: #2a2418; /* color-oak-soft (border=bg, matches .inst-note) */
         --danger: #e08a86; /* color-oxblood */
+        /* Reuse the dark `--accent`/`--warn` values here too — they already pass
+           AA against the dark pill backgrounds (see the `:root` comment above). */
+        --pill-blue-fg: #bfd0e6;
+        --pill-amber-fg: #d2a24a;
       }
       #app.app--dark .appbar { border-bottom-color: #2c3440; } /* color-line */
       #app.app--dark .progress { background: #2c3440; } /* color-line */
-      #app.app--dark .pill--amber { background: #2a2418; } /* color-oak-soft; text stays var(--warn) */
+      #app.app--dark .pill--amber { background: #2a2418; } /* color-oak-soft; text stays var(--pill-amber-fg) */
       #app.app--dark .error-banner {
         /* No `--danger-soft`/`--danger-line` at `:root` (the light rule is
            hardcoded too) — border=bg matches the `.inst-note`/`.remed-tile`
