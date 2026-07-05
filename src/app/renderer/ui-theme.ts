@@ -13,16 +13,29 @@
 export type UiTheme = 'light' | 'dark';
 
 /** Root modifier class for a redesign screen that has a `--dark` CSS variant. */
-export type ThemedScreenRoot = 'inst' | 'remed';
+export type ThemedScreenRoot = 'inst' | 'remed' | 'classic';
 
-// The five redesign screens with dark-mode CSS (`.inst--dark` / `.remed--dark`
-// in index.html) and the root class each one's screen body renders.
+// The redesign screens with dark-mode CSS (`.inst--dark` / `.remed--dark` /
+// `.classic--dark` in index.html) and the root class each one's screen body
+// renders. The nine "classic" screens are the Phase 2 reskin: they render a
+// plain `main.screen` root (no `inst`/`remed` class of their own), so
+// `uiThemeRootClass` below is responsible for adding the base `classic` class
+// in addition to the `--dark` modifier.
 const THEMED_SCREEN_ROOTS: Readonly<Record<string, ThemedScreenRoot>> = {
   'inst-home': 'inst',
   'inst-ask': 'inst',
   'inst-brand': 'inst',
   'inst-ingest': 'inst',
   'remediate-review': 'remed',
+  'build-template': 'classic',
+  'build-details': 'classic',
+  'build-brand': 'classic',
+  'build-result': 'classic',
+  'remediate-source': 'classic',
+  'remediate-provide': 'classic',
+  'alignment': 'classic',
+  'brand-manager': 'classic',
+  'saved-work': 'classic',
 };
 
 /**
@@ -36,13 +49,18 @@ export function themedScreenRoot(screen: string): ThemedScreenRoot | undefined {
 
 /**
  * The class string for a themed screen's root element given its existing
- * classes and the current `uiTheme` — adds or removes the `--dark` modifier
- * while preserving every other class, e.g.
- * `uiThemeRootClass('inst', 'inst', 'dark')` → `'inst inst--dark'`.
+ * classes and the current `uiTheme` — ensures the base `root` modifier class
+ * is present (idempotent; the `inst`/`remed` roots already carry their own
+ * class from their render functions, but the `classic` roots render a plain
+ * `main.screen` and rely on this to add it) and adds or removes the `--dark`
+ * modifier, while preserving every other class, e.g.
+ * `uiThemeRootClass('inst', 'inst', 'dark')` → `'inst inst--dark'`,
+ * `uiThemeRootClass('screen', 'classic', 'dark')` → `'screen classic classic--dark'`.
  */
 export function uiThemeRootClass(existing: string, root: ThemedScreenRoot, uiTheme: UiTheme): string {
   const dark = `${root}--dark`;
   const classes = existing.split(/\s+/).filter((c) => c !== '' && c !== dark);
+  if (!classes.includes(root)) classes.push(root);
   if (uiTheme === 'dark') classes.push(dark);
   return classes.join(' ');
 }
