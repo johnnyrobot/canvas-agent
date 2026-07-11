@@ -1,0 +1,13 @@
+{
+  // Type-checks the offline tooling under `scripts/` with the same strictness as
+  // `src/`, WITHOUT emitting: `scripts/` must never land in `dist/`, because
+  // electron-builder ships `dist/**/*` into the packaged app.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "allowImportingTsExtensions": true
+  },
+  "include": ["scripts/**/*.ts", "src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

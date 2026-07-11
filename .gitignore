@@ -43,3 +43,11 @@ PRD_Canvas_Course_Design_Accessibility_Assistant.md
 # Python bytecode from build scripts
 __pycache__/
 *.pyc
+
+# Model-eval artifacts: imported course corpora, page renders, predictions, metrics.
+# The harness itself (scripts/model-eval/) IS tracked — only its inputs/outputs are not.
+# These MUST stay out of git: the corpus is real Canvas course content (instructor
+# names, third-party course material), and a run is ~60MB of PNGs.
+/.frugal-fable/
+/eval-runs/
+/eval-corpus/
