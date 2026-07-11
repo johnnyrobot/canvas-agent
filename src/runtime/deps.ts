@@ -41,13 +41,24 @@ export interface DocConverter {
 export type RuntimeEnv = Record<string, string | undefined>;
 
 /**
- * The on-device model the runtime selects by default. `gemma4:12b-mlx` (the
- * `src/llm` default) is NOT installed on this machine; `gemma4:31b` and
- * `gemma4:e2b` are. We never edit `src/llm`; we steer model selection through
- * the existing env-override mechanism (`MODEL_TEXT` → every role; see
- * `src/llm/config.ts`).
+ * The on-device model the runtime selects by default.
+ *
+ * Sized for the machines this ships to, not for the dev box: `gemma4:e2b` is
+ * ~7 GB resident and runs on 16 GB Macs with Chromium alongside it. The former
+ * default (`gemma4:31b`, ~20 GB) excluded most target hardware.
+ *
+ * The trade is real and bounded. e2b is pass-biased on unaided WCAG judgment
+ * (it under-reports violations), so it must not be the sole arbiter of whether
+ * content conforms. That is already the design: axe-core detects issues
+ * deterministically and the gate re-scans every proposed fix. The exposed
+ * surfaces are the ones where the model *is* the judge — contrast adjudication
+ * and alt-text — which is why those are the ones being measured before any
+ * further promotion. Evidence: `scripts/model-eval/` (three-arm harness).
+ *
+ * We never edit `src/llm`; we steer model selection through the existing
+ * env-override mechanism (`MODEL_TEXT` → every role; see `src/llm/config.ts`).
  */
-export const RUNTIME_DEFAULT_MODEL = 'gemma4:31b';
+export const RUNTIME_DEFAULT_MODEL = 'gemma4:e2b';
 
 /** Build an env that points the LLM sidecar at an installed model (override-safe). */
 export function runtimeLlmEnv(base: RuntimeEnv = process.env): RuntimeEnv {

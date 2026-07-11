@@ -143,14 +143,27 @@ Docling `convertPath`).
 ## Model selection (no cloud; local Ollama)
 
 The product runs a single on-device model. `src/llm` defaults to
-`gemma4:12b-mlx`, which is **NOT installed on this machine** — `gemma4:31b` and
-`gemma4:e2b` **are**. The runtime never edits `src/llm`; it steers selection
-through the existing env-override mechanism (`src/llm/config.ts`):
-`runtimeLlmEnv()` sets `MODEL_TEXT` (which every role falls back to) to
-`RUNTIME_DEFAULT_MODEL` (`gemma4:31b`) unless `MODEL_TEXT` is already set.
+`gemma4:12b-mlx`; the runtime never edits `src/llm`, it steers selection through
+the existing env-override mechanism (`src/llm/config.ts`): `runtimeLlmEnv()`
+sets `MODEL_TEXT` (which every role falls back to) to `RUNTIME_DEFAULT_MODEL`
+unless `MODEL_TEXT` is already set.
+
+`RUNTIME_DEFAULT_MODEL` is **`gemma4:e2b`** (~7 GB resident): sized for the
+machines the app ships to, not for the dev box. It replaced `gemma4:31b`
+(~20 GB), which excluded most target hardware.
+
+The quality trade is deliberate and bounded. e2b is **pass-biased** on unaided
+WCAG judgment — on a 13-case unambiguous probe it scored 8/13, and *every* miss
+was a false pass (it cleared an `h1`→`h4` skip, a header-less data table,
+"click here" link text, and 2.85:1 contrast). JSON validity was 13/13, so the
+`format` constraint holds; it is the judgment that does not. This is safe only
+because the model is **not** the detector: axe-core finds issues
+deterministically and the gate re-scans every proposed fix. The surfaces where
+the model *is* the judge — contrast adjudication and alt-text — are the ones
+moving to task-tuned adapters.
 
 ```bash
-MODEL_TEXT=gemma4:e2b   # pick another installed local tag
+MODEL_TEXT=gemma4:31b-mlx   # opt in to the heavy model (needs ~20 GB free RAM)
 ```
 
 ## Testing

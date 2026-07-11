@@ -6,9 +6,8 @@
  *   RUN_DOCLING_INTEGRATION=1  → real Docling reachability
  *
  * The model is selected via the llm config override (env): the runtime defaults
- * `MODEL_TEXT` to `gemma4:31b` (installed on this machine; `gemma4:12b-mlx` is
- * NOT — `gemma4:e2b` is also present). Override with `MODEL_TEXT=…` to pick
- * another local tag. See `src/runtime/README.md`.
+ * `MODEL_TEXT` to `gemma4:e2b` (`ollama pull gemma4:e2b`). Override with
+ * `MODEL_TEXT=…` to pick another local tag. See `src/runtime/README.md`.
  *
  * Run with: RUN_OLLAMA_INTEGRATION=1 npx tsx --test "e2e"
  */
