@@ -14,7 +14,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { LaunchOptions } from 'playwright';
-import type { AxeResults, ScanResult, ScanRunner, TextRun, ResolvedBackground } from './types.js';
+import type { AxeResults, ImageAlt, ScanResult, ScanRunner, TextRun, ResolvedBackground } from './types.js';
 import type { TextSize } from '../../contracts/index.js';
 import { decodePng } from './png.js';
 import { sampleBackground } from './sample.js';
@@ -73,6 +73,25 @@ function envInt(name: string, fallback: number): number {
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
+
+/**
+ * Every image and its alt text, for the alt-quality pass (`altTextIssue`).
+ *
+ * Reads the attribute, not the IDL property: `img.alt` returns `''` for BOTH a
+ * missing attribute and `alt=""`, which collapses "no text alternative" (an axe
+ * error) into "explicitly decorative" (correct) — the one distinction this pass
+ * exists to make. Runs as a string; the project's tsconfig has no DOM lib.
+ */
+export const EXTRACT_IMAGES = `(() => {
+  return Array.from(document.querySelectorAll('img')).map((el) => {
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    return {
+      alt: el.hasAttribute('alt') ? el.getAttribute('alt') : null,
+      src: el.getAttribute('src') || '',
+      presentation: role === 'presentation' || role === 'none' || el.getAttribute('aria-hidden') === 'true',
+    };
+  });
+})()`;
 
 /**
  * Browser-side classifier (§8.3 / Appendix K.5). For each visible text run, resolve
@@ -210,6 +229,7 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
           `axe.run(document, { runOnly: { type: 'tag', values: ${JSON.stringify(AXE_TAGS)} }, ` +
           `resultTypes: ['violations', 'incomplete'] })`;
         const axe = (await page.evaluate(axeExpr)) as AxeResults;
+        const images = (await page.evaluate(EXTRACT_IMAGES)) as ImageAlt[];
         const rawRuns = (await page.evaluate(EXTRACT_TEXT_RUNS)) as RawRun[];
         const textRuns: TextRun[] = [];
         for (const r of rawRuns) {
@@ -235,7 +255,7 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
           }
         }
 
-        return { axe, textRuns };
+        return { axe, textRuns, images };
       } finally {
         await browser.close();
       }

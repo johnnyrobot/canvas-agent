@@ -15,6 +15,7 @@ import type { AuditIssue, Auditor, IssueSet, Severity } from '../../contracts/in
 import type { AxeResult, ScanRunner } from './types.js';
 import { semanticCategory, severityForImpact } from './mapping.js';
 import { runContrastIssue } from './run-contrast.js';
+import { altTextIssue } from './alt-text.js';
 
 export interface AuditorOptions {
   /** Severity for deterministic contrast failures (solid/gradient). Default 'blocker'. */
@@ -35,7 +36,7 @@ export function createAuditor(runner: ScanRunner, options: AuditorOptions = {}):
   const gradientSamples = options.gradientSamples ?? 9;
 
   return async function audit(html: string): Promise<IssueSet> {
-    const { axe, textRuns } = await runner.run(html);
+    const { axe, textRuns, images } = await runner.run(html);
     const issues: AuditIssue[] = [];
 
     // [1] axe violations — impact-driven severity, rule-driven category.
@@ -61,6 +62,15 @@ export function createAuditor(runner: ScanRunner, options: AuditorOptions = {}):
     // [3] computed-contrast pass (§8.3) — adjudicates solid/gradient/image/unresolvable.
     for (const run of textRuns) {
       const issue = runContrastIssue(run, { failSeverity, imageFailSeverity, gradientSamples });
+      if (issue) issues.push(issue);
+    }
+
+    // [4] alt-text QUALITY pass. axe only checks that `alt` exists; this judges
+    // whether it says anything (filenames, placeholders, URLs). It is also what
+    // verifies model-drafted alt from `describe_image` — the gate re-audits, so
+    // a junk draft is caught by a rule rather than trusted.
+    for (const image of images) {
+      const issue = altTextIssue(image);
       if (issue) issues.push(issue);
     }
 

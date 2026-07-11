@@ -42,10 +42,26 @@ export interface AxeResults {
   inapplicable?: ReadonlyArray<AxeResult>;
 }
 
+/**
+ * One image and its alt text, as found in the rendered DOM.
+ *
+ * `alt` distinguishes three states that mean different things under WCAG 1.1.1:
+ * `null` = no alt attribute at all (axe's `image-alt` error), `''` = an explicit
+ * decorative marker (correct), any other string = a text alternative whose
+ * *quality* is judged by `altTextIssue`.
+ */
+export interface ImageAlt {
+  alt: string | null;
+  src: string;
+  /** `role="presentation"` / `role="none"` / `aria-hidden="true"`. */
+  presentation: boolean;
+}
+
 /** What a single render-and-scan pass yields for the pure auditor to map. */
 export interface ScanResult {
   axe: AxeResults;
   textRuns: TextRun[];
+  images: ImageAlt[];
 }
 
 /**

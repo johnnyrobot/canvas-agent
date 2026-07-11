@@ -7,13 +7,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAuditor } from './auditor.js';
-import type { AxeImpact, AxeResult, AxeResults, ScanRunner, TextRun } from './types.js';
+import type { AxeImpact, AxeResult, AxeResults, ImageAlt, ScanRunner, TextRun } from './types.js';
 
 // ── Fake runner helpers ──────────────────────────────────────────────────────
 
-function fakeRunner(axe: Partial<AxeResults>, textRuns: TextRun[] = []): ScanRunner {
+function fakeRunner(axe: Partial<AxeResults>, textRuns: TextRun[] = [], images: ImageAlt[] = []): ScanRunner {
   const base: AxeResults = { violations: [], incomplete: [], passes: [], inapplicable: [] };
-  return { run: async () => ({ axe: { ...base, ...axe }, textRuns }) };
+  return { run: async () => ({ axe: { ...base, ...axe }, textRuns, images }) };
 }
 
 /** Build a solid-background text run (the common case in these tests). */
