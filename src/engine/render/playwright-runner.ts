@@ -80,17 +80,29 @@ function envInt(name: string, fallback: number): number {
  * Reads the attribute, not the IDL property: `img.alt` returns `''` for BOTH a
  * missing attribute and `alt=""`, which collapses "no text alternative" (an axe
  * error) into "explicitly decorative" (correct) — the one distinction this pass
- * exists to make. Runs as a string; the project's tsconfig has no DOM lib.
+ * exists to make.
+ *
+ * `presentation` walks the ANCESTOR chain, not just the img: an image inside an
+ * `aria-hidden` or `role="presentation"` wrapper is removed from the
+ * accessibility tree just as surely as one marked directly, and judging alt text
+ * a screen reader will never announce would be a false positive.
+ *
+ * Runs as a string; the project's tsconfig has no DOM lib.
  */
 export const EXTRACT_IMAGES = `(() => {
-  return Array.from(document.querySelectorAll('img')).map((el) => {
-    const role = (el.getAttribute('role') || '').toLowerCase();
-    return {
-      alt: el.hasAttribute('alt') ? el.getAttribute('alt') : null,
-      src: el.getAttribute('src') || '',
-      presentation: role === 'presentation' || role === 'none' || el.getAttribute('aria-hidden') === 'true',
-    };
-  });
+  const decorative = (node) => {
+    for (let cur = node; cur; cur = cur.parentElement) {
+      const role = (cur.getAttribute('role') || '').toLowerCase();
+      if (role === 'presentation' || role === 'none') return true;
+      if (cur.getAttribute('aria-hidden') === 'true') return true;
+    }
+    return false;
+  };
+  return Array.from(document.querySelectorAll('img')).map((el) => ({
+    alt: el.hasAttribute('alt') ? el.getAttribute('alt') : null,
+    src: el.getAttribute('src') || '',
+    presentation: decorative(el),
+  }));
 })()`;
 
 /**

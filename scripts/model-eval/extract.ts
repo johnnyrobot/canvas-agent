@@ -12,9 +12,10 @@
  * Separate pass from render.ts by design: rendering produces pixels, this
  * produces structure. Both are cheap over an offline corpus.
  */
-import { chromium, type Browser } from 'playwright';
+import type { Browser } from 'playwright';
 import type { Fixture } from './types.ts';
 import type { PageStructure } from './contracts.ts';
+import { resolveBundledBrowsersPath } from '../../src/engine/render/playwright-runner.js';
 
 /** Walks the structural elements the tasks reason about. Images become
  *  `figures` (with laid-out bboxes and a null-vs-"" alt distinction — alt=""
@@ -60,6 +61,11 @@ async function structureOf(browser: Browser, html: string): Promise<PageStructur
 
 /** Extract structure for a whole corpus in one browser. */
 export async function extractStructures(fixtures: Fixture[]): Promise<Map<string, PageStructure>> {
+  // Resolve Chromium the way the engine does, so this works from a packaged app
+  // as well as from a dev checkout (mirrors render.ts / playwright-runner.ts).
+  const bundled = resolveBundledBrowsersPath();
+  if (bundled) process.env.PLAYWRIGHT_BROWSERS_PATH = bundled;
+  const { chromium } = await import('playwright');
   const browser = await chromium.launch();
   try {
     const out = new Map<string, PageStructure>();

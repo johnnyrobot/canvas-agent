@@ -43,33 +43,37 @@ export async function predict(
 ): Promise<Prediction> {
   const task = fixture.task;
   const model = modelFor(arm, task);
-  const image = await readFile(fixture.pngPath);
-  const body = {
-    model,
-    stream: false,
-    format: SCHEMAS[task],
-    // MUST stay false. MiniCPM-V 4.6 is a hybrid-reasoning model: left on, it
-    // spends the entire `num_predict` budget inside a <think> block and returns
-    // EMPTY content — which scores as "invalid JSON" and looks like a model
-    // failure when it is really a harness failure. (Measured: ~2.4k chars of
-    // thinking, 0 chars of answer.) Remedy serves these adapters greedy with no
-    // thinking, so this also keeps us faithful to their config — and holds
-    // conditions equal across all three arms.
-    think: false,
-    options: { temperature: 0, num_predict: MAX_TOKENS[task] },
-    messages: [
-      {
-        role: 'user',
-        content: PROMPTS[task](structure),
-        images: [image.toString('base64')],
-      },
-    ],
-  };
 
   const started = Date.now();
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
+    // Inside the try: a missing/unreadable PNG must be recorded as a failed
+    // prediction, not thrown — one bad fixture cannot be allowed to abort a
+    // 300-call eval run. (This is the "Never throws" contract above.)
+    const image = await readFile(fixture.pngPath);
+    const body = {
+      model,
+      stream: false,
+      format: SCHEMAS[task],
+      // MUST stay false. MiniCPM-V 4.6 is a hybrid-reasoning model: left on, it
+      // spends the entire `num_predict` budget inside a <think> block and returns
+      // EMPTY content — which scores as "invalid JSON" and looks like a model
+      // failure when it is really a harness failure. (Measured: ~2.4k chars of
+      // thinking, 0 chars of answer.) Remedy serves these adapters greedy with no
+      // thinking, so this also keeps us faithful to their config — and holds
+      // conditions equal across all three arms.
+      think: false,
+      options: { temperature: 0, num_predict: MAX_TOKENS[task] },
+      messages: [
+        {
+          role: 'user',
+          content: PROMPTS[task](structure),
+          images: [image.toString('base64')],
+        },
+      ],
+    };
+
     const res = await fetch(`${OLLAMA}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -42,8 +42,11 @@ const FILENAME = /^[\w\-.,'’()[\]{}~ &+%#@!]{1,120}\.(jpe?g|png|gif|bmp|webp|s
 const PLACEHOLDER =
   /^(image|images|picture|pic|photo|photograph|graphic|graphics|img|figure|screen ?shot|untitled|placeholder|blank|spacer|divider|banner|thumbnail|icon|logo)\s*\d*$/i;
 
-/** Redundant lead-in. Screen readers already announce "image". */
-const REDUNDANT = /^\s*(image|images|picture|photo|photograph|graphic|pic|img)\s+(of|showing|shows|depicting|that shows|:)\b/i;
+/** Redundant lead-in. Screen readers already announce "image".
+ *  The colon form needs no leading space — "Image: chart" is as redundant as
+ *  "Image of chart", and requiring `\s+` before `:` would miss it. */
+const REDUNDANT =
+  /^\s*(image|images|picture|photo|photograph|graphic|pic|img)(?:\s+(?:of|showing|shows|depicting|that shows)\b|\s*:\s*)/i;
 
 /** An alt that is a bare URL. */
 const URLISH = /^(https?:\/\/|www\.|\/\/)\S+$/i;
@@ -52,11 +55,14 @@ const URLISH = /^(https?:\/\/|www\.|\/\/)\S+$/i;
  *  exists ("CEO", "Map"), so this is human-review, never a block. */
 const MIN_MEANINGFUL = 6;
 
+/** Category tracks severity: a definite failure reports under `error`, anything
+ *  softer under `alert`. An `error`-severity issue filed as an `alert` would be
+ *  under-counted by the WAVE-style report that groups on category. */
 const issue = (
   id: string,
   severity: AuditIssue['severity'],
   message: string,
-): AuditIssue => ({ id, severity, message, category: 'alert' });
+): AuditIssue => ({ id, severity, message, category: severity === 'error' ? 'error' : 'alert' });
 
 /**
  * Judge one image's alt text. Returns `null` when there is nothing to say.
@@ -65,7 +71,15 @@ const issue = (
  * folds over, so it is fully unit-testable with no browser.
  */
 export function altTextIssue(image: ImageAlt): AuditIssue | null {
-  const { alt } = image;
+  const { alt, presentation } = image;
+
+  // An image marked decorative (role="presentation"/"none", or inside an
+  // aria-hidden subtree) is removed from the accessibility tree — a screen
+  // reader never announces its alt at all. Judging that alt's *quality* would
+  // manufacture a badge-withholding error for text nobody will ever hear.
+  // (The markup is sloppy, but it is not a WCAG 1.1.1 failure, and axe already
+  // owns the aria-* rules that police role misuse.)
+  if (presentation) return null;
 
   // Missing alt is axe's `image-alt` rule, already an error. Reporting it again
   // would double-count and mis-attribute what the remediation "fixed".

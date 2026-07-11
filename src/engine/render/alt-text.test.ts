@@ -102,10 +102,36 @@ test('specific, descriptive alt passes', () => {
   }
 });
 
-test('every issue carries a category so the WAVE-style report can group it', () => {
-  const issue = altTextIssue(img('logo.png'));
-  assert.ok(issue);
-  assert.equal(issue.category, 'alert');
+test('category tracks severity so the WAVE-style report groups it correctly', () => {
+  // An `error`-severity issue filed under `alert` would be under-counted by any
+  // report that groups on category.
+  const definite = altTextIssue(img('logo.png'));
+  assert.ok(definite);
+  assert.equal(definite.severity, 'error');
+  assert.equal(definite.category, 'error');
+
+  const soft = altTextIssue(img('Map'));
+  assert.ok(soft);
+  assert.equal(soft.severity, 'alert');
+  assert.equal(soft.category, 'alert');
+});
+
+// ── decorative images are out of scope, however sloppy their markup ───────────
+
+test('a decorative image is never judged on alt QUALITY', () => {
+  // role="presentation" (or an aria-hidden ancestor) removes the image from the
+  // accessibility tree — a screen reader never announces this alt at all, so
+  // flagging it would withhold the badge over text nobody will ever hear.
+  // Sloppy markup, yes; a WCAG 1.1.1 failure, no. axe owns the aria-* rules.
+  assert.equal(altTextIssue(img('SPEED BUMP.jpg', { presentation: true })), null);
+  assert.equal(altTextIssue(img('image', { presentation: true })), null);
+  // ...but the identical alt on a NON-decorative image is still an error.
+  assert.equal(altTextIssue(img('SPEED BUMP.jpg'))?.id, 'alt-text-filename');
+});
+
+test('redundant prefix is caught with a colon and no space ("Image: chart")', () => {
+  assert.equal(altTextIssue(img('Image: chart of Q1 revenue'))?.id, 'alt-text-redundant');
+  assert.equal(altTextIssue(img('Photo:the lab bench at dusk'))?.id, 'alt-text-redundant');
 });
 
 // ── integration: the pass reaches the gate ───────────────────────────────────

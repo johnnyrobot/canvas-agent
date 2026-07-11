@@ -68,9 +68,13 @@ export const FIXTURES: Fixture[] = [
   {
     id: 'alt-pass-descriptive',
     task: 'alt',
-    rationale: 'WCAG 1.1.1: alt text is specific, accurate, and concise.',
+    // Describes ONLY what the SVG actually renders. The chart has no numeric
+    // labels or y-axis, so an alt quoting specific enrollment figures would be
+    // unverifiable from the image — good-looking gold that is really a
+    // hallucination, and a model marking it "fail" would be right.
+    rationale: 'WCAG 1.1.1: alt text is specific, accurate, and concise, and asserts nothing the image does not show.',
     html: page(
-      `<h1>Enrollment trends</h1><img src="${CHART}" alt="Bar chart of BIO 101 enrollment rising each quarter, from about 70 students in Q1 to 160 in Q4." width="360" height="220"><p>Enrollment grew steadily.</p>`,
+      `<h1>Enrollment trends</h1><img src="${CHART}" alt="Bar chart titled Enrollment by quarter: four bars, Q1 through Q4, each taller than the last." width="360" height="220"><p>Enrollment grew steadily.</p>`,
     ),
     gold: { figures: [fig(1, 'pass', '')] },
   },
@@ -133,11 +137,12 @@ export const FIXTURES: Fixture[] = [
   {
     id: 'contrast-fail-near-threshold',
     task: 'contrast',
-    rationale: 'NEAR-THRESHOLD: #7a7a7a on #ffffff = 4.37:1 — just under 4.5:1, so it fails. The band where an adjudicator earns its keep.',
+    // Ratio verified against the app's own engine (`checkContrast`), not eyeballed.
+    rationale: 'NEAR-THRESHOLD: #7a7a7a on #ffffff = 4.29:1 — just under 4.5:1, so it fails. The band where an adjudicator earns its keep.',
     html: page(`<h1>Syllabus</h1><p class="b">Readings are posted each Monday.</p>`, `.b { color:#7a7a7a; }`),
     gold: {
       issues: [
-        { severity: 'error', description: 'Body text contrast ratio is 4.37:1, below WCAG AA 4.5:1.', ratio: 4.37, text_rgb: [122, 122, 122], bg_rgb: [255, 255, 255] },
+        { severity: 'error', description: 'Body text contrast ratio is 4.29:1, below WCAG AA 4.5:1.', ratio: 4.29, text_rgb: [122, 122, 122], bg_rgb: [255, 255, 255] },
       ],
     },
   },

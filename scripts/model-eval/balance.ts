@@ -1,5 +1,6 @@
 /**
- * Balance the labelled corpus to 50/50 pass/fail per task.
+ * Balance the labelled corpus to 50/50 pass/fail per task. Failures are kept
+ * preferentially but are still bounded by the pass count and by --cap.
  *
  * WHY THIS IS NOT OPTIONAL: real Canvas content is overwhelmingly "pass" on any
  * single dimension (heading 103:9, contrast 284:30). Scored on that raw
@@ -46,16 +47,23 @@ const hash = (s: string): number => {
 
 async function main(): Promise<number> {
   const fixtures = JSON.parse(await readFile(arg('in', '.frugal-fable/eval-corpus/labeled.json'), 'utf8')) as Fixture[];
-  const cap = Number(arg('cap', '30')); // max fixtures per class, per task
+  const capRaw = arg('cap', '30'); // max fixtures per class, per task
+  const cap = Number(capRaw);
+  if (!Number.isFinite(cap) || cap < 1) {
+    console.error(`invalid --cap: ${capRaw} (want a positive number)`);
+    return 1;
+  }
 
   const out: Fixture[] = [];
   for (const task of TASK_KEYS) {
     const rows = fixtures.filter((f) => f.task === task);
     const fails = rows.filter((f) => goldStatus(f) === 'fail');
     const passes = rows.filter((f) => goldStatus(f) === 'pass').sort((a, b) => hash(a.id) - hash(b.id));
+    // `n` already bounds failures — a second slice was redundant. Note failures
+    // are NOT always all kept: they are capped by the pass count (to hold the
+    // 50/50 baseline) and by --cap.
     const n = Math.min(fails.length, passes.length, cap);
-    // Keep failures first (scarce), then an equal number of passes.
-    const picked = [...fails.slice(0, Math.min(fails.length, cap)).slice(0, n), ...passes.slice(0, n)];
+    const picked = [...fails.slice(0, n), ...passes.slice(0, n)];
     out.push(...picked);
     const dropped = rows.length - picked.length;
     console.log(
@@ -74,4 +82,7 @@ async function main(): Promise<number> {
   return 0;
 }
 
-main().then((c) => process.exit(c), (e) => { console.error(e); process.exit(1); });
+// Guard so importing this module (e.g. to reuse `goldStatus`) does not run the CLI.
+if (process.argv[1]?.endsWith('balance.ts')) {
+  main().then((c) => process.exit(c), (e) => { console.error(e); process.exit(1); });
+}

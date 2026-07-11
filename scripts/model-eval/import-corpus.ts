@@ -36,6 +36,11 @@ import { audit as realAudit } from '../../src/engine/render/index.js';
 // Not exported there, so replicated here rather than inventing new styling.
 // ---------------------------------------------------------------------------
 
+/** Titles are derived from filenames and can contain `&`, `<`, quotes — escape
+ *  before interpolating, or the wrapper markup corrupts the fixture. */
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 /**
  * Wrap a Canvas RCE body fragment in a standalone page.
  *
@@ -46,7 +51,7 @@ import { audit as realAudit } from '../../src/engine/render/index.js';
  * an artifact of the harness rather than a property of the content.
  */
 export const wrapPage = (body: string, extraCss = '', pageTitle = ''): string => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>${pageTitle || 'Course page'}</title>
+<html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(pageTitle) || 'Course page'}</title>
 <style>
   body { margin:0; font-family: "Lato", "Helvetica Neue", Arial, sans-serif; color:#2d3b45; background:#fff; }
   .crumbs { padding:10px 24px; font-size:13px; color:#586874; border-bottom:1px solid #c7cdd1; }
@@ -61,8 +66,8 @@ export const wrapPage = (body: string, extraCss = '', pageTitle = ''): string =>
   th { background:#f5f5f5; }
   ${extraCss}
 </style></head>
-<body><nav class="crumbs">Course &rsaquo; Pages &rsaquo; ${pageTitle || 'Course page'}</nav><div class="wrap">
-${pageTitle ? `<h1>${pageTitle}</h1>` : ''}
+<body><nav class="crumbs">Course &rsaquo; Pages &rsaquo; ${escapeHtml(pageTitle) || 'Course page'}</nav><div class="wrap">
+${pageTitle ? `<h1>${escapeHtml(pageTitle)}</h1>` : ''}
 ${body}
 </div></body></html>`;
 
@@ -258,7 +263,11 @@ export async function readPagesJson(filePath: string): Promise<ImportedPage[]> {
     if (typeof title !== 'string' || typeof body !== 'string') {
       throw new Error(`${filePath}[${i}]: expected {title: string, body: string}`);
     }
-    return { title, html: wrapPage(bodyFragment(body)), source: `${filePath}[${i}]` };
+    // Pass the title through, exactly as the .imscc and --html-dir readers do:
+    // wrapPage renders it as the <h1>, mirroring Canvas. Omitting it here would
+    // silently give this one input path title-less pages and a different heading
+    // baseline from the other two.
+    return { title, html: wrapPage(bodyFragment(body), '', title), source: `${filePath}[${i}]` };
   });
 }
 
@@ -301,6 +310,8 @@ export interface ImportResult {
   fixtures: Fixture[];
   needsLabel: NeedsLabelEntry[];
   pagesImported: number;
+  /** Pages whose audit threw; skipped rather than aborting the run. */
+  skipped: { source: string; error: string }[];
 }
 
 export async function importFixtures(opts: ImportOptions): Promise<ImportResult> {
@@ -313,13 +324,24 @@ export async function importFixtures(opts: ImportOptions): Promise<ImportResult>
 
   const fixtures: Fixture[] = [];
   const needsLabel: NeedsLabelEntry[] = [];
+  const skipped: { source: string; error: string }[] = [];
   const idSeen = new Map<string, number>();
 
   for (const pageEntry of pages) {
     const tasks = tasksForPage(pageEntry.html);
     if (tasks.length === 0) continue;
 
-    const { issues } = await auditor(pageEntry.html);
+    // One unrenderable page must not abort a 300-page import. Skip it loudly and
+    // keep going — a silently truncated corpus is far more dangerous than a
+    // missing page, because the eval would still report confident numbers.
+    let issues;
+    try {
+      ({ issues } = await auditor(pageEntry.html));
+    } catch (err) {
+      skipped.push({ source: pageEntry.source, error: err instanceof Error ? err.message : String(err) });
+      console.warn(`  ! audit failed, skipping: ${pageEntry.source} — ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
     const images = extractImages(pageEntry.html);
     const pageSlug = slugify(pageEntry.title);
 
@@ -350,7 +372,7 @@ export async function importFixtures(opts: ImportOptions): Promise<ImportResult>
     }
   }
 
-  return { fixtures, needsLabel, pagesImported: pages.length };
+  return { fixtures, needsLabel, pagesImported: pages.length - skipped.length, skipped };
 }
 
 // ---------------------------------------------------------------------------
