@@ -42,6 +42,40 @@ export interface PlaywrightRunnerOptions {
 export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
 /**
+ * Rules switched on explicitly, overriding the tag filter above. Two gaps found
+ * by auditing 8 real Canvas course exports (314 pages), where axe reported ZERO
+ * heading and table failures on content that plainly has them.
+ *
+ * `td-has-header` — a data table whose header row is `<td>` (no `<th>` anywhere)
+ *   makes its relationships programmatically undeterminable. axe tags this
+ *   `wcag2a` + `wcag131`, i.e. a definite AA failure — but ALSO `experimental`,
+ *   and axe does not run experimental rules unless asked. So the rule we needed
+ *   already existed and was simply off. Impact `critical` → `blocker`, which
+ *   withholds the badge — correct for a definite 1.3.1 failure. Verified across
+ *   314 real pages: fires on 3 (eng-101's timetable and grading rubric among
+ *   them) and stays silent on all 18 Moodle `forumpost` LAYOUT tables — axe's
+ *   own data-vs-layout heuristic gets that right, which is the hard part, and
+ *   the reason not to hand-roll this.
+ *
+ * `heading-order` — a skipped heading level (H1 → H4). axe tags this
+ *   `best-practice`, NOT wcag: skipping levels is discouraged but is not
+ *   formally an AA failure, and this file deliberately excludes best-practice
+ *   to avoid manufacturing false blockers. Enabling it does not break that
+ *   promise: impact `moderate` → `warning`, which is SURFACED but does NOT
+ *   withhold the badge — the same weight WAVE gives it ("Alert"). We report what
+ *   a human should look at without claiming a conformance failure we cannot
+ *   substantiate. Fires on 9 of the 314 real pages, matching a hand-written
+ *   heading-skip labeller independently, on the same 9 pages.
+ *
+ * Both are opt-ins, not tag changes: widening AXE_TAGS to `best-practice` would
+ * drag in dozens of unrelated non-WCAG rules.
+ */
+export const AXE_RULE_OVERRIDES: Readonly<Record<string, { enabled: boolean }>> = {
+  'td-has-header': { enabled: true },
+  'heading-order': { enabled: true },
+};
+
+/**
  * Resolve the Chromium browser bundle shipped INSIDE the packaged `.app`.
  *
  * The product's core guarantee — the unconditional accessibility gate — depends on
@@ -239,6 +273,7 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
         await page.addScriptTag({ content: axeSource });
         const axeExpr =
           `axe.run(document, { runOnly: { type: 'tag', values: ${JSON.stringify(AXE_TAGS)} }, ` +
+          `rules: ${JSON.stringify(AXE_RULE_OVERRIDES)}, ` +
           `resultTypes: ['violations', 'incomplete'] })`;
         const axe = (await page.evaluate(axeExpr)) as AxeResults;
         const images = (await page.evaluate(EXTRACT_IMAGES)) as ImageAlt[];

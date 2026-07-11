@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { AXE_TAGS, resolveBundledBrowsersPath } from './playwright-runner.js';
+import { AXE_RULE_OVERRIDES, AXE_TAGS, resolveBundledBrowsersPath } from './playwright-runner.js';
 
 // Browser-free: asserts the COVERAGE CLAIM encoded in the axe tag set. The product
 // states WCAG 2.2 AA; axe-core 4.12 tags rules by version+level, so the scan must
@@ -34,4 +34,24 @@ test('resolveBundledBrowsersPath is undefined in dev/test (no resourcesPath or d
   assert.equal(resolveBundledBrowsersPath(undefined, () => true), undefined);
   // resourcesPath present but nothing bundled (dev electron) → default cache.
   assert.equal(resolveBundledBrowsersPath('/some/Resources', () => false), undefined);
+});
+
+// ── Rule opt-ins (offline guard) ─────────────────────────────────────────────
+
+test('the two gap-closing axe rules stay enabled', () => {
+  // Silently dropping either re-opens a real gap found on 8 live Canvas courses:
+  // axe ships `td-has-header` (wcag2a/1.3.1) as EXPERIMENTAL and `heading-order`
+  // as BEST-PRACTICE, so both are off by default and neither fired on 314 real
+  // pages that plainly have those defects. The gated browser tests in
+  // integration.test.ts assert the resulting severities; this one just makes sure
+  // the opt-ins cannot vanish without a failing test offline.
+  assert.equal(AXE_RULE_OVERRIDES['td-has-header']?.enabled, true);
+  assert.equal(AXE_RULE_OVERRIDES['heading-order']?.enabled, true);
+});
+
+test('rule opt-ins do not widen the WCAG tag set', () => {
+  // They are per-rule opt-ins precisely so we do NOT pull in `best-practice`
+  // wholesale, which would drag in dozens of unrelated non-WCAG rules.
+  assert.ok(!AXE_TAGS.includes('best-practice'));
+  assert.ok(!AXE_TAGS.includes('experimental'));
 });
