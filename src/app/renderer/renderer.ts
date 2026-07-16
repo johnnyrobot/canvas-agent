@@ -60,6 +60,7 @@ import { MODEL_NOT_FETCHED } from '../../contracts/index.js';
 import type {
   BrandKit,
   CanvasPage,
+  CanvasPublishStatus,
   CatalogCourse,
   CatalogCourseSummary,
   DocumentConversionResult,
@@ -195,6 +196,12 @@ interface State {
   canvasPagesLoaded: boolean;
   selectedCanvasPageId: string | undefined;
   remediateView: TurnView | undefined;
+  /** Canvas publish availability (CLI presence + opt-in toggle); loaded lazily. */
+  publishStatus: CanvasPublishStatus | undefined;
+  publishStatusLoaded: boolean;
+  /** Two-step confirm state for the review panel's Publish button. */
+  publishConfirming: boolean;
+  publishBusy: boolean;
   guidanceQuestion: string;
   /** Half-typed inst-ask question, preserved across attach/capture re-renders. */
   askDraft: string;
@@ -305,6 +312,10 @@ const state: State = {
   canvasPagesLoaded: false,
   selectedCanvasPageId: undefined,
   remediateView: undefined,
+  publishStatus: undefined,
+  publishStatusLoaded: false,
+  publishConfirming: false,
+  publishBusy: false,
   guidanceQuestion: 'How do I make a table accessible in Canvas?',
   askDraft: '',
   guidanceView: undefined,
@@ -1099,7 +1110,43 @@ function renderCanvasSourceProvide(): El {
         el('div', { class: 'hint' }, 'Fetched content will be repaired in the next step.'),
         actionButton(state.busy ? 'Importing' : 'Import and fix', () => void importAndRemediate(), 'btn btn--warn', undefined, 'canvas-import-fix'),
       ),
+      publishSettingRow(),
     ),
+  );
+}
+
+/**
+ * The opt-in "Allow publishing to Canvas" setting (PRD §17). Lives on the
+ * Canvas connect screen ("Settings live here for now"). Publishing shells out
+ * to the EXTERNAL canvas-pp-cli, so the checkbox is disabled — and the publish
+ * path stays invisible — until that binary is detected.
+ */
+function publishSettingRow(): El {
+  if (!state.publishStatusLoaded) void loadPublishStatus();
+  const status = state.publishStatus;
+  const cliAvailable = status?.cliAvailable === true;
+  const checkbox = el('input', {
+    type: 'checkbox',
+    id: 'canvas-publish-toggle',
+    'data-testid': 'canvas-publish-toggle',
+  }) as El & { checked: boolean };
+  checkbox.checked = status?.publishEnabled === true;
+  checkbox.disabled = !cliAvailable;
+  checkbox.addEventListener('change', () => void setPublishEnabled(checkbox.checked));
+  const label = el(
+    'label',
+    { class: 'hint', for: 'canvas-publish-toggle' },
+    'Allow publishing repaired pages back to Canvas (via the separately installed canvas-pp-cli; asks per page).',
+  );
+  const detail = !state.publishStatusLoaded
+    ? 'Checking for canvas-pp-cli…'
+    : cliAvailable
+      ? 'canvas-pp-cli detected. Publishing still requires a per-page confirm, and only gate-passing pages can publish.'
+      : 'canvas-pp-cli was not detected on this Mac — publishing stays off. The app itself never writes to Canvas.';
+  return el(
+    'section',
+    { class: 'panel' },
+    splitRow(el('div', {}, checkbox, ' ', label), el('div', { class: 'hint' }, detail)),
   );
 }
 
@@ -1205,6 +1252,46 @@ function renderRemediationReview(): El {
   if (screen.can.download) deps.onDownload = () => runReviewAction(reviewModel.download());
   if (screen.can.copyForCanvas) deps.onCopyForCanvas = () => runReviewAction(reviewModel.copyForCanvas());
   if (screen.can.canvasEditUrl) deps.canvasEditUrl = screen.can.canvasEditUrl;
+
+  // Opt-in publish (PRD §17): offered ONLY when every guardrail holds — the run
+  // passed the gate, the page came from a live Canvas import (we know its
+  // identity), the external CLI is installed, and the setting is on. The button
+  // itself is two-step: arm, then confirm.
+  //
+  // The gate half of that rides on `can.download`, which the model sets exactly
+  // when the run left no failures (ADR-0002) — the same condition this screen
+  // tested directly before the model owned it. The rest of the decision stays
+  // here because it turns on state the review model has no view of: whether the
+  // external CLI is installed and whether the persisted toggle is on, both
+  // resolved asynchronously. None of it is load-bearing on its own — the runtime
+  // re-runs the real accessibility gate server-side at publish time, and a
+  // withheld badge refuses, which is the guardrail that actually binds.
+  if (!state.publishStatusLoaded) void loadPublishStatus();
+  const publishTarget = currentPublishTarget();
+  if (
+    screen.can.download &&
+    publishTarget &&
+    state.publishStatus?.cliAvailable &&
+    state.publishStatus.publishEnabled
+  ) {
+    deps.publishLabel = state.publishBusy
+      ? 'Publishing…'
+      : state.publishConfirming
+        ? 'Confirm publish to Canvas'
+        : 'Publish to Canvas';
+    deps.onPublish = () => {
+      if (state.publishBusy) return;
+      if (!state.publishConfirming) {
+        state.publishConfirming = true;
+        state.notice = `Publishing will overwrite "${screen.view.page.title}" on Canvas with the repaired page shown above. Click "Confirm publish to Canvas" to proceed.`;
+        render();
+        return;
+      }
+      // The PASSED fragment specifically: publishing is for gate-passing output,
+      // and `firstFragment` would happily hand over a run that still fails.
+      void publishCurrentPage(publishTarget, firstPassedFragment(state.remediateView)?.html ?? '');
+    };
+  }
 
   return el('main', { class: 'remed-screen' }, createRemediationPanel(screen.view, deps).element);
 }
@@ -1615,6 +1702,8 @@ function formatBytes(bytes: number): string {
 function go(screenName: Screen): void {
   state.error = undefined;
   state.notice = undefined;
+  // Navigating away abandons a half-armed publish confirm.
+  state.publishConfirming = false;
   state.previousScreen = state.screen;
   state.screen = screenName;
   render();
@@ -2089,6 +2178,60 @@ async function runRemediate(sourceHtml: string): Promise<void> {
   if (view) {
     state.remediateView = view;
     go('remediate-review');
+  }
+}
+
+async function loadPublishStatus(): Promise<void> {
+  try {
+    state.publishStatus = await api().canvasPublishStatus();
+  } catch {
+    // The probe itself never rejects in the real runtime; a transport failure
+    // reads as "no publish path" rather than an error banner.
+    state.publishStatus = { cliAvailable: false, publishEnabled: false };
+  } finally {
+    state.publishStatusLoaded = true;
+    render();
+  }
+}
+
+async function setPublishEnabled(enabled: boolean): Promise<void> {
+  try {
+    await api().setCanvasPublishEnabled(enabled);
+    state.publishStatus = { cliAvailable: state.publishStatus?.cliAvailable ?? false, publishEnabled: enabled };
+  } catch (err) {
+    state.error = errorMessage(err);
+  } finally {
+    render();
+  }
+}
+
+/** The Canvas identity of the current remediation, when it was a live import. */
+function currentPublishTarget(): { baseUrl: string; courseId: string; pageId: string } | undefined {
+  if (state.sourceMode !== 'canvas') return undefined;
+  const baseUrl = state.canvasBaseUrl.trim();
+  const courseId = state.canvasCourseId.trim();
+  const pageId = state.selectedCanvasPageId;
+  if (!baseUrl || !courseId || !pageId) return undefined;
+  return { baseUrl, courseId, pageId };
+}
+
+async function publishCurrentPage(
+  target: { baseUrl: string; courseId: string; pageId: string },
+  html: string,
+): Promise<void> {
+  state.publishBusy = true;
+  state.error = undefined;
+  render();
+  try {
+    const receipt = await api().publishCanvasPage(target.baseUrl, target.courseId, target.pageId, html);
+    state.publishConfirming = false;
+    state.notice = `Published to Canvas — ${receipt.canvasUrl}`;
+  } catch (err) {
+    state.publishConfirming = false;
+    state.error = errorMessage(err);
+  } finally {
+    state.publishBusy = false;
+    render();
   }
 }
 
