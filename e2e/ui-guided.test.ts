@@ -86,6 +86,10 @@ test('M09 inst-home hub reaches Build, Fix, and Ask screens', { skip, timeout: 6
     await win.getByTestId('inst-link-fix').click();
     assert.match((await win.locator('#app').textContent()) ?? '', /What should we check/);
     await win.getByLabel('Back').click();
+    // Task 02 must land on the source-input flow, never the bare review panel.
+    await win.getByTestId('inst-task-remediation').click();
+    assert.match((await win.locator('#app').textContent()) ?? '', /What should we check/);
+    await win.getByLabel('Back').click();
     await win.getByTestId('inst-task-ask').click();
     await win.getByTestId('inst-ask-input').waitFor({ timeout: 10_000 });
   });

@@ -76,3 +76,46 @@ test('text over a background image yields a contrast warning (estimated)', { ski
     `expected an estimated image contrast warning, got: ${JSON.stringify(issues)}`,
   );
 });
+
+// ── Rules enabled over axe's defaults (see AXE_RULE_OVERRIDES) ───────────────
+// Both were found by auditing 8 real Canvas exports, where axe reported ZERO
+// heading and table failures on content that plainly has them.
+
+test('a data table whose header row is <td> is a blocker (axe td-has-header, experimental → opted in)', { skip }, async () => {
+  const { issues } = await audit(
+    '<table>' +
+      '<tr><td>Week</td><td>Topic</td><td>Reading</td></tr>' +
+      '<tr><td>1</td><td>Cells</td><td>Ch. 1</td></tr>' +
+      '<tr><td>2</td><td>Genetics</td><td>Ch. 2</td></tr>' +
+      '</table>',
+  );
+  const found = issues.find((i) => i.id === 'td-has-header');
+  assert.ok(found, 'a header-less data table must be reported — this is a WCAG 1.3.1 failure axe ships DISABLED');
+  assert.equal(found.severity, 'blocker', 'definite 1.3.1 failure: must withhold the passed-checks badge');
+});
+
+test('a properly headed data table is silent', { skip }, async () => {
+  const { issues } = await audit(
+    '<table>' +
+      '<thead><tr><th scope="col">Week</th><th scope="col">Topic</th></tr></thead>' +
+      '<tbody><tr><td>1</td><td>Cells</td></tr><tr><td>2</td><td>Genetics</td></tr></tbody>' +
+      '</table>',
+  );
+  assert.equal(issues.filter((i) => i.id === 'td-has-header').length, 0);
+});
+
+test('a skipped heading level is a WARNING, not a blocker (axe heading-order, best-practice → opted in)', { skip }, async () => {
+  const { issues } = await audit('<h1>Syllabus</h1><h4>Week 1</h4><p>Intro.</p>');
+  const found = issues.find((i) => i.id === 'heading-order');
+  assert.ok(found, 'H1 -> H4 skips a level and must be surfaced');
+  // Deliberate: axe tags heading-order `best-practice`, NOT wcag. Skipping levels
+  // is discouraged but is not formally an AA failure, so we surface it the way
+  // WAVE does (an "Alert") rather than claim a conformance failure we cannot
+  // substantiate. `warning` does not withhold the badge.
+  assert.equal(found.severity, 'warning');
+});
+
+test('a correctly ordered heading sequence is silent', { skip }, async () => {
+  const { issues } = await audit('<h1>Syllabus</h1><h2>Week 1</h2><h3>Readings</h3>');
+  assert.equal(issues.filter((i) => i.id === 'heading-order').length, 0);
+});
