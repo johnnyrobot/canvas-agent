@@ -352,7 +352,7 @@ function renderScreen(): ScreenParts {
       };
     case 'remediate-source':
       return {
-        header: simpleHeader('Fix an existing page', 'Remediate', 'amber', 'inst-home'),
+        header: simpleHeader('Check accessibility', 'Remediate', 'amber', 'inst-home'),
         main: renderRemediateSource(),
       };
     case 'remediate-provide':
@@ -383,7 +383,7 @@ function renderScreen(): ScreenParts {
       };
     case 'remediate-review':
       return {
-        header: simpleHeader('Accessibility review', 'Institutional preview', 'blue', 'inst-home'),
+        header: simpleHeader('Accessibility review', 'Remediate', 'amber', 'inst-home'),
         main: renderRemediationReview(),
       };
     case 'inst-home':
@@ -404,7 +404,7 @@ function institutionalDeps(): InstDeps {
         case 'build':
           return go('build-template');
         case 'remediation':
-          return go('remediate-review');
+          return go('remediate-source');
         case 'ask':
           return go('inst-ask');
         case 'brand':
@@ -1005,50 +1005,16 @@ function canvasPageRow(page: CanvasPage): El {
 }
 
 // ── Institutional accessibility-review screen ────────────────────────────────
-// A navigable, in-app rendering of the redesigned remediation panel (ported
-// from the Paper design "02 · Accessibility remediation" via remediation.ts).
-// Seeded with representative data; binding to live TurnView remediation results
-// (state.remediateView) is a deliberate follow-up.
-let reviewSelectedId = 'contrast';
-
-const REVIEW_ISSUES: RemediationIssue[] = [
-  { id: 'contrast', title: 'Low-contrast heading', element: 'Heading · 2.9:1', severity: 'fail' },
-  { id: 'alt', title: 'Image missing alt text', element: 'Image · banner.png', severity: 'fail' },
-  { id: 'link', title: 'Link text not descriptive', element: 'Link · "click here"', severity: 'fail' },
-  { id: 'small', title: 'Body text too small', element: 'Paragraph · 13px', severity: 'warn' },
-  { id: 'table', title: 'Ambiguous table header', element: 'Table · schedule', severity: 'warn' },
-];
-
-function seedRemediationView(): RemediationView {
-  const idx = REVIEW_ISSUES.findIndex((i) => i.id === reviewSelectedId);
-  return {
-    page: { title: 'Module 1 — Welcome', path: '/courses/204/pages/welcome' },
-    summary: { fail: 3, warn: 2, pass: 9 },
-    issues: REVIEW_ISSUES,
-    selectedId: reviewSelectedId,
-    detail: {
-      tag: 'Fails AA',
-      severity: 'fail',
-      wcag: 'WCAG 1.4.3 · Contrast (Minimum)',
-      position: `Issue ${Math.max(0, idx) + 1} of ${REVIEW_ISSUES.length}`,
-      title: 'Low-contrast heading',
-      description:
-        'The module heading sets Canvas blue on white at a contrast ratio of 2.9 : 1 — below the 4.5 : 1 minimum for normal text. Learners with low vision may be unable to read it.',
-      selector: '.module-heading',
-      before: { ratio: '2.9 : 1 · Fail', level: 'fail', headingColor: '#8FB9DE' },
-      after: { ratio: '8.1 : 1 · Pass', level: 'pass', headingColor: '#1B2A4A' },
-      fix: {
-        removed: '-   color: #5B9BD5;   /* 2.9 : 1 on #fff */',
-        added: '+   color: #1B2A4A;   /* 8.1 : 1 on #fff */',
-      },
-    },
-  };
-}
+// The redesigned remediation panel (ported from the Paper design
+// "02 · Accessibility remediation" via remediation.ts), bound to the live
+// remediation run in state.remediateView. With no run to show it renders an
+// empty state that routes to the remediate-source input flow.
+let reviewSelectedId = '';
 
 // Map a live remediation run (state.remediateView) into the panel's view model.
 // Real findings carry id/severity/message/category — but no per-element contrast
 // tiles or CSS diff — so the panel renders the page-level before/after HTML
-// instead. Returns undefined when there is no usable run (→ fall back to seed).
+// instead. Returns undefined when there is no usable run (→ empty state).
 function gateSeverityToPanel(severity: GateSeverity): 'fail' | 'warn' {
   return severity === 'blocker' || severity === 'error' ? 'fail' : 'warn';
 }
@@ -1152,8 +1118,16 @@ function realRemediationView(): RemediationView | undefined {
   };
 }
 
-function remediationReviewView(): RemediationView {
-  return realRemediationView() ?? seedRemediationView();
+function renderRemediationEmpty(): El {
+  return screen(
+    stack(
+      intro('No accessibility run yet', 'Paste page HTML, import a read-only Canvas page, or convert a document — the on-device audit and repaired result land here.'),
+      splitRow(
+        el('div', { class: 'hint' }, 'Nothing is sent off this machine; pages are read from Canvas without writing back.'),
+        actionButton('Start a check', () => go('remediate-source'), 'btn btn--warn', undefined, 'remediate-review-start'),
+      ),
+    ),
+  );
 }
 
 /**
@@ -1172,7 +1146,12 @@ function currentCanvasEditUrl(): string | undefined {
 }
 
 function renderRemediationReview(): El {
-  const view = remediationReviewView();
+  const view = realRemediationView();
+  if (!view) return renderRemediationEmpty();
+  // Click-time callbacks re-read the live view so they act on fresh state; the
+  // render-time view is the fallback only for type narrowing (state.remediateView
+  // cannot be cleared while the panel is mounted).
+  const current = (): RemediationView => realRemediationView() ?? view;
   // Only offer the corrected-HTML download when the run left no failures — the
   // same safety invariant the retired remediate-result screen enforced by
   // disabling its download/copy affordances on a withheld result.
@@ -1183,7 +1162,7 @@ function renderRemediationReview(): El {
       render();
     },
     onApply: (id) => {
-      const issue = remediationReviewView().issues.find((i) => i.id === id);
+      const issue = current().issues.find((i) => i.id === id);
       state.notice = issue ? `Fix for "${issue.title}" is in the repaired page.` : 'Repaired page is ready.';
       render();
     },
@@ -1192,7 +1171,7 @@ function renderRemediationReview(): El {
       render();
     },
     onCopyFix: () => {
-      const { detail } = remediationReviewView();
+      const { detail } = current();
       const text = detail.fix ? `${detail.fix.removed}\n${detail.fix.added}` : detail.htmlAfter ?? '';
       void copyText(text).then((ok) => {
         state.notice = ok ? 'Copied to clipboard.' : 'Clipboard unavailable.';
@@ -1206,9 +1185,9 @@ function renderRemediationReview(): El {
     },
   };
   if (passed) {
-    deps.onDownload = () => downloadHtml(remediationReviewView().detail.htmlAfter ?? '');
+    deps.onDownload = () => downloadHtml(current().detail.htmlAfter ?? '');
     deps.onCopyForCanvas = () => {
-      const text = remediationReviewView().detail.htmlAfter ?? '';
+      const text = current().detail.htmlAfter ?? '';
       void copyText(text).then((ok) => {
         state.notice = ok ? 'Copied — paste into the Canvas editor' : 'Clipboard unavailable.';
         render();
