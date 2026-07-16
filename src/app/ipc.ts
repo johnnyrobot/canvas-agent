@@ -48,6 +48,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CANVAS_PUBLISH_STATUS,
+  SET_CANVAS_PUBLISH_ENABLED,
+  PUBLISH_CANVAS_PAGE,
   CATALOG_AVAILABLE,
   CATALOG_SEARCH,
   CATALOG_GET,
@@ -193,6 +196,19 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
   // ── Local document conversion ─────────────────────────────────────────────
   ipcMain.handle(CONVERT_DOCUMENT, (_event, document) =>
     envelope(() => api.convertDocument(document as UploadedDocument)),
+  );
+
+  // ── Canvas publish (OPT-IN; via the external canvas-pp-cli) ────────────────
+  ipcMain.handle(CANVAS_PUBLISH_STATUS, () => envelope(() => api.canvasPublishStatus()));
+
+  ipcMain.handle(SET_CANVAS_PUBLISH_ENABLED, (_event, enabled) =>
+    envelope(() => api.setCanvasPublishEnabled(enabled as boolean)),
+  );
+
+  ipcMain.handle(PUBLISH_CANVAS_PAGE, (_event, baseUrl, courseId, pageId, html) =>
+    envelope(() =>
+      api.publishCanvasPage(baseUrl as string, courseId as string, pageId as string, html as string),
+    ),
   );
 
   // ── Catalog enrichment (OPTIONAL; degrades to absent when the CLI isn't installed) ──

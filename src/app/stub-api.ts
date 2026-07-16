@@ -189,6 +189,9 @@ function contrast(ratio: number, size: TextSize = 'normal'): ContrastResult {
 }
 
 export function createStubApi(): AppApi {
+  // Per-instance "Allow publishing to Canvas" toggle (the runtime persists this
+  // in the meta table; the stub keeps it for the process lifetime).
+  let stubPublishEnabled = false;
   return {
     async runTurn(req, onChunk): Promise<TurnView> {
       // Demo the streaming path: a couple of text chunks, a tool chunk, then a
@@ -364,6 +367,25 @@ export function createStubApi(): AppApi {
     // ── Catalog enrichment (OPTIONAL; laccd-courses-pp-cli) ─────────────────────
     async catalogAvailable() {
       return true;
+    },
+    async canvasPublishStatus() {
+      return { cliAvailable: true, publishEnabled: stubPublishEnabled };
+    },
+    async setCanvasPublishEnabled(enabled) {
+      stubPublishEnabled = enabled;
+    },
+    async publishCanvasPage(_baseUrl, courseId, pageId, html) {
+      if (!stubPublishEnabled) {
+        throw new Error('Publishing to Canvas is disabled. Turn on "Allow publishing to Canvas" first.');
+      }
+      return {
+        courseId,
+        pageId,
+        // Deterministic stand-in for the runtime's SHA-256 (no crypto in the stub).
+        contentHash: `stub-${html.length.toString(16)}`,
+        publishedAt: new Date().toISOString(),
+        canvasUrl: `https://stub.instructure.test/courses/${courseId}/pages/${pageId}`,
+      };
     },
     async catalogSearch(_query) {
       return CANNED_CATALOG_SUMMARIES.map((s) => ({ ...s }));

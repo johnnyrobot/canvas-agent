@@ -799,3 +799,84 @@ test('catalogGet propagates a CatalogClient rejection rather than swallowing it'
   });
   await assert.rejects(() => api(runner, { catalog }).catalogGet(1), /course not found/);
 });
+
+// ── Canvas publish (OPT-IN write path; PRD §17) ──────────────────────────────
+
+/** A recording fake CanvasPublisher (no CLI, no network). */
+function fakePublisher(over: Partial<import('../canvas/publish.js').CanvasPublisher> = {}) {
+  const published: Array<{ baseUrl: string; courseId: string; pageId: string; html: string }> = [];
+  const publisher: import('../canvas/publish.js').CanvasPublisher = {
+    available: async () => true,
+    configuredHost: async () => 'canvas.example.edu',
+    publishPage: async (input) => {
+      published.push(input);
+      return { canvasUrl: `https://canvas.example.edu/courses/${input.courseId}/pages/${input.pageId}` };
+    },
+    ...over,
+  };
+  return { publisher, published };
+}
+
+test('publishCanvasPage REFUSES while the toggle is off — the publisher is never invoked', async () => {
+  const runner = new ScriptedRunner([]);
+  const { publisher, published } = fakePublisher();
+  const app = api(runner, { publisher, db: await freshDb(), gate: markerGate() });
+
+  await assert.rejects(
+    () => app.publishCanvasPage('https://canvas.example.edu', '204', 'welcome', '<h2>ok</h2>'),
+    /disabled/i,
+  );
+  assert.equal(published.length, 0);
+});
+
+test('publishCanvasPage re-runs the gate and REFUSES gate-withheld HTML even with the toggle on', async () => {
+  const runner = new ScriptedRunner([]);
+  const { publisher, published } = fakePublisher();
+  const app = api(runner, { publisher, db: await freshDb(), gate: markerGate() });
+
+  await app.setCanvasPublishEnabled(true);
+  // markerGate flags LOWCONTRAST as a blocker → badge withheld → refusal.
+  await assert.rejects(
+    () => app.publishCanvasPage('https://canvas.example.edu', '204', 'welcome', '<p>LOWCONTRAST</p>'),
+    /withheld/i,
+  );
+  assert.equal(published.length, 0, 'gate-withheld HTML must NEVER reach the publisher');
+});
+
+test('publishCanvasPage publishes gate-passing HTML, returns a receipt, and records the audit row', async () => {
+  const runner = new ScriptedRunner([]);
+  const { publisher, published } = fakePublisher();
+  const db = await freshDb();
+  const app = api(runner, { publisher, db, gate: markerGate() });
+
+  await app.setCanvasPublishEnabled(true);
+  const receipt = await app.publishCanvasPage('https://canvas.example.edu', '204', 'welcome', '<h2>Clean</h2>');
+
+  assert.equal(published.length, 1);
+  assert.equal(published[0]!.html, '<h2>Clean</h2>');
+  assert.equal(receipt.courseId, '204');
+  assert.equal(receipt.pageId, 'welcome');
+  const { createHash } = await import('node:crypto');
+  assert.equal(receipt.contentHash, createHash('sha256').update('<h2>Clean</h2>').digest('hex'));
+  assert.equal(receipt.canvasUrl, 'https://canvas.example.edu/courses/204/pages/welcome');
+
+  const rows = await db.all<{ course_id: string; page_id: string; content_hash: string }>(
+    'SELECT course_id, page_id, content_hash FROM canvas_publishes',
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.course_id, '204');
+  assert.equal(rows[0]!.content_hash, receipt.contentHash);
+});
+
+test('canvasPublishStatus reflects CLI availability and the persisted toggle, and never rejects', async () => {
+  const runner = new ScriptedRunner([]);
+  const db = await freshDb();
+  const { publisher } = fakePublisher({ available: async () => false });
+  const app = api(runner, { publisher, db, gate: markerGate() });
+
+  assert.deepEqual(await app.canvasPublishStatus(), { cliAvailable: false, publishEnabled: false });
+  await app.setCanvasPublishEnabled(true);
+  assert.deepEqual(await app.canvasPublishStatus(), { cliAvailable: false, publishEnabled: true });
+  await app.setCanvasPublishEnabled(false);
+  assert.deepEqual(await app.canvasPublishStatus(), { cliAvailable: false, publishEnabled: false });
+});

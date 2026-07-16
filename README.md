@@ -16,7 +16,9 @@ the next required question for the job you pick:
 - **Build a Canvas page** — generate an accessible page from a guided template and
   get checked HTML (every fragment carries an authoritative accessibility badge).
 - **Fix an existing page** — paste HTML or import a read-only Canvas page, then get
-  WCAG findings and remediations.
+  WCAG findings and remediations. Canvas access is read-only by default; publishing a
+  repaired page back is explicit opt-in via the separately installed `canvas-pp-cli`
+  (per-page confirm, and only pages that pass the accessibility gate).
 - **Ask how Canvas works** — a Q&A mode, with or without a screenshot.
 
 Accessibility checking is backed by [axe-core](https://github.com/dequelabs/axe-core)

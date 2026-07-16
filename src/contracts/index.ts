@@ -215,6 +215,33 @@ export interface CanvasImportResult {
 /** Read-only Canvas importer. MUST perform no write/mutation calls. */
 export type CanvasImporter = (config: CanvasConfig, courseId: string) => Promise<CanvasImportResult>;
 
+// ── Canvas publish (OPT-IN write path via the EXTERNAL canvas-pp-cli; PRD §17) ──
+// The in-app Canvas client stays GET-only by construction. Publishing shells out
+// to the separately installed `canvas-pp-cli` binary, and only when every
+// guardrail holds: CLI present, settings toggle on, per-page confirm in the UI,
+// and the runtime re-runs the accessibility gate on the exact HTML — a withheld
+// badge refuses the publish.
+
+/** Whether the publish path is currently offered (both must be true). */
+export interface CanvasPublishStatus {
+  /** True iff the local `canvas-pp-cli` binary is installed and runnable. */
+  cliAvailable: boolean;
+  /** The user's persisted "Allow publishing to Canvas" setting (default false). */
+  publishEnabled: boolean;
+}
+
+/** Audit receipt for one successful publish; also persisted on-device. */
+export interface CanvasPublishReceipt {
+  courseId: string;
+  pageId: string;
+  /** SHA-256 (hex) of the exact HTML that was published. */
+  contentHash: string;
+  /** ISO timestamp of the publish. */
+  publishedAt: string;
+  /** The Canvas page URL, for "view what changed". */
+  canvasUrl: string;
+}
+
 // ── Catalog enrichment (catalog track; consumes the laccd-courses-pp-cli binary) ─
 // OPTIONAL enrichment source (see src/catalog/README.md): degrades to absent
 // when the CLI isn't installed, and a search/get call may go live to the
@@ -525,6 +552,21 @@ export interface AppApi {
   // from the Keychain (see `saveCanvasAuth`), so no secret transits the renderer.
   fetchCanvasPage(baseUrl: string, courseId: string, pageId: string): Promise<string>;
   listCanvasPages(baseUrl: string, courseId: string): Promise<CanvasPage[]>;
+
+  // ── Canvas publish (OPT-IN; via the EXTERNAL canvas-pp-cli — see CanvasPublishStatus) ──
+  /** Current publish availability (CLI presence + persisted toggle). Never rejects. */
+  canvasPublishStatus(): Promise<CanvasPublishStatus>;
+  /** Persist the "Allow publishing to Canvas" toggle. */
+  setCanvasPublishEnabled(enabled: boolean): Promise<void>;
+  /**
+   * Publish gate-passing HTML back to a Canvas page via the external CLI.
+   * The runtime re-runs the accessibility gate on `html` and REFUSES to publish
+   * when the badge would be withheld. `baseUrl` must match the CLI's configured
+   * Canvas host (checked via `canvas-pp-cli doctor`) so a stale app setting can
+   * never push to a different Canvas than the one the page was imported from.
+   * Rejects when the toggle is off or the CLI is missing.
+   */
+  publishCanvasPage(baseUrl: string, courseId: string, pageId: string, html: string): Promise<CanvasPublishReceipt>;
 
   // ── Catalog enrichment (OPTIONAL; degrades to absent when the CLI isn't installed) ──
   /** True iff the local `laccd-courses-pp-cli` binary is installed and runnable. Never rejects. */

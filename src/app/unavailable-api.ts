@@ -90,6 +90,16 @@ export function createUnavailableApi(reason: string): AppApi {
       // absent rather than fabricating availability.
       return false;
     },
+    async canvasPublishStatus() {
+      // Same honesty: a dead runtime offers no publish path.
+      return { cliAvailable: false, publishEnabled: false };
+    },
+    async setCanvasPublishEnabled() {
+      return fail();
+    },
+    async publishCanvasPage() {
+      return fail();
+    },
     async catalogSearch() {
       return fail();
     },
