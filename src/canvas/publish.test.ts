@@ -118,10 +118,23 @@ test('publishPage maps non-JSON stdout to parse', async () => {
   await assert.rejects(publisher.publishPage(PAGE), (err: PublishError) => err.kind === 'parse');
 });
 
-test('configuredHost rejects with parse when doctor reports no base_url', async () => {
+test('configuredBase rejects with parse when doctor reports no base_url', async () => {
   const { exec } = fakeExec(() => ok(JSON.stringify({ auth: 'configured' })));
   const publisher = createCanvasPublisher({ exec });
-  await assert.rejects(publisher.configuredHost(), (err: PublishError) => err.kind === 'parse');
+  await assert.rejects(publisher.configuredBase(), (err: PublishError) => err.kind === 'parse');
+});
+
+test('publishPage refuses a scheme/path mismatch, not just a host mismatch', async () => {
+  // Same host, different scheme — the full-base preflight must still refuse.
+  const { exec, calls } = fakeExec((_file, args) =>
+    args[0] === 'doctor' ? ok(JSON.stringify({ base_url: 'http://canvas.example.edu' })) : ok(UPDATE_JSON),
+  );
+  const publisher = createCanvasPublisher({ exec });
+  await assert.rejects(
+    publisher.publishPage({ ...PAGE, baseUrl: 'https://canvas.example.edu' }),
+    (err: PublishError) => err.kind === 'hostMismatch',
+  );
+  assert.equal(calls.length, 1, 'preflight short-circuits before any pages update');
 });
 
 // ── available() ──────────────────────────────────────────────────────────────
@@ -138,4 +151,12 @@ test('available probes agent-context and never throws', async () => {
     },
   });
   assert.equal(await bad.available(), false);
+});
+
+test('available returns false when the probe RESOLVES with a non-zero exit code', async () => {
+  // A present-but-broken binary: exec resolves (no throw) but exits non-zero.
+  const publisher = createCanvasPublisher({
+    exec: () => Promise.resolve({ stdout: '', stderr: 'bad config', exitCode: 1 }),
+  });
+  assert.equal(await publisher.available(), false);
 });

@@ -89,8 +89,13 @@ export const defaultExec: ExecLike = (file, args, options) =>
       clearTimeout(timer);
       resolve({ stdout, stderr, exitCode: code ?? -1 });
     });
-    if (options.stdinData !== undefined) child.stdin.write(options.stdinData);
-    child.stdin.end();
+    // Swallow stdin stream errors (e.g. EPIPE when the child closes its input
+    // early / dies before reading): without a listener the 'error' event would
+    // surface as an unhandled exception. The real outcome still arrives via the
+    // child's 'error'/'close' handlers above.
+    child.stdin.on('error', () => {});
+    if (options.stdinData !== undefined) child.stdin.end(options.stdinData);
+    else child.stdin.end();
   });
 
 export interface CanvasPublisherOptions {
@@ -119,8 +124,8 @@ export interface PublishPageResult {
 export interface CanvasPublisher {
   /** True iff the binary resolves AND a lightweight probe command exits 0. Never throws. */
   available(): Promise<boolean>;
-  /** The CLI's configured Canvas base URL (from `doctor --agent`). */
-  configuredHost(): Promise<string>;
+  /** The CLI's configured Canvas base URL, normalized (from `doctor --agent`). */
+  configuredBase(): Promise<string>;
   /** PUT the page body via `pages update`. Resolves with the page URL on success. */
   publishPage(input: PublishPageInput): Promise<PublishPageResult>;
 }
@@ -136,10 +141,18 @@ const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
  */
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._~-]*$/;
 
-/** Normalized origin host of a URL-ish string (`https://x.edu/` → `x.edu`), or null. */
-function hostOf(url: string): string | null {
+/**
+ * Normalized HTTP(S) base — scheme + lowercased host(+port) + path with trailing
+ * slashes stripped (`https://X.edu/canvas/` → `https://x.edu/canvas`), or null for
+ * a non-HTTP(S) or unparseable value. Comparing the FULL base (not just the host)
+ * keeps a path-hosted Canvas (`…/canvas`) and the http/https scheme part of the
+ * preflight, and lets the receipt URL be built from the real configured base.
+ */
+function normalizeBase(url: string): string | null {
   try {
-    return new URL(url).host.toLowerCase();
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return `${u.protocol}//${u.host.toLowerCase()}${u.pathname.replace(/\/+$/, '')}`;
   } catch {
     return null;
   }
@@ -182,29 +195,32 @@ export function createCanvasPublisher(opts: CanvasPublisherOptions = {}): Canvas
     }
   }
 
-  async function configuredHost(): Promise<string> {
+  async function configuredBase(): Promise<string> {
     const data = await invoke(['doctor']);
     const baseUrl =
       typeof data === 'object' && data !== null ? (data as Record<string, unknown>).base_url : undefined;
-    const host = typeof baseUrl === 'string' ? hostOf(baseUrl) : null;
-    if (!host) {
+    const base = typeof baseUrl === 'string' ? normalizeBase(baseUrl) : null;
+    if (!base) {
       throw new PublishError('parse', 'canvas-pp-cli doctor did not report a base_url');
     }
-    return host;
+    return base;
   }
 
   return {
     async available(): Promise<boolean> {
       try {
-        // Same cheap, side-effect-free probe the catalog client uses.
-        await exec(command, ['agent-context'], { timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
-        return true;
+        // Same cheap, side-effect-free probe the catalog client uses. Unlike the
+        // catalog client's execFile transport (which REJECTS on a non-zero exit),
+        // our spawn-based exec RESOLVES with the code — so a broken-but-present
+        // binary that exits non-zero must read as unavailable, not available.
+        const result = await exec(command, ['agent-context'], { timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
+        return result.exitCode === 0;
       } catch {
         return false;
       }
     },
 
-    configuredHost,
+    configuredBase,
 
     async publishPage(input: PublishPageInput): Promise<PublishPageResult> {
       if (!SAFE_ID.test(input.courseId)) {
@@ -214,21 +230,22 @@ export function createCanvasPublisher(opts: CanvasPublisherOptions = {}): Canvas
         throw new PublishError('invalidId', `invalid Canvas page id: ${JSON.stringify(input.pageId)}`);
       }
 
-      // Host-match preflight: the CLI publishes to ITS configured Canvas; refuse
-      // when that is not the Canvas this page was imported from.
-      const cliHost = await configuredHost();
-      const appHost = hostOf(input.baseUrl);
-      if (!appHost || appHost !== cliHost) {
+      // Base-match preflight: the CLI publishes to ITS configured Canvas; refuse
+      // when that is not the Canvas this page was imported from (full base — scheme,
+      // host, and any path — so http/https and path-hosted instances can't mismatch).
+      const cliBase = await configuredBase();
+      const appBase = normalizeBase(input.baseUrl);
+      if (!appBase || appBase !== cliBase) {
         throw new PublishError(
           'hostMismatch',
-          `canvas-pp-cli is configured for ${cliHost}, but this page came from ${appHost ?? input.baseUrl}. ` +
+          `canvas-pp-cli is configured for ${cliBase}, but this page came from ${appBase ?? input.baseUrl}. ` +
             'Re-point one of them before publishing.',
         );
       }
 
       const body = JSON.stringify({ wiki_page: { body: input.html, notify_of_update: false } });
       await invoke(['pages', 'update', input.courseId, input.pageId, '--stdin'], body);
-      return { canvasUrl: `https://${cliHost}/courses/${input.courseId}/pages/${input.pageId}` };
+      return { canvasUrl: `${cliBase}/courses/${input.courseId}/pages/${input.pageId}` };
     },
   };
 }

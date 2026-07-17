@@ -4,9 +4,12 @@
 helps instructors build and remediate [Canvas LMS](https://www.instructure.com/canvas)
 content that meets **WCAG 2.2 Level AA**.
 
-Everything runs locally. There is no cloud service and no third-party API call:
-the language model and the document-ingestion pipeline both run on your machine
-as bundled sidecars, so course content and credentials never leave the device.
+The language model and the document-ingestion pipeline both run on your machine
+as bundled sidecars — no cloud AI service and no telemetry. The only network
+calls are to the Canvas instance you choose to connect: reading pages to
+remediate, and — strictly opt-in — publishing a repaired page back via the
+separately installed `canvas-pp-cli`. Your Canvas token stays in the macOS
+Keychain and is never sent anywhere else.
 
 ## What it does
 
