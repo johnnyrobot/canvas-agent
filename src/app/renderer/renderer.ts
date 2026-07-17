@@ -147,6 +147,8 @@ interface State {
   /** Canvas publish availability (CLI presence + opt-in toggle); loaded lazily. */
   publishStatus: CanvasPublishStatus | undefined;
   publishStatusLoaded: boolean;
+  /** True while a toggle write is in flight — disables the checkbox to serialize saves. */
+  publishStatusSaving: boolean;
   /** Two-step confirm state for the review panel's Publish button. */
   publishConfirming: boolean;
   publishBusy: boolean;
@@ -259,6 +261,7 @@ const state: State = {
   remediateView: undefined,
   publishStatus: undefined,
   publishStatusLoaded: false,
+  publishStatusSaving: false,
   publishConfirming: false,
   publishBusy: false,
   guidanceQuestion: 'How do I make a table accessible in Canvas?',
@@ -1014,7 +1017,7 @@ function publishSettingRow(): El {
     'data-testid': 'canvas-publish-toggle',
   }) as El & { checked: boolean };
   checkbox.checked = status?.publishEnabled === true;
-  checkbox.disabled = !cliAvailable;
+  checkbox.disabled = !cliAvailable || state.publishStatusSaving;
   checkbox.addEventListener('change', () => void setPublishEnabled(checkbox.checked));
   const label = el(
     'label',
@@ -1264,7 +1267,16 @@ function renderRemediationReview(): El {
         render();
         return;
       }
-      void publishCurrentPage(publishTarget, current().detail.htmlAfter ?? '');
+      // Never publish an empty body — that would blank the live Canvas page.
+      // (htmlAfter is populated for any passed run, but guard the write path.)
+      const htmlAfter = current().detail.htmlAfter;
+      if (!htmlAfter) {
+        state.publishConfirming = false;
+        state.error = 'No repaired HTML is available to publish.';
+        render();
+        return;
+      }
+      void publishCurrentPage(publishTarget, htmlAfter);
     };
   }
 
@@ -2094,12 +2106,18 @@ async function loadPublishStatus(): Promise<void> {
 }
 
 async function setPublishEnabled(enabled: boolean): Promise<void> {
+  // Serialize saves: disable the checkbox while a write is in flight so rapid
+  // toggles can't resolve out of order and leave the DB / UI on the wrong value.
+  if (state.publishStatusSaving) return;
+  state.publishStatusSaving = true;
+  render();
   try {
     await api().setCanvasPublishEnabled(enabled);
     state.publishStatus = { cliAvailable: state.publishStatus?.cliAvailable ?? false, publishEnabled: enabled };
   } catch (err) {
     state.error = errorMessage(err);
   } finally {
+    state.publishStatusSaving = false;
     render();
   }
 }

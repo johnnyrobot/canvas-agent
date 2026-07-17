@@ -5,7 +5,7 @@
  * the public `AppApi` contract unchanged while letting Playwright exercise the
  * real guided renderer and IPC bridge without waiting on local model inference.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { WCAG } from '../contracts/index.js';
 import type {
   AppApi,
@@ -440,7 +440,8 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
       return {
         courseId,
         pageId,
-        contentHash: `e2e-${html.length.toString(16)}`,
+        // Match the runtime contract: SHA-256 hex of the exact published HTML.
+        contentHash: createHash('sha256').update(html).digest('hex'),
         publishedAt: new Date().toISOString(),
         canvasUrl: `https://e2e.instructure.test/courses/${courseId}/pages/${pageId}`,
       };

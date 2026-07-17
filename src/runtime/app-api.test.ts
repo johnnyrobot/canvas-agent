@@ -807,7 +807,7 @@ function fakePublisher(over: Partial<import('../canvas/publish.js').CanvasPublis
   const published: Array<{ baseUrl: string; courseId: string; pageId: string; html: string }> = [];
   const publisher: import('../canvas/publish.js').CanvasPublisher = {
     available: async () => true,
-    configuredHost: async () => 'canvas.example.edu',
+    configuredBase: async () => 'https://canvas.example.edu',
     publishPage: async (input) => {
       published.push(input);
       return { canvasUrl: `https://canvas.example.edu/courses/${input.courseId}/pages/${input.pageId}` };

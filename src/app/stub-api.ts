@@ -17,6 +17,7 @@
  * orchestrator's `enforceGate` — the app-shell track depends only on the frozen
  * contract *types*, never on another track's runtime code.
  */
+import { createHash } from 'node:crypto';
 import { WCAG } from '../contracts/index.js';
 import type {
   AppApi,
@@ -381,8 +382,8 @@ export function createStubApi(): AppApi {
       return {
         courseId,
         pageId,
-        // Deterministic stand-in for the runtime's SHA-256 (no crypto in the stub).
-        contentHash: `stub-${html.length.toString(16)}`,
+        // Match the runtime contract: SHA-256 hex of the exact published HTML.
+        contentHash: createHash('sha256').update(html).digest('hex'),
         publishedAt: new Date().toISOString(),
         canvasUrl: `https://stub.instructure.test/courses/${courseId}/pages/${pageId}`,
       };

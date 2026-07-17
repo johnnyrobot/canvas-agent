@@ -202,7 +202,15 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
   ipcMain.handle(CANVAS_PUBLISH_STATUS, () => envelope(() => api.canvasPublishStatus()));
 
   ipcMain.handle(SET_CANVAS_PUBLISH_ENABLED, (_event, enabled) =>
-    envelope(() => api.setCanvasPublishEnabled(enabled as boolean)),
+    envelope(() => {
+      // Reject a non-boolean payload rather than coercing it — this toggle gates
+      // a write-to-Canvas capability, so a stray '' / 0 must not silently disable
+      // (or a truthy string enable) publishing.
+      if (typeof enabled !== 'boolean') {
+        throw new Error('setCanvasPublishEnabled expects a boolean');
+      }
+      return api.setCanvasPublishEnabled(enabled);
+    }),
   );
 
   ipcMain.handle(PUBLISH_CANVAS_PAGE, (_event, baseUrl, courseId, pageId, html) =>
