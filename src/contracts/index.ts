@@ -168,6 +168,12 @@ export interface AppPaths {
    * (`DOCLING_SERVE_ARTIFACTS_PATH`). Empty until the first-run download.
    */
   modelsDir: string;
+  /**
+   * Writable home for the bundled catalog CLI (`laccd-courses-pp-cli --home`).
+   * Holds the copied-once seed DB (`data/data.db`) so the read-only bundled
+   * seed is never opened read-write in place. Packaged app only.
+   */
+  catalogHomeDir: string;
 }
 
 // ── Knowledge (knowledge track; consumes Database) ───────────────────────────

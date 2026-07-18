@@ -12,6 +12,7 @@ test('default layout sits under ~/Library/Application Support/CanvasAgent', () =
   assert.equal(p.uploadsDir, join(dataDir, 'uploads'));
   assert.equal(p.exportsDir, join(dataDir, 'exports'));
   assert.equal(p.modelsDir, join(dataDir, 'docling-models'));
+  assert.equal(p.catalogHomeDir, join(dataDir, 'catalog-home'));
 });
 
 test('every resolved path is absolute', () => {
@@ -21,6 +22,7 @@ test('every resolved path is absolute', () => {
   assert.ok(isAbsolute(p.uploadsDir));
   assert.ok(isAbsolute(p.exportsDir));
   assert.ok(isAbsolute(p.modelsDir));
+  assert.ok(isAbsolute(p.catalogHomeDir));
 });
 
 test('overriding dataDir re-bases the derived paths under it', () => {

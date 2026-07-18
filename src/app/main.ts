@@ -20,6 +20,9 @@ import { createE2eAppApi } from './e2e-api.js';
 import { isInAppUrl, externalOpenTarget } from './navigation.js';
 import { withScreenshotCapture } from './screenshot.js';
 import { createAppApi } from '../runtime/index.js';
+import { resolveSidecarCommand } from '../runtime/bundled-resources.js';
+import { ensureCatalogHome } from '../runtime/catalog-home.js';
+import { createCatalogClient } from '../catalog/index.js';
 import { resolveAppPaths } from '../storage/index.js';
 import type { ScreenshotPermissionStatus } from '../contracts/index.js';
 
@@ -77,6 +80,21 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
+/**
+ * Packaged app only: point the catalog client at the bundled
+ * `laccd-courses-pp-cli` binary and a writable `--home` seeded (once) from the
+ * bundled read-only seed DB. In dev (not packaged) this returns `undefined`,
+ * and `createAppApi`'s `opts.catalog ?? createCatalogClient()` falls back to
+ * the PATH default unchanged.
+ */
+function packagedCatalogClient() {
+  if (!app.isPackaged || !process.resourcesPath) return undefined;
+  const command = resolveSidecarCommand('laccd-courses-pp-cli');
+  const seedDbPath = path.join(process.resourcesPath, 'sidecars', 'laccd-courses-pp-cli', 'seed', 'data.db');
+  const home = ensureCatalogHome({ seedDbPath, homeDir: resolveAppPaths().catalogHomeDir });
+  return createCatalogClient({ command, home });
+}
+
 function createRuntimeApi() {
   if (process.env.CANVAS_AGENT_E2E_API === 'scripted') {
     return createE2eAppApi(process.env.CANVAS_AGENT_E2E_SCENARIO);
@@ -88,7 +106,11 @@ function createRuntimeApi() {
   if (app.isPackaged && !process.env.DOCLING_MODELS_DIR) {
     process.env.DOCLING_MODELS_DIR = resolveAppPaths().modelsDir;
   }
-  return withScreenshotCapture(createAppApi(), {
+  // `exactOptionalPropertyTypes` treats `{ catalog: undefined }` as distinct from
+  // omitting the key, so the key is only included when a packaged client exists;
+  // omitting it (dev) still falls through to `opts.catalog ?? createCatalogClient()`.
+  const catalog = packagedCatalogClient();
+  return withScreenshotCapture(createAppApi(catalog ? { catalog } : {}), {
     permissionStatus: () =>
       systemPreferences.getMediaAccessStatus('screen') as ScreenshotPermissionStatus,
     getSources: (options) => desktopCapturer.getSources(options),
