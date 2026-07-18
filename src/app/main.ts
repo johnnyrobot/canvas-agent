@@ -86,13 +86,29 @@ app.on('web-contents-created', (_event, contents) => {
  * bundled read-only seed DB. In dev (not packaged) this returns `undefined`,
  * and `createAppApi`'s `opts.catalog ?? createCatalogClient()` falls back to
  * the PATH default unchanged.
+ *
+ * Catalog enrichment is documented as NEVER a hard runtime dependency
+ * (`app-api.ts`'s `catalog` option: `catalogAvailable()` degrades to `false`
+ * rather than throwing). `ensureCatalogHome` does a synchronous ~900 MB
+ * `copyFileSync` of the seed on first launch, so if the seed isn't staged at
+ * the expected path, or the copy fails (disk full, interrupted, permissions),
+ * it throws synchronously — and an uncaught throw here would propagate out of
+ * `createRuntimeApi()` into `buildApi`'s catch, degrading the ENTIRE app (dead
+ * chat/build/remediate), not just the catalog panel. Guard against that: any
+ * failure here logs a warning and returns `undefined`, so only catalog
+ * enrichment degrades, exactly like every other bundled-resource resolution.
  */
 function packagedCatalogClient() {
   if (!app.isPackaged || !process.resourcesPath) return undefined;
-  const command = resolveSidecarCommand('laccd-courses-pp-cli');
-  const seedDbPath = path.join(process.resourcesPath, 'sidecars', 'laccd-courses-pp-cli', 'seed', 'data.db');
-  const home = ensureCatalogHome({ seedDbPath, homeDir: resolveAppPaths().catalogHomeDir });
-  return createCatalogClient({ command, home });
+  try {
+    const command = resolveSidecarCommand('laccd-courses-pp-cli');
+    const seedDbPath = path.join(process.resourcesPath, 'sidecars', 'laccd-courses-pp-cli', 'seed', 'data.db');
+    const home = ensureCatalogHome({ seedDbPath, homeDir: resolveAppPaths().catalogHomeDir });
+    return createCatalogClient({ command, home });
+  } catch (err) {
+    console.warn('[catalog] bundled catalog unavailable; enrichment disabled:', err);
+    return undefined;
+  }
 }
 
 function createRuntimeApi() {
