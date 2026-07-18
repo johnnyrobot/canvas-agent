@@ -43,7 +43,9 @@ test('searchCourses parses real SLO-shaped results, incl. id from _links.self.hr
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.file, 'laccd-courses-pp-cli');
-  assert.deepEqual(calls[0]!.args, ['courses', 'search', '--query', 'accounting', '--agent']);
+  assert.deepEqual(calls[0]!.args, [
+    'search', 'accounting', '--type', 'courses', '--limit', '25', '--agent', '--data-source', 'local',
+  ]);
 
   assert.equal(results.length, 2);
   // Both fixture rows are the same course code at different colleges — id comes
@@ -60,7 +62,9 @@ test('searchCourses passes the raw query through argv, never through a shell str
 
   await client.searchCourses('accounting; rm -rf /');
 
-  assert.deepEqual(calls[0]!.args, ['courses', 'search', '--query', 'accounting; rm -rf /', '--agent']);
+  assert.deepEqual(calls[0]!.args, [
+    'search', 'accounting; rm -rf /', '--type', 'courses', '--limit', '25', '--agent', '--data-source', 'local',
+  ]);
 });
 
 test('searchCourses skips a row with no parseable id rather than surfacing junk', async () => {
@@ -96,7 +100,7 @@ test('getCourse parses nested fullCourseInfo: real SLOs, objectives (ordered), u
 
   const course = await client.getCourse(40830);
 
-  assert.deepEqual(calls[0]!.args, ['courses', 'get', '40830', '--agent']);
+  assert.deepEqual(calls[0]!.args, ['courses', 'get', '40830', '--agent', '--data-source', 'auto']);
   assert.equal(course.id, 40830);
   assert.equal(course.code, 'ACCTG001');
   assert.equal(course.title, 'Introductory Accounting I');
@@ -323,4 +327,19 @@ test('getCourse rejects invalid ids before anything reaches the CLI argv', async
     );
   }
   assert.equal(calls.length, 0, 'no CLI invocation for invalid ids');
+});
+
+test('a configured home prefixes --home on every invocation (search, get, probe)', async () => {
+  const { execFile, calls } = fakeExecFile((_f, args) =>
+    args.includes('agent-context') ? ok('{"ok":true}') : ok('{"meta":{"source":"local"},"results":[]}'),
+  );
+  const client = createCatalogClient({ execFile, home: '/u/catalog-home' });
+  await client.available();
+  await client.searchCourses('x');
+  // The stub envelope has no resolvable course, so parsing rejects — we only
+  // assert the argv prefix here, which the fake records before parsing.
+  await client.getCourse(5).catch(() => {});
+  assert.deepEqual(calls[0]!.args.slice(0, 2), ['--home', '/u/catalog-home']); // agent-context probe
+  assert.deepEqual(calls[1]!.args.slice(0, 2), ['--home', '/u/catalog-home']); // search
+  assert.deepEqual(calls[2]!.args.slice(0, 2), ['--home', '/u/catalog-home']); // get
 });

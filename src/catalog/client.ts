@@ -75,6 +75,8 @@ const defaultExecFile: ExecFileLike = (file, args, options) =>
 export interface CatalogClientOptions {
   /** Path (or PATH-resolvable name) of the CLI binary. Default: `'laccd-courses-pp-cli'`. */
   command?: string;
+  /** `--home` root for the bundled/copied mirror. Prefixed on every call when set. */
+  home?: string;
   /** Transport. Defaults to a promisified `child_process.execFile`; tests inject a recording fake. */
   execFile?: ExecFileLike;
   /** Per-invocation timeout (ms). A hung/throttled CLI must not hang the caller. Default 15s. */
@@ -94,18 +96,22 @@ const DEFAULT_COMMAND = 'laccd-courses-pp-cli';
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** Search/get responses embed a large `fullCourseInfo` JSON string per row; give stdout room. */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+/** Cap on rows the local full-text `search` returns per query. */
+const SEARCH_LIMIT = 25;
 
 /** Build a read-only catalog client over an injectable `execFile`. */
 export function createCatalogClient(opts: CatalogClientOptions = {}): CatalogClient {
   const command = opts.command ?? DEFAULT_COMMAND;
   const run = opts.execFile ?? defaultExecFile;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const homeArgs = opts.home ? (['--home', opts.home] as const) : ([] as const);
 
   /** Run the CLI with `--agent` (JSON, non-interactive) and parse stdout as JSON. */
-  async function invoke(args: readonly string[]): Promise<unknown> {
+  async function invoke(args: readonly string[], dataSource: 'local' | 'auto'): Promise<unknown> {
     let stdout: string;
     try {
-      const res = await run(command, [...args, '--agent'], { timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
+      const full = [...homeArgs, ...args, '--agent', '--data-source', dataSource];
+      const res = await run(command, full, { timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
       stdout = res.stdout;
     } catch (err) {
       throw toCatalogError(err, timeoutMs);
@@ -125,7 +131,7 @@ export function createCatalogClient(opts: CatalogClientOptions = {}): CatalogCli
       try {
         // A cheap, side-effect-free probe: emits the CLI's own capability
         // description and exits 0 iff the binary runs at all.
-        await run(command, ['agent-context'], { timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
+        await run(command, [...homeArgs, 'agent-context'], { timeoutMs, maxBuffer: MAX_BUFFER_BYTES });
         return true;
       } catch {
         return false;
@@ -133,7 +139,9 @@ export function createCatalogClient(opts: CatalogClientOptions = {}): CatalogCli
     },
 
     async searchCourses(query: string): Promise<CatalogCourseSummary[]> {
-      const data = await invoke(['courses', 'search', '--query', query]);
+      // Full-text `search` over the local mirror — `courses search --query` does NOT
+      // filter in local mode (it dumps all rows); the top-level `search` does.
+      const data = await invoke(['search', query, '--type', 'courses', '--limit', String(SEARCH_LIMIT)], 'local');
       return extractResults(data)
         .map(toSummary)
         .filter((s): s is CatalogCourseSummary => s !== null);
@@ -144,7 +152,8 @@ export function createCatalogClient(opts: CatalogClientOptions = {}): CatalogCli
       if (!Number.isSafeInteger(id) || id <= 0) {
         throw new CatalogError('parse', `invalid catalog course id: ${String(id)}`);
       }
-      const data = await invoke(['courses', 'get', String(id)]);
+      // `auto` = live with local fallback: current SLOs when online, seed when offline.
+      const data = await invoke(['courses', 'get', String(id)], 'auto');
       const raw = extractSingle(data);
       if (!raw) {
         throw new CatalogError('notFound', `Course ${id} was not found in the catalog.`);
