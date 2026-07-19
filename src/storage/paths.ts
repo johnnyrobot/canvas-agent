@@ -22,6 +22,7 @@ function deriveFrom(dataDir: string): AppPaths {
     uploadsDir: join(dataDir, 'uploads'),
     exportsDir: join(dataDir, 'exports'),
     modelsDir: join(dataDir, 'docling-models'),
+    catalogHomeDir: join(dataDir, 'catalog-home'),
   };
 }
 
@@ -40,6 +41,7 @@ export function resolveAppPaths(override?: Partial<AppPaths>): AppPaths {
     uploadsDir: override?.uploadsDir ? resolve(override.uploadsDir) : derived.uploadsDir,
     exportsDir: override?.exportsDir ? resolve(override.exportsDir) : derived.exportsDir,
     modelsDir: override?.modelsDir ? resolve(override.modelsDir) : derived.modelsDir,
+    catalogHomeDir: override?.catalogHomeDir ? resolve(override.catalogHomeDir) : derived.catalogHomeDir,
   };
   return merged;
 }
