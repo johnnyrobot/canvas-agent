@@ -34,8 +34,14 @@ The large binaries are not committed (see `resources/STAGING.md`):
 
 ```sh
 npm run stage:browsers                                   # Chromium → resources/ms-playwright
+
+# The course-catalog seed (~900 MB). SLOW (~1h+) and network-bound — start it first.
+CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" \
+  node scripts/build-catalog-seed.mjs                    # seed → resources/sidecars/laccd-courses-pp-cli/seed/
+
 OLLAMA_BIN="$(command -v ollama)" \
   DOCLING_SERVE_DIR="/path/to/docling-serve"  \
+  CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" \
   npm run stage:sidecars                                 # sidecars → resources/sidecars/*
 npm run pre-release -- --strict                          # asserts paths exist, payloads + sidecar launchers staged
 ```
@@ -46,6 +52,19 @@ npm run pre-release -- --strict                          # asserts paths exist, 
 > sidecar from the fixed leaf `<Resources>/sidecars/docling-serve/docling-serve`;
 > `stage:sidecars` asserts the launcher lands there and `pre-release --strict`
 > re-checks it, so a mis-stage fails before electron-builder ever runs.
+
+> **The catalog seed must be built BEFORE `stage:sidecars`** — staging refuses to
+> stage the CLI without a seed beside it, because a seedless binary yields an app
+> whose offline search silently returns nothing. `CATALOG_CLI_BIN` may be an
+> ad-hoc/linker-signed local build: `afterPack.cjs` re-signs it with Developer ID
+> along with every other nested Mach-O, so no pre-signed binary is needed.
+>
+> The seed build gates on `coverage --data-source live` reporting **zero missing
+> courses district-wide**, and retries, because the district API has been seen to
+> cut off mid-mirror (http2 GOAWAY) while the CLI still exits 0. If it dies, resume
+> rather than restart — the sync is incremental and the script prints the home:
+> `CATALOG_SEED_HOME=<printed path> CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs`.
+> `pre-release --strict` additionally rejects a seed under 700 MB as partial.
 
 ## 4. Build, sign & notarize the DMG
 
@@ -110,6 +129,12 @@ RUN_PACKAGED_SMOKE=1 CANVAS_AGENT_APP="release/mac-arm64/Canvas Agent.app" \
 Asserts: the preload bridge loads in the packaged renderer, `health()` resolves
 over IPC, and a build turn's emitted HTML is gated by the **bundled** Chromium
 auditor (the `process.resourcesPath → ms-playwright` resolution works end to end).
+
+Also asserts the **bundled catalog**: the CLI sits at the resolver leaf, the seed
+is present and whole, first launch copies it into `<dataDir>/catalog-home/`, local
+search returns rows from that seed, and `catalogGet` serves `source: 'live'`. This
+one is load-bearing because the catalog wiring is deliberately fail-safe — a broken
+bundle would otherwise ship looking perfectly healthy, just with an empty catalog.
 
 ---
 
