@@ -77,6 +77,13 @@
         ]
       },
       {
+        "from": "resources/sidecars/laccd-courses-pp-cli",
+        "to": "sidecars/laccd-courses-pp-cli",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "THIRD-PARTY-NOTICES.md",
         "to": "THIRD-PARTY-NOTICES.md"
       }

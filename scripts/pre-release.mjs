@@ -93,6 +93,17 @@ for (const res of build.extraResources ?? []) {
       check(runnerOk, 'staged', 'ollama runner present & executable: sidecars/ollama/llama-server',
         runnerOk ? 'present' : 'MISSING/not-executable — `ollama serve` spawns llama-server as a sibling; stage the full runner set');
     }
+    // The catalog CLI is useless without its course seed: the binary spawns fine and
+    // every offline search silently returns zero rows. A bare launcher check would
+    // pass that. Assert the seed is present and plausibly whole (it is ~898 MB).
+    if (name === 'laccd-courses-pp-cli') {
+      const seed = path.join(from, 'seed/data.db');
+      const seedMb = existsSync(seed) && statSync(seed).isFile() ? statSync(seed).size / 1048576 : 0;
+      const seedOk = seedMb > 100;
+      check(seedOk, 'staged', 'catalog seed present: sidecars/laccd-courses-pp-cli/seed/data.db',
+        seedOk ? `present (${seedMb.toFixed(0)} MB)`
+          : `MISSING/truncated (${seedMb.toFixed(0)} MB) — offline catalog search would return nothing; run \`CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs\``);
+    }
   }
 }
 
