@@ -12,6 +12,10 @@
  *   DOCLING_SERVE_DIR   the docling-serve onedir app dir       → resources/sidecars/docling-serve/
  *                       (its IMMEDIATE child must be the `docling-serve` launcher,
  *                        e.g. PyInstaller's `.../dist/docling-serve`, NOT the parent `dist`)
+ *   CATALOG_CLI_BIN     path to the `laccd-courses-pp-cli` arm64 binary
+ *                                                             → resources/sidecars/laccd-courses-pp-cli/
+ *                       (single self-contained binary; its 898 MB course seed must
+ *                        already be built — `node scripts/build-catalog-seed.mjs`)
  *
  * The runtime (`resolveSidecarCommand`) spawns each sidecar from the fixed leaf
  * path `<resources>/sidecars/<name>/<name>`, so staging MUST land the launcher
@@ -21,13 +25,27 @@
  * Chromium for the audit engine is staged separately: `npm run stage:browsers`.
  * After staging, `npm run pre-release -- --strict` verifies everything is present.
  */
-import { existsSync, mkdirSync, copyFileSync, cpSync, realpathSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, cpSync, realpathSync, readdirSync, rmSync, chmodSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ollamaBin = process.env.OLLAMA_BIN;
 const doclingDir = process.env.DOCLING_SERVE_DIR;
+const catalogBin = process.env.CATALOG_CLI_BIN;
+
+/** True when `file` is a thin arm64 Mach-O (the only arch this app ships). */
+function isArm64MachO(file) {
+  const head = Buffer.alloc(8);
+  const fd = openSync(file, 'r');
+  try {
+    if (readSync(fd, head, 0, 8, 0) < 8) return false;
+  } finally {
+    closeSync(fd);
+  }
+  // 64-bit little-endian Mach-O: magic 0xfeedfacf, cputype CPU_TYPE_ARM64 (0x0100000c).
+  return head.readUInt32LE(0) === 0xfeedfacf && head.readUInt32LE(4) === 0x0100000c;
+}
 
 let staged = 0;
 const missing = [];
@@ -84,6 +102,43 @@ if (doclingDir && existsSync(doclingDir)) {
   staged += 1;
 } else {
   missing.push('DOCLING_SERVE_DIR — the docling-serve onedir app dir (immediate child = `docling-serve` launcher)');
+}
+
+if (catalogBin && existsSync(catalogBin)) {
+  const dst = path.join(ROOT, 'resources/sidecars/laccd-courses-pp-cli');
+  mkdirSync(dst, { recursive: true });
+  const realCatalog = realpathSync(catalogBin);
+  // Validate the SOURCE before touching the staged leaf. Copying first and checking
+  // after would leave the rejected binary in place: `pre-release --strict` only
+  // checks that the leaf is executable, so a later `npm run package` would happily
+  // ship the x86_64/universal/non-Mach-O binary this run just rejected.
+  if (!isArm64MachO(realCatalog)) {
+    console.error(`✗ CATALOG_CLI_BIN is not a thin arm64 Mach-O: ${realCatalog}`);
+    console.error('  This app ships arm64-only — point CATALOG_CLI_BIN at an arm64 build.');
+    console.error('  (The previously staged binary, if any, was left untouched.)');
+    process.exit(1);
+  }
+  // Single self-contained binary (unlike ollama/docling): copy it to the resolver leaf
+  // name. `afterPack.cjs` re-signs it with Developer ID as part of the nested-Mach-O pass,
+  // so an ad-hoc/linker-signed local build is a fine input here.
+  const leaf = path.join(dst, 'laccd-courses-pp-cli');
+  copyFileSync(realCatalog, leaf);
+  chmodSync(leaf, 0o755);
+  // The binary without its seed is a silent failure: the app starts, catalog search
+  // resolves, and every offline query returns zero rows. Build it first:
+  //   CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs
+  const seed = path.join(dst, 'seed/data.db');
+  if (!existsSync(seed)) {
+    console.error('✗ staged the catalog CLI, but there is no seed at sidecars/laccd-courses-pp-cli/seed/data.db.');
+    console.error('  Without it the packaged app ships an EMPTY catalog — offline search returns nothing.');
+    console.error('  Build it first: CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs');
+    process.exit(1);
+  }
+  const seedMb = (statSync(seed).size / 1048576).toFixed(0);
+  console.log(`✓ staged catalog CLI from ${realCatalog} → sidecars/laccd-courses-pp-cli/ (binary + ${seedMb} MB seed)`);
+  staged += 1;
+} else {
+  missing.push('CATALOG_CLI_BIN — path to the `laccd-courses-pp-cli` arm64 binary (e.g. "$(command -v laccd-courses-pp-cli)")');
 }
 
 if (missing.length > 0) {

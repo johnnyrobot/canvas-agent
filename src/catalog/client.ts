@@ -9,7 +9,7 @@
  *   - always spawns via an ARG ARRAY (`execFile`), never a shell string, so
  *     user-typed search text can never be interpreted as shell syntax;
  *   - never asks the CLI to write anything (no `sync`, `import`, `config set`,
- *     etc. — only `agent-context`, `courses search`, and `courses get`);
+ *     etc. — only `agent-context`, `search`, and `courses get`);
  *   - times out each call so a hung/throttled upstream can't hang the caller;
  *   - maps every failure (spawn error, non-zero exit, malformed JSON) to a
  *     typed `CatalogError` instead of letting a raw `Error` (or a Buffer, or

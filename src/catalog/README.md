@@ -1,30 +1,71 @@
-# catalog — LACCD eLumen course-catalog enrichment (OPTIONAL)
+# catalog — LACCD eLumen course-catalog enrichment (BUNDLED)
 
-A single, dependency-free module that shells out to the locally installed
-`laccd-courses-pp-cli` binary and returns real course SLOs, objectives, units,
-and descriptions from the public LACCD eLumen catalog — replacing placeholder
-text with the actual approved course outline. It is consumed by the app's
-catalog IPC handlers (`src/app/ipc.ts`).
+A single, dependency-free module that shells out to the `laccd-courses-pp-cli`
+binary and returns real course SLOs, objectives, units, and descriptions from
+the public LACCD eLumen catalog — replacing placeholder text with the actual
+approved course outline. It is consumed by the app's catalog IPC handlers
+(`src/app/ipc.ts`).
 
 | Export | Kind | Contract type |
 | --- | --- | --- |
-| `createCatalogClient({ command?, execFile?, timeoutMs? })` | DI factory | → `CatalogClient` |
+| `createCatalogClient({ command?, home?, execFile?, timeoutMs? })` | DI factory | → `CatalogClient` |
 | `CatalogError` | typed error class (`.kind`) | — |
 
 All are re-exported from the module; there is no default-wired singleton (unlike
-`src/canvas`) because the CLI's install location varies by machine — callers
-resolve/inject a `command` (or rely on the `laccd-courses-pp-cli` PATH default).
+`src/canvas`) because the binary's location differs between dev and a packaged
+app — callers resolve/inject a `command` (or rely on the PATH default).
 
-## OPTIONAL enrichment — this is not a required dependency
+## Bundled in the packaged app; optional in dev
 
-Everything in this module degrades honestly when the CLI isn't installed:
+**Packaged:** the arm64 binary and a ~900 MB course seed ship inside the `.app`
+(`sidecars/laccd-courses-pp-cli/`). `src/app/main.ts` resolves the binary via
+`resolveSidecarCommand`, copies the seed once into a writable home
+(`ensureCatalogHome` → `<dataDir>/catalog-home/data/data.db`, atomic temp+rename),
+and injects a client bound to that home. So **local search works fully offline,
+out of the box** — that is what the 900 MB buys.
+
+**Dev:** nothing is bundled. The module falls back to a `laccd-courses-pp-cli`
+PATH lookup, and if it isn't installed the app behaves exactly as it did before
+this module existed (placeholder SLOs).
+
+Either way it degrades honestly:
 
 - `available()` never throws. It resolves `false` when the binary can't be
   resolved or run, so callers (the IPC layer, the UI) can show/hide the
   enrichment feature instead of surfacing a confusing error.
-- There is no bundled binary and no install step here — `laccd-courses-pp-cli`
-  is an independent tool the user installs separately. If it's absent, the app
-  works exactly as it did before this module existed (placeholder SLOs).
+- The packaged wiring is **fail-safe**: any resolution/copy failure logs a
+  warning and yields `undefined`, degrading only the catalog panel rather than
+  downing the whole app. The trade-off is that a bundling mistake degrades
+  *silently* — which is why `e2e/packaged-smoke.test.ts` asserts
+  `catalogAvailable() === true` against the real `.app`.
+
+## Why local search + live detail (measured, not assumed)
+
+- **Search is LOCAL** (`--data-source local`). Live search measured **~17s** even
+  tenant-scoped — unusable interactively. Local FTS over the seed is instant.
+- **Detail is LIVE** (`--data-source auto`, live with local fallback). A live GET
+  measured **2.4s**, and SLOs must be current — a stale mirror would hand an
+  instructor outdated outcomes. `CatalogCourse.source` reports which path served
+  it, and the packaged smoke fails if a GET silently degrades to `'mirror'`.
+
+Note the CLI has two different search surfaces: the **top-level `search`**
+command filters properly, while `courses search --query` does **not** filter
+under `--data-source local` (it dumps all ~9.7k rows). This module uses the
+top-level one.
+
+## Seed provenance
+
+The bundled seed is built by `scripts/build-catalog-seed.mjs` (see
+`resources/STAGING.md`): full mirror sync → `scripts/trim-catalog-seed.py`
+(empties the redundant `resources.data` blobs for courses; keeps `courses.data`,
+which local search reads for display) → self-verify through the real CLI.
+
+The build **gates on `coverage --data-source live` reporting zero missing
+courses district-wide**. This matters: the district API has been observed to cut
+off mid-mirror (http2 GOAWAY), and the CLI's default exit policy downgrades that
+to a warning with exit 0. A truncated mirror still searches perfectly well while
+silently missing whole colleges, so "does search return rows?" cannot catch it —
+only the coverage gate can.
 
 ## This makes real, user-initiated network calls — same category as Canvas import
 
@@ -51,15 +92,19 @@ interface CatalogClient {
 }
 ```
 
+Every invocation is prefixed with `--home <dir>` when the factory was given a
+`home` (always so in the packaged app) and suffixed with `--agent --data-source
+<local|auto>`.
+
 - `available()` — resolvable binary AND a lightweight `agent-context` probe
   exits 0. Never throws.
-- `searchCourses(query)` — runs `laccd-courses-pp-cli courses search --query
-  <q> --agent`, parses the JSON envelope (`{ meta, results: [...] }`), and maps
-  each row to a `CatalogCourseSummary` (`id`, `code`, `title`, `college?`). The
-  numeric `id` is parsed from `_links.self.href` (e.g.
-  `"/public/courses/38409"` → `38409`); a row with no parseable id is skipped
-  rather than surfaced as junk.
-- `getCourse(id)` — runs `laccd-courses-pp-cli courses get <id> --agent` and
+- `searchCourses(query)` — runs `search <q> --type courses --limit 25
+  --agent --data-source local`, parses the JSON envelope
+  (`{ meta, results: [...] }`), and maps each row to a `CatalogCourseSummary`
+  (`id`, `code`, `title`, `college?`). The numeric `id` is parsed from
+  `_links.self.href` (e.g. `"/public/courses/38409"` → `38409`); a row with no
+  parseable id is skipped rather than surfaced as junk.
+- `getCourse(id)` — runs `courses get <id> --agent --data-source auto` and
   parses the single result's nested `fullCourseInfo` field, which the CLI
   returns as a **JSON-encoded string** (not a nested object): SLOs are
   `fullCourseInfo.outcomes` filtered to `outcomeLevel === "CSLO"`, objectives
@@ -72,10 +117,14 @@ interface CatalogClient {
 
 ## READ-ONLY guarantee
 
-This adapter only ever invokes `agent-context`, `courses search`, and
-`courses get` — the CLI's own read-only, `mcp:read-only: true`-annotated
-commands. There is no code path that runs `sync`, `import`, `config set`, or
-any other CLI subcommand that could write local state or upstream data.
+This adapter only ever invokes `agent-context`, `search`, and `courses get` —
+the CLI's own read-only, `mcp:read-only: true`-annotated commands. There is no
+code path that runs `sync`, `import`, `config set`, or any other CLI subcommand
+that could write local state or upstream data.
+
+The seed build **does** run `sync`, but that is a release-time build script
+(`scripts/build-catalog-seed.mjs`) run by a human on the build machine — never
+by the app at runtime. The shipped app only ever reads.
 
 ## Process safety
 
@@ -109,14 +158,19 @@ correctly.
 
 ## Dependency injection / testability
 
-`createCatalogClient({ command, execFile, timeoutMs })`:
+`createCatalogClient({ command, home, execFile, timeoutMs })`:
 
 - `execFile` — defaults to a promisified `child_process.execFile`; tests
   inject a fake that records every call (file + args) and returns/rejects
   canned results shaped exactly like Node's real `execFile` error (`code`,
   `killed`, `stdout`, `stderr`). **No real process is ever spawned in tests.**
 - `command` — defaults to `'laccd-courses-pp-cli'` (resolved via `PATH`);
-  callers with a known absolute install path can pass it directly.
+  callers with a known absolute install path can pass it directly. The packaged
+  app passes the bundled sidecar path.
+- `home` — `--home` root, prefixed on **every** call when set. The packaged app
+  passes `<dataDir>/catalog-home`. Required there because the CLI opens its DB
+  **read-write**, so it cannot run against the read-only app bundle — hence the
+  first-run copy. Unset in dev, where the CLI uses its own default home.
 - `timeoutMs` — default 15000.
 
 ## Tests

@@ -31,9 +31,18 @@ function deriveFrom(dataDir: string): AppPaths {
  * layout. An `override` merges field-by-field: overriding `dataDir` re-bases
  * the derived paths under it, while an explicit `dbPath`/`uploadsDir`/
  * `exportsDir` wins over the derived value. All returned paths are absolute.
+ *
+ * `CANVAS_AGENT_DATA_DIR` re-bases the whole layout when set, sitting between
+ * the explicit argument (which still wins) and the macOS default. Production
+ * code calls this with no argument, so that env var is the only way to point a
+ * LAUNCHED app at a throwaway data root — which is what the packaged smoke needs
+ * to prove first-run behaviour (e.g. the catalog seed copy) without reading, or
+ * damaging, the real user's data. An empty value is ignored rather than being
+ * resolved to the process cwd.
  */
 export function resolveAppPaths(override?: Partial<AppPaths>): AppPaths {
-  const dataDir = resolve(override?.dataDir ?? defaultDataDir());
+  const fromEnv = process.env.CANVAS_AGENT_DATA_DIR?.trim();
+  const dataDir = resolve(override?.dataDir ?? (fromEnv ? fromEnv : undefined) ?? defaultDataDir());
   const derived = deriveFrom(dataDir);
   const merged: AppPaths = {
     dataDir,

@@ -11,6 +11,7 @@ directory structure + this doc are committed so the layout is self-describing an
 | `ms-playwright/`             | `ms-playwright/`                      | `npm run stage:browsers` |
 | `sidecars/ollama/`           | `sidecars/ollama/`                    | `npm run stage:sidecars` |
 | `sidecars/docling-serve/`    | `sidecars/docling-serve/`             | `npm run stage:sidecars` |
+| `sidecars/laccd-courses-pp-cli/` | `sidecars/laccd-courses-pp-cli/`  | `node scripts/build-catalog-seed.mjs` (seed) + `npm run stage:sidecars` (binary) |
 
 ## How the runtime finds these
 
@@ -18,13 +19,18 @@ directory structure + this doc are committed so the layout is self-describing an
   (`resolveBundledBrowsersPath`) sets `PLAYWRIGHT_BROWSERS_PATH` to
   `<Resources>/ms-playwright` at launch, so `chromium.launch()` resolves the
   bundled browser instead of a dev-only `~/.cache/ms-playwright`.
-- **Sidecars (Ollama, docling-serve):** `resolveSidecarCommand`
+- **Sidecars (Ollama, docling-serve, laccd-courses-pp-cli):** `resolveSidecarCommand`
   (`src/runtime/bundled-resources.ts`) spawns each from the fixed leaf
   `<Resources>/sidecars/<name>/<name>` (so `sidecars/ollama/ollama`,
   `sidecars/docling-serve/docling-serve`). A Finder-launched `.app` has a minimal
   PATH, so the bundled absolute path is required; the resolver falls back to a
   bare-PATH lookup only in dev. `stage:sidecars` + `pre-release --strict` both
   assert the launcher is at that leaf.
+- **Catalog seed:** the bundle is read-only, but the CLI needs a writable store, so
+  the app copies `sidecars/laccd-courses-pp-cli/seed/data.db` into
+  `<userData>/catalog-home/data/` on first run (`ensureCatalogHome`, atomically via
+  temp+rename). Both `stage:sidecars` and `pre-release --strict` assert the seed is
+  present — a binary without it yields a silent, always-empty offline search.
 
 ## Staging before a release build
 
@@ -32,17 +38,29 @@ directory structure + this doc are committed so the layout is self-describing an
 # 1. Chromium for the audit engine (downloads the pinned revision into resources/)
 npm run stage:browsers
 
-# 2. The on-device sidecar binaries (point at your local installs).
+# 2. The course-catalog seed (~900 MB). SLOW (~1h+) and the district API is flaky
+#    over a full mirror — the script syncs with --strict, retries, and refuses to
+#    ship unless `coverage --data-source live` reports 0 missing courses district-
+#    wide. Do this before staging: stage:sidecars won't stage a binary with no seed.
+CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" \
+node scripts/build-catalog-seed.mjs
+
+#    If a run dies, RESUME it (the sync is incremental) — the script prints the home:
+# CATALOG_SEED_HOME=~/.cache/canvas-agent/catalog-seed-home \
+# CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" node scripts/build-catalog-seed.mjs
+
+# 3. The on-device sidecar binaries (point at your local installs).
 #    DOCLING_SERVE_DIR = the onedir app dir whose immediate child is the
 #    `docling-serve` launcher (e.g. .../dist/docling-serve), NOT the parent `dist`.
 OLLAMA_BIN="$(command -v ollama)" \
 DOCLING_SERVE_DIR="/path/to/docling-serve" \
+CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" \
 npm run stage:sidecars
 
-# 3. Verify the build config is coherent and every payload is present
+# 4. Verify the build config is coherent and every payload is present
 npm run pre-release -- --strict
 
-# 4. Package (the package script re-runs the strict pre-release gate first)
+# 5. Package (the package script re-runs the strict pre-release gate first)
 npm run package
 ```
 
