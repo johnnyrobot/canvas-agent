@@ -136,6 +136,12 @@ search returns rows from that seed, and `catalogGet` serves `source: 'live'`. Th
 one is load-bearing because the catalog wiring is deliberately fail-safe — a broken
 bundle would otherwise ship looking perfectly healthy, just with an empty catalog.
 
+> The catalog case launches the app against a **throwaway data root**
+> (`CANVAS_AGENT_DATA_DIR` → a temp dir, removed afterwards), so it genuinely
+> exercises FIRST-RUN seed copying and never reads or disturbs your own Canvas
+> Agent data. Against a real home the copy is skipped by design, so the assertion
+> would prove nothing about the build under test.
+
 ---
 
 A tag is GREEN only when **all five** steps pass on arm64. Steps 2 + 5 are the

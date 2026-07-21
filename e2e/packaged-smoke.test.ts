@@ -23,7 +23,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, statSync, readdirSync } from 'node:fs';
+import { existsSync, statSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { _electron as electron } from 'playwright';
 import { resolveAppPaths } from '../src/storage/paths.js';
@@ -115,7 +116,10 @@ test('packaged .app bundles the catalog CLI + seed, copies the home, and serves 
   // 1. Bundle layout — the exact leaf `resolveSidecarCommand` spawns, plus the seed
   //    beside it. Checked from disk (not via the app) so a staging miss is reported
   //    as a staging miss, rather than surfacing as a confusing runtime degradation.
-  const resources = path.join(appPathEnv as string, 'Contents', 'Resources');
+  //    Derived from the EXECUTABLE, not from CANVAS_AGENT_APP: `resolveExecutable`
+  //    also accepts a direct executable path, and `<executable>/Contents/Resources`
+  //    would be nonsense for that input.
+  const resources = path.resolve(path.dirname(executablePath as string), '..', 'Resources');
   const cliPath = path.join(resources, 'sidecars', 'laccd-courses-pp-cli', 'laccd-courses-pp-cli');
   const seedPath = path.join(resources, 'sidecars', 'laccd-courses-pp-cli', 'seed', 'data.db');
   assert.ok(existsSync(cliPath), `bundled catalog CLI must exist at ${cliPath}`);
@@ -127,7 +131,17 @@ test('packaged .app bundles the catalog CLI + seed, copies the home, and serves 
   const seedMb = statSync(seedPath).size / 1048576;
   assert.ok(seedMb > 700, `bundled seed looks partial: ${seedMb.toFixed(0)} MB (expected ~900 MB+)`);
 
-  const app = await electron.launch({ executablePath: executablePath as string, args: [] });
+  // A THROWAWAY data root, so this proves FIRST-RUN behaviour. Against the real
+  // home, `ensureCatalogHome` (correctly) leaves an existing DB alone — so the copy
+  // assertion below would either pass without the copy ever running, or fail merely
+  // because an older seed is still sitting there. Neither says anything about this
+  // build. It also keeps a release smoke from touching real user data.
+  const dataRoot = mkdtempSync(path.join(tmpdir(), 'canvas-agent-smoke-'));
+  const app = await electron.launch({
+    executablePath: executablePath as string,
+    args: [],
+    env: { ...process.env, CANVAS_AGENT_DATA_DIR: dataRoot },
+  });
   try {
     const win = await app.firstWindow();
     await win.waitForSelector('#app', { timeout: 30_000 });
@@ -142,8 +156,9 @@ test('packaged .app bundles the catalog CLI + seed, copies the home, and serves 
 
     // 3. First run copies the read-only bundled seed into the writable home. The
     //    bundle itself is read-only and the CLI opens its DB read-write, so without
-    //    this copy every query fails.
-    const homeDb = path.join(resolveAppPaths().catalogHomeDir, 'data', 'data.db');
+    //    this copy every query fails. `dataRoot` was empty a moment ago, so this
+    //    file existing means THIS launch created it.
+    const homeDb = path.join(resolveAppPaths({ dataDir: dataRoot }).catalogHomeDir, 'data', 'data.db');
     assert.ok(existsSync(homeDb), `first launch must copy the seed to ${homeDb}`);
     assert.ok(
       Math.abs(statSync(homeDb).size - statSync(seedPath).size) < 1024,
@@ -172,5 +187,7 @@ test('packaged .app bundles the catalog CLI + seed, copies the home, and serves 
     assert.ok(Array.isArray(course.slos), 'a fetched course carries an SLO array');
   } finally {
     await app.close();
+    // The throwaway root holds a full ~937 MB copy of the seed — don't leave it behind.
+    rmSync(dataRoot, { recursive: true, force: true });
   }
 });

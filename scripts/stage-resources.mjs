@@ -108,17 +108,22 @@ if (catalogBin && existsSync(catalogBin)) {
   const dst = path.join(ROOT, 'resources/sidecars/laccd-courses-pp-cli');
   mkdirSync(dst, { recursive: true });
   const realCatalog = realpathSync(catalogBin);
+  // Validate the SOURCE before touching the staged leaf. Copying first and checking
+  // after would leave the rejected binary in place: `pre-release --strict` only
+  // checks that the leaf is executable, so a later `npm run package` would happily
+  // ship the x86_64/universal/non-Mach-O binary this run just rejected.
+  if (!isArm64MachO(realCatalog)) {
+    console.error(`✗ CATALOG_CLI_BIN is not a thin arm64 Mach-O: ${realCatalog}`);
+    console.error('  This app ships arm64-only — point CATALOG_CLI_BIN at an arm64 build.');
+    console.error('  (The previously staged binary, if any, was left untouched.)');
+    process.exit(1);
+  }
   // Single self-contained binary (unlike ollama/docling): copy it to the resolver leaf
   // name. `afterPack.cjs` re-signs it with Developer ID as part of the nested-Mach-O pass,
   // so an ad-hoc/linker-signed local build is a fine input here.
   const leaf = path.join(dst, 'laccd-courses-pp-cli');
   copyFileSync(realCatalog, leaf);
   chmodSync(leaf, 0o755);
-  if (!isArm64MachO(leaf)) {
-    console.error(`✗ staged catalog CLI from ${realCatalog}, but it is not a thin arm64 Mach-O.`);
-    console.error('  This app ships arm64-only — point CATALOG_CLI_BIN at an arm64 build.');
-    process.exit(1);
-  }
   // The binary without its seed is a silent failure: the app starts, catalog search
   // resolves, and every offline query returns zero rows. Build it first:
   //   CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs

@@ -24,9 +24,18 @@ tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='ta
 if 'resources' not in tables:
     raise SystemExit(f"refusing to trim: no `resources` table in {db}")
 
+total = c.execute("SELECT count(*) FROM resources WHERE resource_type='courses'").fetchone()[0]
+if total == 0:
+    raise SystemExit(f"refusing to trim: no course rows in {db} -- wrong store?")
+
 before = c.execute("SELECT count(*) FROM resources WHERE resource_type='courses' AND data != '{}'").fetchone()[0]
 if before == 0:
-    raise SystemExit("refusing to trim: no untrimmed course rows -- wrong store, or already trimmed")
+    # Already trimmed: SUCCEED, don't bail. A build that trimmed and then failed
+    # later (self-verify, or the ~900 MB copy) must stay resumable via
+    # CATALOG_SEED_HOME -- exiting non-zero here would strand it permanently.
+    print(f"already trimmed ({total} course resource rows) -- nothing to do")
+    c.close()
+    raise SystemExit(0)
 
 c.execute("UPDATE resources SET data='{}' WHERE resource_type='courses'")
 c.commit()
