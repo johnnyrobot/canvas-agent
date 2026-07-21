@@ -95,14 +95,18 @@ for (const res of build.extraResources ?? []) {
     }
     // The catalog CLI is useless without its course seed: the binary spawns fine and
     // every offline search silently returns zero rows. A bare launcher check would
-    // pass that. Assert the seed is present and plausibly whole (it is ~898 MB).
+    // pass that. Assert the seed is present and plausibly WHOLE — a half-finished
+    // mirror also searches fine, it just misses half the district (an aborted sync
+    // produced a 461 MB seed at 4,700/9,701 courses). A complete trimmed seed is
+    // ~900 MB+; build-catalog-seed.mjs gates on live per-college coverage, this is
+    // the cheap backstop for a stale/partial staging dir.
     if (name === 'laccd-courses-pp-cli') {
       const seed = path.join(from, 'seed/data.db');
       const seedMb = existsSync(seed) && statSync(seed).isFile() ? statSync(seed).size / 1048576 : 0;
-      const seedOk = seedMb > 100;
+      const seedOk = seedMb > 700;
       check(seedOk, 'staged', 'catalog seed present: sidecars/laccd-courses-pp-cli/seed/data.db',
         seedOk ? `present (${seedMb.toFixed(0)} MB)`
-          : `MISSING/truncated (${seedMb.toFixed(0)} MB) — offline catalog search would return nothing; run \`CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs\``);
+          : `MISSING/PARTIAL (${seedMb.toFixed(0)} MB, expected ~900 MB+) — offline catalog search would be empty or miss whole colleges; rebuild with \`CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs\``);
     }
   }
 }

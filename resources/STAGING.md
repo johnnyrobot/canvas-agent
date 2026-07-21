@@ -38,11 +38,16 @@ directory structure + this doc are committed so the layout is self-describing an
 # 1. Chromium for the audit engine (downloads the pinned revision into resources/)
 npm run stage:browsers
 
-# 2. The course-catalog seed (~898 MB). SLOW — it mirrors the full district
-#    catalog, then trims and self-verifies it via the real CLI. Do this before
-#    staging: stage:sidecars refuses to stage the binary without a seed.
+# 2. The course-catalog seed (~900 MB). SLOW (~1h+) and the district API is flaky
+#    over a full mirror — the script syncs with --strict, retries, and refuses to
+#    ship unless `coverage --data-source live` reports 0 missing courses district-
+#    wide. Do this before staging: stage:sidecars won't stage a binary with no seed.
 CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" \
 node scripts/build-catalog-seed.mjs
+
+#    If a run dies, RESUME it (the sync is incremental) — the script prints the home:
+# CATALOG_SEED_HOME=~/.cache/canvas-agent/catalog-seed-home \
+# CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" node scripts/build-catalog-seed.mjs
 
 # 3. The on-device sidecar binaries (point at your local installs).
 #    DOCLING_SERVE_DIR = the onedir app dir whose immediate child is the
