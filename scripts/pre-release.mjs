@@ -127,8 +127,8 @@ if (build.mac?.notarize === true) {
   const haveCreds = credA || credB || credK;
   check(haveCreds, 'staged', 'notarization credentials present (one full family)',
     haveCreds
-      ? 'present'
-      : 'MISSING — export Option A (APPLE_API_KEY/_ID/_ISSUER) or Option B (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID); else electron-builder skips notarization silently');
+      ? `present (${credA ? 'API key' : credB ? 'Apple ID' : 'keychain profile'})`
+      : 'MISSING — export ONE of: Option A (APPLE_API_KEY/_ID/_ISSUER), Option B (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID), or Option C (APPLE_KEYCHAIN_PROFILE alone — do NOT also set APPLE_KEYCHAIN); else electron-builder skips notarization silently');
 }
 
 // Report.
