@@ -17,6 +17,7 @@
  * orchestrator's `enforceGate` — the app-shell track depends only on the frozen
  * contract *types*, never on another track's runtime code.
  */
+import { createHash } from 'node:crypto';
 import { WCAG } from '../contracts/index.js';
 import type {
   AppApi,
@@ -189,6 +190,9 @@ function contrast(ratio: number, size: TextSize = 'normal'): ContrastResult {
 }
 
 export function createStubApi(): AppApi {
+  // Per-instance "Allow publishing to Canvas" toggle (the runtime persists this
+  // in the meta table; the stub keeps it for the process lifetime).
+  let stubPublishEnabled = false;
   return {
     async runTurn(req, onChunk): Promise<TurnView> {
       // Demo the streaming path: a couple of text chunks, a tool chunk, then a
@@ -364,6 +368,25 @@ export function createStubApi(): AppApi {
     // ── Catalog enrichment (OPTIONAL; laccd-courses-pp-cli) ─────────────────────
     async catalogAvailable() {
       return true;
+    },
+    async canvasPublishStatus() {
+      return { cliAvailable: true, publishEnabled: stubPublishEnabled };
+    },
+    async setCanvasPublishEnabled(enabled) {
+      stubPublishEnabled = enabled;
+    },
+    async publishCanvasPage(_baseUrl, courseId, pageId, html) {
+      if (!stubPublishEnabled) {
+        throw new Error('Publishing to Canvas is disabled. Turn on "Allow publishing to Canvas" first.');
+      }
+      return {
+        courseId,
+        pageId,
+        // Match the runtime contract: SHA-256 hex of the exact published HTML.
+        contentHash: createHash('sha256').update(html).digest('hex'),
+        publishedAt: new Date().toISOString(),
+        canvasUrl: `https://stub.instructure.test/courses/${courseId}/pages/${pageId}`,
+      };
     },
     async catalogSearch(_query) {
       return CANNED_CATALOG_SUMMARIES.map((s) => ({ ...s }));

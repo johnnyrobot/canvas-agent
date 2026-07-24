@@ -93,6 +93,15 @@ export interface RemediationDeps {
    */
   onCopyForCanvas?(): void;
   /**
+   * Publish the corrected page back to Canvas (the opt-in write path; PRD §17).
+   * Present only when EVERY upstream guardrail holds: the gate passed, the page
+   * was imported from Canvas, the external canvas-pp-cli is installed, and the
+   * user's "Allow publishing" setting is on. `publishLabel` carries the caller's
+   * two-step confirm state ("Publish to Canvas" → "Confirm publish…").
+   */
+  onPublish?(): void;
+  publishLabel?: string;
+  /**
    * The Canvas page-edit URL for the current remediation source, when it was
    * a live Canvas import. When present, the footer renders an "Open page in
    * Canvas" action alongside "Copy for Canvas". Pasted-HTML/document
@@ -302,6 +311,15 @@ export function createRemediationPanel(view: RemediationView, deps: RemediationD
     const openCanvasBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost', 'data-testid': 'remed-open-canvas' }, 'Open page in Canvas');
     openCanvasBtn.addEventListener('click', () => openUrl(deps.canvasEditUrl!));
     footerBtns.push(openCanvasBtn);
+  }
+  if (deps.onPublish) {
+    const publishBtn = el(
+      'button',
+      { type: 'button', class: 'remed-btn remed-btn--primary', 'data-testid': 'remed-publish-canvas' },
+      deps.publishLabel ?? 'Publish to Canvas',
+    );
+    publishBtn.addEventListener('click', () => deps.onPublish!());
+    footerBtns.push(publishBtn);
   }
   const skipBtn = el('button', { type: 'button', class: 'remed-btn remed-btn--ghost' }, 'Skip');
   skipBtn.addEventListener('click', () => deps.onSkip(view.selectedId));

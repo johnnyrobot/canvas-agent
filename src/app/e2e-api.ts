@@ -5,7 +5,7 @@
  * the public `AppApi` contract unchanged while letting Playwright exercise the
  * real guided renderer and IPC bridge without waiting on local model inference.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { WCAG } from '../contracts/index.js';
 import type {
   AppApi,
@@ -14,6 +14,8 @@ import type {
   CanvasImportResult,
   CanvasPage,
   CatalogCourse,
+  CanvasPublishReceipt,
+  CanvasPublishStatus,
   CatalogCourseSummary,
   ContrastResult,
   DocumentConversionResult,
@@ -257,6 +259,8 @@ function scenarioFromEnv(value: string | undefined): E2eScenario {
 
 export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCENARIO): AppApi {
   const scenario = scenarioFromEnv(scenarioValue);
+  // Scripted "Allow publishing to Canvas" toggle (process-lifetime, like the stub's).
+  let e2ePublishEnabled = false;
   const failIfDown = (): void => {
     if (scenario === 'runtime-down') throw new Error('E2E scripted runtime is down');
   };
@@ -420,6 +424,27 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
 
     async catalogAvailable(): Promise<boolean> {
       return scenario !== 'runtime-down';
+    },
+    async canvasPublishStatus(): Promise<CanvasPublishStatus> {
+      return { cliAvailable: scenario !== 'runtime-down', publishEnabled: e2ePublishEnabled };
+    },
+    async setCanvasPublishEnabled(enabled): Promise<void> {
+      failIfDown();
+      e2ePublishEnabled = enabled;
+    },
+    async publishCanvasPage(_baseUrl, courseId, pageId, html): Promise<CanvasPublishReceipt> {
+      failIfDown();
+      if (!e2ePublishEnabled) {
+        throw new Error('Publishing to Canvas is disabled. Turn on "Allow publishing to Canvas" first.');
+      }
+      return {
+        courseId,
+        pageId,
+        // Match the runtime contract: SHA-256 hex of the exact published HTML.
+        contentHash: createHash('sha256').update(html).digest('hex'),
+        publishedAt: new Date().toISOString(),
+        canvasUrl: `https://e2e.instructure.test/courses/${courseId}/pages/${pageId}`,
+      };
     },
     async catalogSearch(): Promise<CatalogCourseSummary[]> {
       failIfDown();

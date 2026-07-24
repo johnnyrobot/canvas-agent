@@ -38,6 +38,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CANVAS_PUBLISH_STATUS,
+  SET_CANVAS_PUBLISH_ENABLED,
+  PUBLISH_CANVAS_PAGE,
   CATALOG_AVAILABLE,
   CATALOG_SEARCH,
   CATALOG_GET,
@@ -114,6 +117,7 @@ test('createBridge exposes exactly the AppApi methods', () => {
   const { invoke } = fakeInvoke({});
   const bridge = createBridge(invoke, noSub);
   assert.deepEqual(Object.keys(bridge).sort(), [
+    'canvasPublishStatus',
     'captureScreenshot',
     'catalogAvailable',
     'catalogGet',
@@ -130,6 +134,7 @@ test('createBridge exposes exactly the AppApi methods', () => {
     'listScreenshotSources',
     'listSessions',
     'loadSession',
+    'publishCanvasPage',
     'pullIngestModel',
     'pullModel',
     'resolveBrandTheme',
@@ -137,6 +142,7 @@ test('createBridge exposes exactly the AppApi methods', () => {
     'saveBrandKit',
     'saveCanvasAuth',
     'screenshotPermissionStatus',
+    'setCanvasPublishEnabled',
   ]);
 });
 
@@ -254,6 +260,9 @@ test('each new method invokes its channel with the right args and unwraps the va
     { channel: SCREENSHOT_PERMISSION_STATUS, value: 'granted', args: [], run: (b) => b.screenshotPermissionStatus() },
     { channel: LIST_SCREENSHOT_SOURCES, value: [SCREENSHOT_SOURCE], args: [], run: (b) => b.listScreenshotSources() },
     { channel: CAPTURE_SCREENSHOT, value: SCREENSHOT, args: [SCREENSHOT_SOURCE.id], run: (b) => b.captureScreenshot(SCREENSHOT_SOURCE.id) },
+    { channel: CANVAS_PUBLISH_STATUS, value: { cliAvailable: true, publishEnabled: false }, args: [], run: (b) => b.canvasPublishStatus() },
+    { channel: SET_CANVAS_PUBLISH_ENABLED, value: undefined, args: [true], run: (b) => b.setCanvasPublishEnabled(true) },
+    { channel: PUBLISH_CANVAS_PAGE, value: { courseId: '123', pageId: 'syllabus', contentHash: 'h', publishedAt: 't', canvasUrl: 'u' }, args: [CONFIG.baseUrl, '123', 'syllabus', '<p>x</p>'], run: (b) => b.publishCanvasPage(CONFIG.baseUrl, '123', 'syllabus', '<p>x</p>') },
     { channel: CATALOG_AVAILABLE, value: true, args: [], run: (b) => b.catalogAvailable() },
     { channel: CATALOG_SEARCH, value: CATALOG_SUMMARIES, args: ['accounting'], run: (b) => b.catalogSearch('accounting') },
     { channel: CATALOG_GET, value: CATALOG_COURSE, args: [40830], run: (b) => b.catalogGet(40830) },
