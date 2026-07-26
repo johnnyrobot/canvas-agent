@@ -20,6 +20,12 @@ import { importCourse, fetchPageBody as defaultFetchPageBody, listPages as defau
 import type { PageReader } from '../canvas/index.js';
 import { createCatalogClient } from '../catalog/index.js';
 import type { CatalogClient } from '../catalog/index.js';
+import { createCanvasPublisher } from '../canvas/publish.js';
+import type { CanvasPublisher } from '../canvas/publish.js';
+import { createHash } from 'node:crypto';
+
+/** meta-table key for the persisted "Allow publishing to Canvas" toggle. */
+const PUBLISH_ENABLED_KEY = 'canvas_publish_enabled';
 import { resolveTheme as defaultResolveTheme } from '../theme/index.js';
 import { createOllamaSidecar } from '../llm/index.js';
 import type { ChatMessage, OllamaSidecar } from '../llm/index.js';
@@ -154,6 +160,12 @@ export interface AppApiOptions {
    * isn't installed — this is never a hard runtime dependency.
    */
   catalog?: CatalogClient;
+  /**
+   * Canvas publish adapter (OPT-IN write path; see `src/canvas/publish.ts`).
+   * Default: a real `createCanvasPublisher()` resolving `canvas-pp-cli` off
+   * PATH. `canvasPublishStatus()` degrades to unavailable rather than throwing.
+   */
+  publisher?: CanvasPublisher;
 }
 
 /**
@@ -426,6 +438,21 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const listPagesFn: PageReader['listPages'] = opts.listPages ?? defaultListPages;
   const secrets: SecretStore = opts.secrets ?? createKeychainSecretStore();
   const catalog: CatalogClient = opts.catalog ?? createCatalogClient();
+  const publisher: CanvasPublisher = opts.publisher ?? createCanvasPublisher();
+
+  /** The persisted "Allow publishing to Canvas" toggle (meta table; default off). */
+  const publishEnabledSetting = async (): Promise<boolean> => {
+    try {
+      const db = await database();
+      const row = await db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', [
+        PUBLISH_ENABLED_KEY,
+      ]);
+      return row?.value === '1';
+    } catch {
+      // A fresh/unopenable DB reads as "off" — status probes never reject.
+      return false;
+    }
+  };
   const configuredModel = sidecar().config.models.text;
 
   // Resolve the saved Canvas token for `baseUrl` from the OS Keychain and build the
@@ -758,6 +785,51 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     },
     async listCanvasPages(baseUrl, courseId) {
       return listPagesFn(await canvasConfigFor(baseUrl), courseId);
+    },
+
+    // ── Canvas publish (OPT-IN write path via the EXTERNAL canvas-pp-cli; PRD §17) ──
+    async canvasPublishStatus() {
+      const [cliAvailable, publishEnabled] = await Promise.all([
+        publisher.available(),
+        publishEnabledSetting(),
+      ]);
+      return { cliAvailable, publishEnabled };
+    },
+    async setCanvasPublishEnabled(enabled) {
+      const db = await database();
+      await db.run(
+        `INSERT INTO meta (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [PUBLISH_ENABLED_KEY, enabled ? '1' : '0'],
+      );
+    },
+    async publishCanvasPage(baseUrl, courseId, pageId, html) {
+      if (!(await publishEnabledSetting())) {
+        throw new Error('Publishing to Canvas is disabled. Turn on "Allow publishing to Canvas" first.');
+      }
+      // Server-side re-check of the accessibility gate on the EXACT HTML that
+      // would go out — a withheld badge refuses the publish regardless of what
+      // the renderer showed. The gated (allowlist-sanitized) html is what ships.
+      const gate = await enforceGate(html, gateDeps);
+      if (gate.badgeWithheld) {
+        const first = gate.conformance.blockers[0]?.message ?? 'accessibility blockers remain';
+        throw new Error(`Refused to publish: the accessibility gate withheld the badge (${first}).`);
+      }
+      const { canvasUrl } = await publisher.publishPage({ baseUrl, courseId, pageId, html: gate.html });
+      const receipt = {
+        courseId,
+        pageId,
+        contentHash: createHash('sha256').update(gate.html).digest('hex'),
+        publishedAt: new Date().toISOString(),
+        canvasUrl,
+      };
+      const db = await database();
+      await db.run(
+        `INSERT INTO canvas_publishes (course_id, page_id, content_hash, canvas_url, published_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [receipt.courseId, receipt.pageId, receipt.contentHash, receipt.canvasUrl, receipt.publishedAt],
+      );
+      return receipt;
     },
 
     async screenshotPermissionStatus() {

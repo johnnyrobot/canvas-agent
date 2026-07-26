@@ -10,7 +10,7 @@
 import type { Database } from '../contracts/index.js';
 
 /** Bump when the core schema changes; recorded in `meta.schema_version`. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * The implicit single-user "home" project (PRD v1: single-user). Every session
@@ -69,6 +69,17 @@ const STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
+  )`,
+
+  // v4: audit trail of opt-in Canvas publishes (PRD §17 — what was pushed,
+  // where, when, and the SHA-256 of the exact HTML that went out).
+  `CREATE TABLE IF NOT EXISTS canvas_publishes (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id    TEXT NOT NULL,
+    page_id      TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    canvas_url   TEXT NOT NULL,
+    published_at TEXT NOT NULL
   )`,
 
   // Helpful lookup indexes for the parent→child relations.

@@ -234,6 +234,23 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
       calls.push({ method: 'captureScreenshot', args: [sourceId] });
       return SCREENSHOT;
     },
+    async canvasPublishStatus() {
+      calls.push({ method: 'canvasPublishStatus', args: [] });
+      return { cliAvailable: true, publishEnabled: true };
+    },
+    async setCanvasPublishEnabled(enabled) {
+      calls.push({ method: 'setCanvasPublishEnabled', args: [enabled] });
+    },
+    async publishCanvasPage(baseUrl, courseId, pageId, html) {
+      calls.push({ method: 'publishCanvasPage', args: [baseUrl, courseId, pageId, html] });
+      return {
+        courseId,
+        pageId,
+        contentHash: 'abc123',
+        publishedAt: '2026-01-01T00:00:00.000Z',
+        canvasUrl: `https://canvas.example.edu/courses/${courseId}/pages/${pageId}`,
+      };
+    },
     async catalogAvailable() {
       calls.push({ method: 'catalogAvailable', args: [] });
       return true;

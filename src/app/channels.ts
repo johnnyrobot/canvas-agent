@@ -31,6 +31,11 @@ export const DELETE_BRAND_KIT = 'canvasAgent:deleteBrandKit';
 export const FETCH_CANVAS_PAGE = 'canvasAgent:fetchCanvasPage';
 export const LIST_CANVAS_PAGES = 'canvasAgent:listCanvasPages';
 
+// ── Canvas publish (OPT-IN; via the external canvas-pp-cli) ─────────────────
+export const CANVAS_PUBLISH_STATUS = 'canvasAgent:canvasPublishStatus';
+export const SET_CANVAS_PUBLISH_ENABLED = 'canvasAgent:setCanvasPublishEnabled';
+export const PUBLISH_CANVAS_PAGE = 'canvasAgent:publishCanvasPage';
+
 // ── Local document conversion ───────────────────────────────────────────────
 export const CONVERT_DOCUMENT = 'canvasAgent:convertDocument';
 
@@ -84,6 +89,9 @@ export const CHANNELS = {
   deleteBrandKit: DELETE_BRAND_KIT,
   fetchCanvasPage: FETCH_CANVAS_PAGE,
   listCanvasPages: LIST_CANVAS_PAGES,
+  canvasPublishStatus: CANVAS_PUBLISH_STATUS,
+  setCanvasPublishEnabled: SET_CANVAS_PUBLISH_ENABLED,
+  publishCanvasPage: PUBLISH_CANVAS_PAGE,
   convertDocument: CONVERT_DOCUMENT,
   catalogAvailable: CATALOG_AVAILABLE,
   catalogSearch: CATALOG_SEARCH,

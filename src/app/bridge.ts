@@ -38,6 +38,9 @@ import {
   SCREENSHOT_PERMISSION_STATUS,
   LIST_SCREENSHOT_SOURCES,
   CAPTURE_SCREENSHOT,
+  CANVAS_PUBLISH_STATUS,
+  SET_CANVAS_PUBLISH_ENABLED,
+  PUBLISH_CANVAS_PAGE,
   CATALOG_AVAILABLE,
   CATALOG_SEARCH,
   CATALOG_GET,
@@ -180,6 +183,17 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
     },
     async captureScreenshot(sourceId) {
       return unwrap(await invoke(CAPTURE_SCREENSHOT, sourceId));
+    },
+
+    // ── Canvas publish (OPT-IN; via the external canvas-pp-cli) ─────────────
+    async canvasPublishStatus() {
+      return unwrap(await invoke(CANVAS_PUBLISH_STATUS));
+    },
+    async setCanvasPublishEnabled(enabled) {
+      return unwrap(await invoke(SET_CANVAS_PUBLISH_ENABLED, enabled));
+    },
+    async publishCanvasPage(baseUrl, courseId, pageId, html) {
+      return unwrap(await invoke(PUBLISH_CANVAS_PAGE, baseUrl, courseId, pageId, html));
     },
 
     // ── Catalog enrichment (OPTIONAL; laccd-courses-pp-cli) ─────────────────
