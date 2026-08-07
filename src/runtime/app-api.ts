@@ -14,7 +14,7 @@
  * the real model + sidecars + on-device SQLite for production.
  */
 import { validateAllowlist } from '../engine/index.js';
-import { audit as renderAudit } from '../engine/render/index.js';
+import { createAuditor, createPlaywrightRunner } from '../engine/render/index.js';
 import { createRetriever } from '../knowledge/index.js';
 import { importCourse, fetchPageBody as defaultFetchPageBody, listPages as defaultListPages } from '../canvas/index.js';
 import type { PageReader } from '../canvas/index.js';
@@ -416,9 +416,8 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const llm: LlmRuntime = opts.llm ?? sidecar();
   const ingest: IngestRuntime = opts.ingest ?? createDoclingSidecar();
   const retriever: KbRetriever = opts.retriever ?? createRetriever();
-  const auditor: Auditor = opts.audit ?? renderAudit;
   const importer: CanvasImporter = opts.importer ?? importCourse;
-  const gateDeps: GateDeps = opts.gate ?? { validateAllowlist, audit: auditor };
+  const gateDepsFor = (auditor: Auditor): GateDeps => opts.gate ?? { validateAllowlist, audit: auditor };
   const maxToolIterations = opts.maxToolIterations ?? 5;
   const systemPromptOverride = opts.systemPrompt;
   const resolveThemeFn: ThemeResolver = opts.resolveTheme ?? defaultResolveTheme;
@@ -467,8 +466,35 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
     return (brandKitStorePromise ??= database().then(createBrandKitStore));
   };
 
+  /**
+   * Run `fn` with an auditor whose Chromium process lives exactly as long as
+   * the turn (ADR-0005).
+   *
+   * A remediate turn audits up to five times — source gate, first repair, then
+   * up to three re-audits — and each of those used to launch and close its own
+   * browser. One browser now covers the whole turn and is disposed in the
+   * `finally`. It is NOT kept warm between turns: the app has no shutdown path
+   * (`window-all-closed` is guarded by `process.platform !== 'darwin'` and so
+   * never fires here), so a process-wide instance would be a Chromium leak
+   * nobody closes.
+   *
+   * An injected `opts.audit` short-circuits the whole thing, so offline tests
+   * never construct a runner. Even when one IS constructed it launches lazily —
+   * a turn that never audits pays nothing, and disposing an unlaunched runner
+   * is a no-op.
+   */
+  const withTurnAuditor = async <T>(fn: (auditor: Auditor) => Promise<T>): Promise<T> => {
+    if (opts.audit) return fn(opts.audit);
+    const runner = createPlaywrightRunner();
+    try {
+      return await fn(createAuditor(runner));
+    } finally {
+      await runner.dispose();
+    }
+  };
+
   // The orchestrator is wired identically every turn (real or injected parts).
-  const buildOrchestrator = (): Orchestrator => {
+  const buildOrchestrator = (auditor: Auditor): Orchestrator => {
     const deps = createEngineDeps({ retriever, llm, ingest, audit: auditor });
     const registry = new ToolRegistry().registerAll(createCanonicalTools(deps));
     const orchOpts: OrchestratorOptions = { maxToolIterations, retrieveKb: retriever };
@@ -506,9 +532,11 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const runStandardTurn = async (
     req: TurnRequest,
     mode: ProductMode,
+    auditor: Auditor,
     onChunk?: OnTurnChunk,
   ): Promise<TurnView> => {
-    const orch = buildOrchestrator();
+    const orch = buildOrchestrator(auditor);
+    const gateDeps = gateDepsFor(auditor);
 
     const input: TurnInput = { user: req.user, mode };
     const base = baseSystemFor(req, mode);
@@ -544,8 +572,13 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   };
 
   // ── Remediate flow: repair user-supplied HTML; Canvas is never written to. ──
-  const runRemediate = async (req: TurnRequest, onChunk?: OnTurnChunk): Promise<TurnView> => {
-    const orch = buildOrchestrator();
+  const runRemediate = async (
+    req: TurnRequest,
+    auditor: Auditor,
+    onChunk?: OnTurnChunk,
+  ): Promise<TurnView> => {
+    const orch = buildOrchestrator(auditor);
+    const gateDeps = gateDepsFor(auditor);
     const ctx = streamingCtx(onChunk);
     const system = baseSystemFor(req, 'remediate');
     const sourceHtml = req.remediateInput!.sourceHtml;
@@ -621,8 +654,12 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       const prepared: TurnRequest = { ...req, user };
       delete prepared.attachments;
       const { mode } = routeIntent(user, req.mode);
-      if (mode === 'remediate' && prepared.remediateInput) return runRemediate(prepared, onChunk);
-      return runStandardTurn(prepared, mode, onChunk);
+      // ONE Chromium for the whole turn, disposed when it ends (ADR-0005).
+      return withTurnAuditor((auditor) =>
+        mode === 'remediate' && prepared.remediateInput
+          ? runRemediate(prepared, auditor, onChunk)
+          : runStandardTurn(prepared, mode, auditor, onChunk),
+      );
     },
 
     async saveCanvasAuth(auth) {

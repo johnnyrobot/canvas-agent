@@ -127,13 +127,31 @@ exercised:
 | `llm` | real Ollama sidecar | fake `{ describeImage, isHealthy }` |
 | `ingest` | real Docling sidecar | fake `{ convertPath, isHealthy }` |
 | `retriever` | bundled Knowledge Packs | scripted `KbRetriever` |
-| `audit` | real Chromium render-and-scan | `createAuditor(fakeScanRunner)` (real mapping, no browser) |
+| `audit` | real Chromium render-and-scan, **one browser per turn** (see below) | `createAuditor(fakeScanRunner)` (real mapping, no browser) |
 | `gate` | `{ validateAllowlist, audit }` | marker/issue-counting `GateDeps` fake |
 | `importer` | real `importCourse` | fake / `createImporter({ fetch })` |
 | `db` | on-device SQLite (lazy `openDatabase` + `migrate`) | `openDatabase(':memory:')` + `migrate` |
 | `sessionStore` / `brandKitStore` | built lazily from `db` | injected fake store |
 | `resolveTheme` | real `resolveTheme` (no LLM) | injected resolver |
 | `fetchPageBody` / `listPages` | real read-only canvas readers | injected fakes / spies |
+
+### The audit browser's lifetime (ADR-0005)
+
+`runTurn` wraps each turn in `withTurnAuditor`, which builds ONE
+`createPlaywrightRunner()` for the turn, hands it to `createAuditor`, and
+disposes it in a `finally`. A remediate turn audits up to five times (source
+gate, first repair, up to three re-audits) and now pays a single Chromium
+launch instead of five.
+
+Two properties keep this out of the way of the offline tests:
+
+- Injecting `opts.audit` short-circuits it entirely — no runner is constructed.
+- Even when one IS constructed (e.g. a test injects only `opts.gate`), the
+  browser launches LAZILY on the first scan. A turn that never audits never
+  starts Chromium, and disposing an unlaunched runner is a no-op.
+
+There is no process-wide browser and no idle timeout: the app has no shutdown
+path, so anything held between turns would be a Chromium process nobody closes.
 
 `createEngineDeps` adapts each module's real signature (e.g. wraps the sync
 `checkContrast` as async, validates the `render_template` `type` against the 8

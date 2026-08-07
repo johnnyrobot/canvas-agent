@@ -66,11 +66,38 @@ export interface ScanResult {
 
 /**
  * The injected scanner. The real implementation drives headless Chromium
- * (`playwrightRunner`); unit tests inject a fake that returns canned data, so
- * the axe→IssueSet mapping is tested with no browser. (PRD §8.6, AGENT_BRIEF.)
+ * (`createPlaywrightRunner()`); unit tests inject a fake that returns canned
+ * data, so the axe→IssueSet mapping is tested with no browser. (PRD §8.6,
+ * AGENT_BRIEF.)
  */
 export interface ScanRunner {
   run(html: string): Promise<ScanResult>;
+}
+
+/**
+ * A `ScanRunner` that owns a resource — in practice, one Chromium process held
+ * for the lifetime of a turn (ADR-0005).
+ *
+ * `ScanRunner` itself deliberately stays a SINGLE method: adding `dispose()` to
+ * it would force every injected test fake and `createAuditor` to grow a
+ * lifecycle they neither have nor need. Only the concrete factory that actually
+ * allocates something returns this wider type, and only the caller who
+ * constructed it is obliged to dispose it.
+ */
+export interface DisposableScanRunner extends ScanRunner {
+  /**
+   * Release the browser. Idempotent, and safe on a runner that never ran.
+   *
+   * Disposal is FINAL. A `run()` after it rejects rather than launching a
+   * second browser — a stray late scan, one escaping the `finally` that
+   * disposed the runner, would otherwise allocate a Chromium nobody is left to
+   * close. Construct a new runner instead; they are cheap until they launch.
+   *
+   * This also makes `dispose()` safe against an in-flight `run()`: a launch
+   * already under way is awaited and closed, and one not yet started is
+   * refused. That `run()` fails, but nothing leaks.
+   */
+  dispose(): Promise<void>;
 }
 
 /** The resolved background behind a text run, as classified by the runner. */

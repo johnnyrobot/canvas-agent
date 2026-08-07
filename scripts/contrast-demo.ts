@@ -53,24 +53,31 @@ function baselineVerdict(axe: AuditIssue[]): string {
 }
 
 async function main(): Promise<void> {
-  const audit = createAuditor(createPlaywrightRunner({ settleDelayMs: 50 }));
-  console.log('\n=== Contrast adjudication demo — Canvas-style fixtures ===');
-  console.log('(baseline = axe-core, the open-source engine; WAVE behaves the same or skips entirely)\n');
-  for (const f of FIXTURES) {
-    const { issues } = await audit(f.html);
-    const contrast = issues.filter((i) => i.category === 'contrast');
-    const axe = contrast.filter(isAxe);
-    const ours = contrast.filter((i) => !isAxe(i));
+  const runner = createPlaywrightRunner({ settleDelayMs: 50 });
+  const audit = createAuditor(runner);
+  try {
+    console.log('\n=== Contrast adjudication demo — Canvas-style fixtures ===');
+    console.log('(baseline = axe-core, the open-source engine; WAVE behaves the same or skips entirely)\n');
+    for (const f of FIXTURES) {
+      const { issues } = await audit(f.html);
+      const contrast = issues.filter((i) => i.category === 'contrast');
+      const axe = contrast.filter(isAxe);
+      const ours = contrast.filter((i) => !isAxe(i));
 
-    console.log(`• ${f.name}`);
-    console.log(`    WAVE:     ${f.wave}`);
-    console.log(`    axe-core: ${baselineVerdict(axe)}`);
-    if (ours.length === 0) {
-      console.log(`    → OUR ENGINE: cleared — definitively passes (no false positive)`);
-    } else {
-      for (const i of ours) console.log(`    → OUR ENGINE: [${i.severity.toUpperCase()}] ${i.message}`);
+      console.log(`• ${f.name}`);
+      console.log(`    WAVE:     ${f.wave}`);
+      console.log(`    axe-core: ${baselineVerdict(axe)}`);
+      if (ours.length === 0) {
+        console.log(`    → OUR ENGINE: cleared — definitively passes (no false positive)`);
+      } else {
+        for (const i of ours) console.log(`    → OUR ENGINE: [${i.severity.toUpperCase()}] ${i.message}`);
+      }
+      console.log('');
     }
-    console.log('');
+  } finally {
+    // One browser for the whole demo, closed at the end (ADR-0005) — the runner
+    // owns a Chromium process, so without this the script would never exit.
+    await runner.dispose();
   }
 }
 

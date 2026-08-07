@@ -8,7 +8,7 @@
  *
  * Mirrors the gated live-Ollama integration tests in src/llm/integration.test.ts.
  */
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAuditor, createPlaywrightRunner } from './index.js';
 
@@ -16,7 +16,12 @@ const optedIn = ['1', 'true', 'yes'].includes((process.env.RUN_BROWSER_INTEGRATI
 const skip: true | string | false = optedIn ? false : 'set RUN_BROWSER_INTEGRATION=1 to run';
 
 // Small settle delay keeps the gated run fast; the fragment loads no network.
-const audit = createAuditor(createPlaywrightRunner({ settleDelayMs: 50 }));
+// ONE browser for this whole file, closed when it finishes (ADR-0005). The
+// runner owns a Chromium process now, so leaving it undisposed would keep the
+// test process alive after the last assertion.
+const runner = createPlaywrightRunner({ settleDelayMs: 50 });
+const audit = createAuditor(runner);
+after(() => runner.dispose());
 
 test('a meaningful <img> with no alt yields an image-alt issue', { skip }, async () => {
   const { issues } = await audit('<p>Hello</p><img src="https://example.com/x.png">');

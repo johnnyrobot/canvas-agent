@@ -10,7 +10,7 @@
  * Env-gated (needs a Chromium binary), like `src/engine/render/integration.test.ts`:
  *   RUN_BROWSER_INTEGRATION=1 npx tsx --test src/templates/audit.test.ts
  */
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AuditIssue, TemplateType, TemplateSlots, ThemeResult } from '../contracts/index.js';
 import { renderTemplate } from './index.js';
@@ -20,7 +20,12 @@ const optedIn = ['1', 'true', 'yes'].includes((process.env.RUN_BROWSER_INTEGRATI
 const skip: true | string | false = optedIn ? false : 'set RUN_BROWSER_INTEGRATION=1 to run';
 
 // Small settle delay keeps the gated run fast; fragments load no network.
-const audit = createAuditor(createPlaywrightRunner({ settleDelayMs: 50 }));
+// ONE browser for this whole file, closed when it finishes (ADR-0005). The
+// runner owns a Chromium process now, so leaving it undisposed would keep the
+// test process alive after the last assertion.
+const runner = createPlaywrightRunner({ settleDelayMs: 50 });
+const audit = createAuditor(runner);
+after(() => runner.dispose());
 
 /** The two severities that withhold the badge (mirrors the gate's BLOCKING set). */
 const gating = (issues: AuditIssue[]): AuditIssue[] =>
