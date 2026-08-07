@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE — Accessibility review screen model</title>
+<style>
+  :root {
+    --ink: #1b1b1f;
+    --muted: #5d5f6b;
+    --line: #dcdce4;
+    --paper: #fbfbfd;
+    --card: #ffffff;
+    --accent: #0b5394;
+    --fail: #a3202c;
+    --warn: #8a5a00;
+    --pass: #2c6e3f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 24px 96px;
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--paper);
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-family: Georgia, serif; font-size: 30px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-family: Georgia, serif; font-size: 19px; margin: 0 0 12px; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--muted); max-width: 76ch; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: #fff; background: var(--fail);
+    padding: 3px 8px; border-radius: 3px; margin-bottom: 14px;
+  }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 22px; margin-bottom: 20px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+
+  button {
+    font: inherit; font-size: 14px; padding: 7px 13px; border-radius: 6px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { opacity: 0.9; color: #fff; }
+  button.done { opacity: 0.45; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .btns:last-child { margin-bottom: 0; }
+
+  .field { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px dotted var(--line); font-size: 14px; }
+  .field:last-child { border-bottom: 0; }
+  .field .k { flex: 0 0 150px; color: var(--muted); }
+  .field .v { flex: 1; font-variant-numeric: tabular-nums; }
+  .changed { background: #fff6d6; box-shadow: 0 0 0 4px #fff6d6; border-radius: 2px; }
+
+  .issue { display: flex; gap: 9px; padding: 6px 0; font-size: 14px; align-items: baseline; }
+  .issue .dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--warn); margin-top: 6px; }
+  .issue.fail .dot { background: var(--fail); }
+  .issue.sel { font-weight: 600; }
+  .issue.sel .marker { color: var(--accent); }
+  .marker { flex: 0 0 16px; color: transparent; }
+
+  .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--line); margin-right: 6px; }
+  .yes { color: var(--pass); border-color: #bcd9c6; background: #f2f9f4; }
+  .no  { color: var(--muted); background: #f5f5f7; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+  .tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .step { display: flex; gap: 11px; align-items: flex-start; padding: 8px 0; }
+  .step .n { flex: 0 0 22px; height: 22px; border-radius: 50%; background: #eef1f6; color: var(--muted);
+             font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .step.now .n { background: var(--accent); color: #fff; }
+  .step.past .n { background: #e6efe8; color: var(--pass); }
+  .step .label { flex: 1; }
+  .step .why { display: block; font-size: 13px; color: var(--muted); }
+
+  .notice { font-size: 14px; padding: 9px 12px; border-radius: 6px; background: #eef3f9; border: 1px solid #d5e2f0; }
+  .refused { background: #fdf0f1; border-color: #f0d4d7; color: var(--fail); }
+  .toggle { font-size: 14px; display: flex; gap: 9px; align-items: flex-start; padding: 12px; background: #fff8e8; border: 1px solid #ecdcb4; border-radius: 8px; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; background: #f2f2f6; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="tag">Throwaway prototype</span>
+  <h1>Who should own the accessibility review screen’s state?</h1>
+  <p class="lede">
+    In the app today, the <strong>accessibility review screen</strong> keeps one piece of memory —
+    <em>which finding you have selected</em> — in a loose variable that sits outside the screen itself,
+    alongside 56 other fields belonging to thirteen other screens. Nothing resets it, and no test can
+    reach it. <strong>ADR-0002</strong> proposes moving that memory <em>inside</em> a screen model that
+    owns both the state and the rules for changing it.
+  </p>
+  <p class="lede">
+    This page is that screen model, with the screen removed. Press the buttons, watch the state.
+    The question to answer: <strong>does a model that owns its own memory behave the way you’d expect
+    an instructor to experience this screen?</strong> Use the walkthroughs — especially
+    “Selection goes stale” — and switch the comparison toggle to feel the difference against today.
+  </p>
+
+  <div class="card toggle">
+    <input type="checkbox" id="legacy" style="margin-top:4px">
+    <label for="legacy">
+      <strong>Compare against today’s behaviour.</strong>
+      Tick this to move the selection back <em>outside</em> the model, exactly as the live app does —
+      a loose variable nobody resets. Everything else stays the same, so any difference you see is
+      caused purely by where the memory lives.
+    </label>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h2>What the screen is showing</h2>
+        <div id="state"></div>
+      </div>
+      <div class="card">
+        <h3>What the instructor is allowed to do</h3>
+        <div id="caps"></div>
+        <div style="margin-top:14px" id="notice"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Guided walkthroughs</h2>
+        <p style="font-size:14px;color:var(--muted);margin-bottom:14px">
+          Each one sets up a situation that is hard to judge on paper. Press the steps in order.
+        </p>
+        <div class="tabs" id="tabs"></div>
+        <div id="scenario"></div>
+      </div>
+
+      <div class="card">
+        <h2>Free play</h2>
+        <p style="font-size:14px;color:var(--muted);margin-bottom:14px">
+          Any button, any order — including ones that should be refused.
+        </p>
+        <h3>A check finishes and its results arrive</h3>
+        <div class="btns" id="fp-runs"></div>
+        <h3>Where the page came from</h3>
+        <div class="btns" id="fp-source"></div>
+        <h3>Working through the findings</h3>
+        <div class="btns" id="fp-issues"></div>
+        <h3>Taking the repaired page away</h3>
+        <div class="btns" id="fp-export"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE SCREEN MODEL — the part being prototyped.
+
+   Pure: no DOM, no document, no event handlers. It owns the review screen's
+   state and every transition over it, and exposes one read model (`view()`)
+   plus one method per thing the instructor can do. If this shape feels right,
+   THIS is what lifts into src/app/renderer/ as the ADR-0002 vertical slice;
+   the page below it is throwaway.
+
+   Mirrors realRemediationView() + reviewSelectedId in renderer.ts.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function createReviewModel(opts = {}) {
+  // When true, selection lives OUTSIDE the model (today's behaviour) and so
+  // survives a brand-new check. That is the whole comparison.
+  const selectionOutside = opts.selectionOutside ?? false;
+
+  let run = null;                       // the finished check, or nothing yet
+  let source = { kind: 'pasted' };      // where the page came from
+  let selectedId = '';                  // ← the memory in question
+  let notice = null;
+
+  const label = { contrast: 'Contrast', aria: 'ARIA', structure: 'Structure', error: 'Error', alert: 'Alert' };
+
+  function pageContext() {
+    if (source.kind === 'canvas') return { title: source.pageTitle || 'Imported Canvas page', path: source.baseUrl || 'canvas' };
+    if (source.kind === 'document') return { title: source.fileName || 'Converted document', path: 'document' };
+    return { title: 'Pasted HTML', path: 'pasted-source' };
+  }
+
+  // "Open in Canvas" needs all three facts; anything less is copy-only.
+  function canvasEditUrl() {
+    if (source.kind !== 'canvas') return null;
+    if (!source.baseUrl || !source.courseId || !source.pageId) return null;
+    return `${source.baseUrl}/courses/${source.courseId}/pages/${source.pageId}/edit`;
+  }
+
+  function issues() {
+    if (!run) return [];
+    return run.findings.map((f) => ({
+      id: f.id, title: f.title, element: label[f.category] ?? 'Issue',
+      severity: f.severity === 'blocker' || f.severity === 'error' ? 'fail' : 'warn',
+    }));
+  }
+
+  function view() {
+    // Nothing to show at all → the screen offers to start a check instead.
+    if (!run) return { kind: 'empty' };
+    const list = issues();
+    if (list.length === 0 && !run.repaired) return { kind: 'empty' };
+
+    const fixed = run.fixedCount;
+    const fixedNote = `${fixed} ${fixed === 1 ? 'issue was' : 'issues were'} auto-fixed by the gate.`;
+    const summary = {
+      fail: list.filter((i) => i.severity === 'fail').length,
+      warn: list.filter((i) => i.severity === 'warn').length,
+      pass: fixed,
+    };
+    // The badge is withheld while anything still fails, and a withheld page
+    // must not be downloadable or pasteable into Canvas.
+    const can = { download: summary.fail === 0, copyForCanvas: summary.fail === 0, openInCanvas: canvasEditUrl() };
+
+    if (list.length === 0) {
+      return {
+        kind: 'clear', page: pageContext(), summary, issues: [], selectedId: '', can,
+        detail: { tag: 'Audit clear', position: 'No blocking issues', title: 'No blocking issues found',
+                  description: `The repaired page passed the on-device accessibility audit. ${fixedNote}` },
+      };
+    }
+
+    // Selection falls back to the first finding whenever the remembered one
+    // is not in this list.
+    const selected = list.find((i) => i.id === selectedId) ?? list[0];
+    const idx = list.findIndex((i) => i.id === selected.id);
+    return {
+      kind: 'review', page: pageContext(), summary, issues: list, selectedId: selected.id, can,
+      detail: {
+        tag: selected.severity === 'fail' ? 'Fails checks' : 'Needs review',
+        position: `Issue ${idx + 1} of ${list.length}`,
+        title: selected.title,
+        description: `Surfaced by the on-device accessibility audit. ${fixedNote}`,
+      },
+    };
+  }
+
+  return {
+    view,
+    get notice() { return notice; },
+    get remembered() { return selectedId; },   // exposed so the demo can show it
+
+    checkFinished(nextRun) {
+      run = nextRun;
+      // THE DIFFERENCE. Owning the state means a new check starts clean.
+      if (!selectionOutside) selectedId = '';
+      notice = { text: 'A check finished — results are in.', ok: true };
+    },
+    noCheckYet() {
+      run = null;
+      if (!selectionOutside) selectedId = '';
+      notice = null;
+    },
+    cameFrom(next) { source = next; notice = { text: 'Source of the page changed.', ok: true }; },
+
+    selectFinding(id) {
+      const known = issues().some((i) => i.id === id);
+      if (!known) { notice = { text: `Refused: there is no finding "${id}" on screen.`, ok: false }; return; }
+      selectedId = id;
+      notice = { text: 'Selected a different finding.', ok: true };
+    },
+    applyFix(id) {
+      const found = issues().find((i) => i.id === id);
+      notice = { text: found ? `Fix for “${found.title}” is in the repaired page.` : 'Repaired page is ready.', ok: true };
+    },
+    skipFinding() { notice = { text: 'Issue skipped.', ok: true }; },
+    copyFix() { notice = { text: 'Copied to clipboard.', ok: true }; },
+
+    downloadRepairedPage() {
+      if (!view().can.download) { notice = { text: 'Refused: the page still fails a check, so it cannot be downloaded.', ok: false }; return; }
+      notice = { text: 'Downloaded the repaired page.', ok: true };
+    },
+    copyForCanvas() {
+      if (!view().can.copyForCanvas) { notice = { text: 'Refused: the page still fails a check, so it cannot be pasted into Canvas.', ok: false }; return; }
+      notice = { text: 'Copied — paste into the Canvas editor.', ok: true };
+    },
+    openInCanvas() {
+      const url = canvasEditUrl();
+      notice = url ? { text: `Opening ${url}`, ok: true }
+                   : { text: 'Refused: this page did not come from a Canvas import we can link back to.', ok: false };
+    },
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Everything below is the throwaway page.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const RUN_MIXED = { label: 'a check with 1 failure + 2 warnings', repaired: true, fixedCount: 4, findings: [
+  { id: 'image-alt',     title: 'Image has no alternative text',        category: 'error',    severity: 'blocker' },
+  { id: 'heading-order', title: 'Heading level skipped (H1 → H4)',      category: 'structure', severity: 'warning' },
+  { id: 'contrast',      title: 'Text contrast is below 4.5:1',         category: 'contrast',  severity: 'warning' },
+]};
+const RUN_WARNINGS = { label: 'a check with warnings only', repaired: true, fixedCount: 2, findings: [
+  { id: 'contrast',      title: 'Text contrast is below 4.5:1',         category: 'contrast', severity: 'warning' },
+  { id: 'td-has-header', title: 'Data table has no header row',         category: 'structure', severity: 'alert' },
+]};
+const RUN_OTHER_PAGE = { label: 'a check on a DIFFERENT page', repaired: true, fixedCount: 1, findings: [
+  { id: 'link-name',     title: 'Link has no discernible text',         category: 'aria',     severity: 'blocker' },
+  { id: 'contrast',      title: 'Text contrast is below 4.5:1',         category: 'contrast', severity: 'warning' },
+]};
+const RUN_CLEAN = { label: 'a check that found nothing, after repairs', repaired: true, fixedCount: 6, findings: [] };
+const RUN_NOTHING = { label: 'a check with nothing to show', repaired: false, fixedCount: 0, findings: [] };
+
+const SRC_PASTED = { kind: 'pasted' };
+const SRC_DOCUMENT = { kind: 'document', fileName: 'week-3-syllabus.docx' };
+const SRC_CANVAS_FULL = { kind: 'canvas', pageTitle: 'Week 3 — Reading', baseUrl: 'https://laccd.instructure.com', courseId: '1842', pageId: 'week-3-reading' };
+const SRC_CANVAS_PARTIAL = { kind: 'canvas', pageTitle: 'Week 3 — Reading', baseUrl: 'https://laccd.instructure.com', courseId: '', pageId: 'week-3-reading' };
+
+let model = createReviewModel();
+let prev = null;
+let scenario = 0;
+let step = 0;
+
+const SCENARIOS = [
+  {
+    name: 'Working through findings',
+    blurb: 'The ordinary path. A check finishes on a pasted page with one failure and two warnings. Watch the position label (“Issue 2 of 3”) and which finding is highlighted as you move between them.',
+    setup: () => { model.cameFrom(SRC_PASTED); model.checkFinished(RUN_MIXED); },
+    steps: [
+      ['See the results arrive', 'The first finding is selected for you — nobody chose it.', (m) => m.checkFinished(RUN_MIXED)],
+      ['Open the heading problem', 'Position and detail should both follow the selection.', (m) => m.selectFinding('heading-order')],
+      ['Apply that fix', 'A confirmation appears; the finding stays on screen.', (m) => m.applyFix('heading-order')],
+      ['Skip the contrast one', 'Skipping should not change what is selected.', (m) => m.skipFinding()],
+    ],
+  },
+  {
+    name: 'Selection goes stale',
+    blurb: 'THE ONE THAT MATTERS. Select the contrast finding, then run a check on a completely different page that happens to also have a contrast finding. Should the screen still be pointed at “contrast” — a finding from a page you are no longer looking at? Tick the comparison toggle and run this twice.',
+    setup: () => { model.cameFrom(SRC_PASTED); model.checkFinished(RUN_MIXED); },
+    steps: [
+      ['Start on the first page', 'Three findings, first one selected.', (m) => { m.cameFrom(SRC_PASTED); m.checkFinished(RUN_MIXED); }],
+      ['Select the contrast finding', 'Now “contrast” is what the instructor is looking at.', (m) => m.selectFinding('contrast')],
+      ['Run a check on a different page', 'A new page, new findings — but one of them is also called “contrast”.', (m) => m.checkFinished(RUN_OTHER_PAGE)],
+      ['Now look at what is selected', 'Model owns it → back to the first finding. Today → still “contrast”, carried over from a page you left.', (m) => m.skipFinding()],
+    ],
+  },
+  {
+    name: 'A failing page must not escape',
+    blurb: 'The safety rule: while anything still fails, the repaired page cannot be downloaded or pasted into Canvas. Try it while failing, then on a page with warnings only.',
+    setup: () => { model.cameFrom(SRC_CANVAS_FULL); model.checkFinished(RUN_MIXED); },
+    steps: [
+      ['Land on a page that still fails', 'One failure — so the badge is withheld.', (m) => { m.cameFrom(SRC_CANVAS_FULL); m.checkFinished(RUN_MIXED); }],
+      ['Try to download it anyway', 'Should be refused, in plain words.', (m) => m.downloadRepairedPage()],
+      ['Try to copy it into Canvas', 'Refused for the same reason.', (m) => m.copyForCanvas()],
+      ['Now a page with warnings only', 'No failures — so both become available.', (m) => m.checkFinished(RUN_WARNINGS)],
+      ['Download it', 'Allowed now.', (m) => m.downloadRepairedPage()],
+    ],
+  },
+  {
+    name: 'Clean, versus nothing at all',
+    blurb: 'Two situations that look alike and must not be confused: a check that ran and found nothing (worth celebrating, and downloadable), and no check having happened yet (an empty screen that offers to start one).',
+    setup: () => { model.cameFrom(SRC_DOCUMENT); model.noCheckYet(); },
+    steps: [
+      ['No check has run yet', 'The screen should be empty and offer to start one.', (m) => m.noCheckYet()],
+      ['A check finds nothing to fix', 'Not empty — “Audit clear”, with the repaired page available.', (m) => m.checkFinished(RUN_CLEAN)],
+      ['Download the clean page', 'Nothing failed, so this is allowed.', (m) => m.downloadRepairedPage()],
+      ['A check with nothing to show at all', 'No findings AND no repaired page — back to empty.', (m) => m.checkFinished(RUN_NOTHING)],
+    ],
+  },
+  {
+    name: 'Linking back to Canvas',
+    blurb: '“Open in Canvas” needs three facts: the Canvas address, the course, and the page. Miss any one and the instructor gets copy-only. Watch the permission change as the source changes.',
+    setup: () => { model.cameFrom(SRC_PASTED); model.checkFinished(RUN_WARNINGS); },
+    steps: [
+      ['A pasted page', 'Nothing to link back to.', (m) => { m.cameFrom(SRC_PASTED); m.checkFinished(RUN_WARNINGS); }],
+      ['Try to open it in Canvas', 'Refused — it never came from Canvas.', (m) => m.openInCanvas()],
+      ['A Canvas page, missing its course', 'Imported, but we do not know the course.', (m) => m.cameFrom(SRC_CANVAS_PARTIAL)],
+      ['Try again', 'Still refused — two out of three is not enough.', (m) => m.openInCanvas()],
+      ['A fully identified Canvas page', 'All three facts present.', (m) => m.cameFrom(SRC_CANVAS_FULL)],
+      ['Open it in Canvas', 'Now it works.', (m) => m.openInCanvas()],
+    ],
+  },
+];
+
+const FREE_PLAY = {
+  'fp-runs': [
+    ['Check finished: 1 failure + 2 warnings', (m) => m.checkFinished(RUN_MIXED)],
+    ['Check finished: warnings only', (m) => m.checkFinished(RUN_WARNINGS)],
+    ['Check finished: a different page', (m) => m.checkFinished(RUN_OTHER_PAGE)],
+    ['Check finished: found nothing', (m) => m.checkFinished(RUN_CLEAN)],
+    ['Check finished: nothing to show', (m) => m.checkFinished(RUN_NOTHING)],
+    ['No check has run yet', (m) => m.noCheckYet()],
+  ],
+  'fp-source': [
+    ['Pasted HTML', (m) => m.cameFrom(SRC_PASTED)],
+    ['Converted document', (m) => m.cameFrom(SRC_DOCUMENT)],
+    ['Canvas page (fully identified)', (m) => m.cameFrom(SRC_CANVAS_FULL)],
+    ['Canvas page (no course)', (m) => m.cameFrom(SRC_CANVAS_PARTIAL)],
+  ],
+  'fp-issues': [
+    ['Select: missing alt text', (m) => m.selectFinding('image-alt')],
+    ['Select: heading skipped', (m) => m.selectFinding('heading-order')],
+    ['Select: contrast', (m) => m.selectFinding('contrast')],
+    ['Select: a finding not on screen', (m) => m.selectFinding('nonexistent-rule')],
+    ['Apply the selected fix', (m) => m.applyFix(m.view().selectedId)],
+    ['Skip this finding', (m) => m.skipFinding()],
+    ['Copy just this fix', (m) => m.copyFix()],
+  ],
+  'fp-export': [
+    ['Download the repaired page', (m) => m.downloadRepairedPage()],
+    ['Copy for the Canvas editor', (m) => m.copyForCanvas()],
+    ['Open in Canvas', (m) => m.openInCanvas()],
+  ],
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+function field(k, v, was) {
+  const changed = was !== undefined && was !== v ? ' changed' : '';
+  return `<div class="field"><span class="k">${k}</span><span class="v${changed}">${esc(v)}</span></div>`;
+}
+
+function renderState() {
+  const v = model.view();
+  const p = prev;
+  let html = '';
+
+  if (v.kind === 'empty') {
+    html += `<p style="color:var(--muted)"><strong>Empty screen.</strong> No accessibility run to show — the screen
+             offers “Start a check” and nothing else.</p>`;
+    html += field('Screen', 'Empty', p && p.kind);
+  } else {
+    html += field('Screen', v.kind === 'clear' ? 'Audit clear' : 'Findings to review', p && (p.kind === 'clear' ? 'Audit clear' : p.kind === 'review' ? 'Findings to review' : 'Empty'));
+    html += field('Page', `${v.page.title} · ${v.page.path}`, p && p.page && `${p.page.title} · ${p.page.path}`);
+    html += field('Fails', v.summary.fail, p && p.summary && p.summary.fail);
+    html += field('Needs review', v.summary.warn, p && p.summary && p.summary.warn);
+    html += field('Auto-fixed', v.summary.pass, p && p.summary && p.summary.pass);
+
+    if (v.issues.length) {
+      html += `<h3 style="margin-top:18px">Findings</h3>`;
+      for (const i of v.issues) {
+        const sel = i.id === v.selectedId;
+        html += `<div class="issue ${i.severity} ${sel ? 'sel' : ''}">
+                   <span class="marker">${sel ? '▸' : ''}</span><span class="dot"></span>
+                   <span>${esc(i.title)} <span style="color:var(--muted);font-weight:400">· ${esc(i.element)}</span></span>
+                 </div>`;
+      }
+    }
+
+    html += `<h3 style="margin-top:18px">What the instructor is reading</h3>`;
+    html += field('Status', v.detail.tag, p && p.detail && p.detail.tag);
+    html += field('Position', v.detail.position, p && p.detail && p.detail.position);
+    html += field('Finding', v.detail.title, p && p.detail && p.detail.title);
+  }
+
+  html += `<h3 style="margin-top:18px">The memory in question</h3>`;
+  html += field('Remembered selection', model.remembered === '' ? '(none — falls back to the first)' : model.remembered,
+                p && p.__remembered);
+  html += `<p style="font-size:13px;color:var(--muted);margin:8px 0 0">
+             Lives ${model.__outside ? '<strong>outside</strong> the model (today)' : '<strong>inside</strong> the model (ADR-0002)'}.
+           </p>`;
+
+  $('state').innerHTML = html;
+
+  const caps = v.kind === 'empty' ? { download: false, copyForCanvas: false, openInCanvas: null } : v.can;
+  $('caps').innerHTML =
+    `<span class="pill ${caps.download ? 'yes' : 'no'}">${caps.download ? '✓' : '✕'} Download the repaired page</span>
+     <span class="pill ${caps.copyForCanvas ? 'yes' : 'no'}">${caps.copyForCanvas ? '✓' : '✕'} Copy for the Canvas editor</span>
+     <span class="pill ${caps.openInCanvas ? 'yes' : 'no'}">${caps.openInCanvas ? '✓' : '✕'} Open in Canvas</span>`;
+
+  const n = model.notice;
+  $('notice').innerHTML = n ? `<div class="notice ${n.ok ? '' : 'refused'}">${esc(n.text)}</div>` : '';
+
+  const snap = model.view();
+  prev = { ...snap, __remembered: model.remembered === '' ? '(none — falls back to the first)' : model.remembered };
+}
+
+function act(fn) { fn(model); renderState(); }
+
+function renderFreePlay() {
+  for (const [id, list] of Object.entries(FREE_PLAY)) {
+    const host = $(id);
+    host.innerHTML = '';
+    for (const [label, fn] of list) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.onclick = () => act(fn);
+      host.appendChild(b);
+    }
+  }
+}
+
+function renderTabs() {
+  const host = $('tabs');
+  host.innerHTML = '';
+  SCENARIOS.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.textContent = s.name;
+    if (i === scenario) b.className = 'on';
+    b.onclick = () => { scenario = i; startScenario(); };
+    host.appendChild(b);
+  });
+}
+
+function startScenario() {
+  step = 0;
+  model = createReviewModel({ selectionOutside: $('legacy').checked });
+  model.__outside = $('legacy').checked;
+  prev = null;
+  SCENARIOS[scenario].setup();
+  renderTabs();
+  renderScenario();
+  renderState();
+}
+
+function renderScenario() {
+  const s = SCENARIOS[scenario];
+  let html = `<p style="font-size:14px">${esc(s.blurb)}</p>`;
+  html += `<div style="margin-top:14px">`;
+  s.steps.forEach((st, i) => {
+    const cls = i < step ? 'past' : i === step ? 'now' : '';
+    html += `<div class="step ${cls}">
+               <span class="n">${i < step ? '✓' : i + 1}</span>
+               <span class="label"><button data-step="${i}" ${i === step ? 'class="primary"' : i < step ? 'class="done"' : ''}>${esc(st[0])}</button>
+               <span class="why">${esc(st[1])}</span></span>
+             </div>`;
+  });
+  html += `</div><div class="btns" style="margin-top:14px"><button id="restart">Restart this walkthrough</button></div>`;
+  $('scenario').innerHTML = html;
+
+  $('scenario').querySelectorAll('button[data-step]').forEach((b) => {
+    b.onclick = () => {
+      const i = Number(b.dataset.step);
+      SCENARIOS[scenario].steps[i][2](model);
+      step = Math.max(step, i + 1);
+      renderScenario();
+      renderState();
+    };
+  });
+  $('restart').onclick = startScenario;
+}
+
+$('legacy').onchange = startScenario;
+renderFreePlay();
+startScenario();
+</script>
+</body>
+</html>
