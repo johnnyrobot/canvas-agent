@@ -41,12 +41,19 @@ test('convert ensures the docling-serve sidecar is running BEFORE converting (C4
   assert.deepEqual(f.calls, ['ensureRunning', 'convertFile']);
 });
 
-test('the sidecar is started at most once across repeated conversions (C4)', async () => {
+test('every conversion defers the start decision to the process lifecycle (C4)', async () => {
   const f = fakes();
   const sidecar = createDoclingSidecar({ process: f.process, client: f.client });
   await sidecar.convert({ base64: 'QUJD', filename: 'a.pdf' });
   await sidecar.convert({ base64: 'QUJD', filename: 'b.pdf' });
-  assert.equal(f.started(), 1);
+  // At-most-once used to be enforced HERE, by a memo on `DoclingSidecar`.
+  // ADR-0004 moved that memo down into `SidecarLifecycle.ensureRunning` — i.e.
+  // below this injected fake — so the facade now asks per conversion and the
+  // lifecycle dedupes. The at-most-one-SPAWN guarantee is tested against a real
+  // spawn fake in `src/sidecar/lifecycle.test.ts`; what is left to assert here
+  // is that the facade never converts without asking first.
+  assert.deepEqual(f.calls, ['ensureRunning', 'convertFile', 'ensureRunning', 'convertFile']);
+  assert.equal(f.started(), 2, 'asks every time; the lifecycle below decides');
 });
 
 test('modelStatus reflects whether the models are present on disk', async () => {

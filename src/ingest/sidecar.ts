@@ -13,7 +13,7 @@ import type {
 } from './types.js';
 import { loadIngestConfig, type Env } from './config.js';
 import { DoclingClient } from './client.js';
-import { DoclingProcess, type IngestProcessLogger } from './process.js';
+import { DoclingProcess, type SidecarLogger } from './process.js';
 import { downloadModels, type DownloadSpawnLike } from './model-download.js';
 
 /** The convert surface the sidecar facade needs (real `DoclingClient` satisfies it). */
@@ -23,7 +23,7 @@ type SidecarProcess = Pick<DoclingProcess, 'ensureRunning' | 'stop' | 'isHealthy
 
 export interface CreateIngestOptions {
   env?: Env;
-  logger?: IngestProcessLogger;
+  logger?: SidecarLogger;
   /** Test seam: inject a fake convert client (defaults to the real `DoclingClient`). */
   client?: ConvertClient;
   /** Test seam: inject a fake process lifecycle (defaults to the real `DoclingProcess`). */
@@ -86,23 +86,18 @@ export class DoclingSidecar {
     }
   }
 
-  /** Memoized in-flight start so concurrent/repeat conversions spawn the daemon once. */
-  private starting: Promise<void> | undefined;
-
   /**
    * Ensure the daemon is up before any conversion (attach-if-running /
-   * spawn-if-not). Memoized on success; cleared on failure so a later call can
-   * retry. Without this, `convert*` hit a dead endpoint because nothing ever
-   * starts the sidecar (the lifecycle was never wired into the runtime).
+   * spawn-if-not). Without this, `convert*` hit a dead endpoint because nothing
+   * ever starts the sidecar (the lifecycle was never wired into the runtime).
+   *
+   * The memoization that used to live here — memoized on success, cleared on
+   * failure — moved DOWN into `SidecarLifecycle.ensureRunning` (ADR-0004), which
+   * is how the LLM sidecar gained the same guard. `stop()` clearing the memo
+   * moved with it.
    */
   private ensureStarted(): Promise<void> {
-    if (!this.starting) {
-      this.starting = this.process.ensureRunning().catch((err: unknown) => {
-        this.starting = undefined;
-        throw err;
-      });
-    }
-    return this.starting;
+    return this.process.ensureRunning();
   }
 
   async start(): Promise<void> {
@@ -110,7 +105,6 @@ export class DoclingSidecar {
   }
 
   async stop(): Promise<void> {
-    this.starting = undefined;
     await this.process.stop();
   }
 
