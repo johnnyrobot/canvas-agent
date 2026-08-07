@@ -253,17 +253,11 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-test('registerIpc registers a handler for every channel', () => {
-  const ipc = fakeIpcMain();
-  const { api } = fakeApi();
-  registerIpc(ipc, api);
-  for (const channel of Object.values(CHANNELS)) {
-    assert.ok(ipc.handlers.has(channel), `expected a handler for ${channel}`);
-  }
-  assert.equal(ipc.handlers.size, Object.keys(CHANNELS).length);
-  // The one-way CHUNK event is a `send`, never a `handle`.
-  assert.ok(!ipc.handlers.has(CHUNK), 'CHUNK must not have a request/response handler');
-});
+// NOTE: the former 'registerIpc registers a handler for every channel' test was
+// deleted per ADR-0001. Handlers are now derived from `CHANNELS`, which carries
+// `satisfies Record<keyof AppApi, string>` — a missing method and an excess key
+// both fail to compile, so the assertion (including its `!handlers.has(CHUNK)`
+// half, since `chunk` is not an `AppApi` member) is subsumed by the compiler.
 
 test('runTurn channel (no turnId) delegates to api.runTurn and wraps the value', async () => {
   const ipc = fakeIpcMain();

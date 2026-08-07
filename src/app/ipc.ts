@@ -6,6 +6,13 @@
  * be unit-tested with a fake `ipcMain` + a fake `AppApi`. `main.ts` passes the
  * real `ipcMain`.
  *
+ * Coverage is by construction, not by convention: the three streaming channels
+ * are hand-written (they do work a table cannot express), and every other
+ * handler is DERIVED by looping `CHANNELS`, which is itself compiler-checked
+ * for completeness against `AppApi`. `registerIpc` takes `AppApi` as a
+ * parameter, which constrains its callers rather than its body — the derivation
+ * is what makes the body exhaustive.
+ *
  * Every handler returns a discriminated `IpcResult` envelope rather than letting
  * an error escape. The matching `bridge.ts` unwraps it on the renderer side, so
  * a runtime failure surfaces as a rejected promise in the UI — never a silent
@@ -17,40 +24,14 @@
  * route it to the right `onChunk` callback. The final `TurnView` still comes
  * back through the normal `IpcResult` reply.
  */
-import type {
-  AppApi,
-  BrandKit,
-  CanvasConfig,
-  ProductMode,
-  TurnRequest,
-  UploadedDocument,
-} from '../contracts/index.js';
+import type { AppApi, TurnRequest } from '../contracts/index.js';
 import {
+  CHANNELS,
   RUN_TURN,
-  SAVE_CANVAS_AUTH,
-  IMPORT_CANVAS,
-  HEALTH,
   PULL_MODEL,
   PULL_PROGRESS,
   PULL_INGEST_MODEL,
   INGEST_PULL_PROGRESS,
-  CREATE_SESSION,
-  LIST_SESSIONS,
-  LOAD_SESSION,
-  DELETE_SESSION,
-  RESOLVE_BRAND_THEME,
-  LIST_BRAND_KITS,
-  SAVE_BRAND_KIT,
-  DELETE_BRAND_KIT,
-  FETCH_CANVAS_PAGE,
-  LIST_CANVAS_PAGES,
-  CONVERT_DOCUMENT,
-  SCREENSHOT_PERMISSION_STATUS,
-  LIST_SCREENSHOT_SOURCES,
-  CAPTURE_SCREENSHOT,
-  CATALOG_AVAILABLE,
-  CATALOG_SEARCH,
-  CATALOG_GET,
   CHUNK,
 } from './channels.js';
 
@@ -103,10 +84,19 @@ async function envelope<T>(fn: () => Promise<T>): Promise<IpcResult<T>> {
  * global state — everything it needs is injected.
  */
 export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
+  // Registering through this wrapper (rather than `ipcMain.handle` directly)
+  // records what has been handled, so the derived loop at the bottom can skip
+  // the hand-written streaming channels without a second list to keep in sync.
+  const handled = new Set<string>();
+  const handle: IpcMainLike['handle'] = (channel, listener) => {
+    handled.add(channel);
+    ipcMain.handle(channel, listener);
+  };
+
   // Streaming turn: payload is `{ req, turnId? }`. With a `turnId`, stream each
   // chunk back over the CHUNK event tagged with that id; always reply with the
   // final TurnView through the envelope.
-  ipcMain.handle(RUN_TURN, (event, payload) => {
+  handle(RUN_TURN, (event, payload) => {
     const { req, turnId } = (payload ?? {}) as { req: TurnRequest; turnId?: string };
     return envelope(() => {
       if (turnId === undefined) return api.runTurn(req);
@@ -115,21 +105,10 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
     });
   });
 
-  // The token crosses the boundary ONLY here, into the Keychain.
-  ipcMain.handle(SAVE_CANVAS_AUTH, (_event, auth) =>
-    envelope(() => api.saveCanvasAuth(auth as CanvasConfig)),
-  );
-
-  ipcMain.handle(IMPORT_CANVAS, (_event, baseUrl, courseId) =>
-    envelope(() => api.importCanvas(baseUrl as string, courseId as string)),
-  );
-
-  ipcMain.handle(HEALTH, () => envelope(() => api.health()));
-
   // First-run model download: payload is `{ pullId? }`. With a `pullId`, stream
   // each progress update back over the PULL_PROGRESS event tagged with that id;
   // the final reply (void on success, error envelope on failure) returns normally.
-  ipcMain.handle(PULL_MODEL, (event, payload) => {
+  handle(PULL_MODEL, (event, payload) => {
     const { pullId } = (payload ?? {}) as { pullId?: string };
     return envelope(() => {
       if (pullId === undefined) return api.pullModel();
@@ -140,7 +119,7 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
 
   // First-run Docling model download — same streaming shape as PULL_MODEL,
   // tagged over the INGEST_PULL_PROGRESS event channel.
-  ipcMain.handle(PULL_INGEST_MODEL, (event, payload) => {
+  handle(PULL_INGEST_MODEL, (event, payload) => {
     const { pullId } = (payload ?? {}) as { pullId?: string };
     return envelope(() => {
       if (pullId === undefined) return api.pullIngestModel();
@@ -149,71 +128,22 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
     });
   });
 
-  // ── Sessions ───────────────────────────────────────────────────────────────
-  ipcMain.handle(CREATE_SESSION, (_event, init) =>
-    envelope(() => api.createSession(init as { title: string; mode: ProductMode })),
-  );
-
-  ipcMain.handle(LIST_SESSIONS, () => envelope(() => api.listSessions()));
-
-  ipcMain.handle(LOAD_SESSION, (_event, sessionId) =>
-    envelope(() => api.loadSession(sessionId as string)),
-  );
-
-  ipcMain.handle(DELETE_SESSION, (_event, sessionId) =>
-    envelope(() => api.deleteSession(sessionId as string)),
-  );
-
-  // ── Brand kits ───────────────────────────────────────────────────────────────
-  ipcMain.handle(RESOLVE_BRAND_THEME, (_event, primary, secondary) =>
-    envelope(() => api.resolveBrandTheme(primary as string, secondary as string)),
-  );
-
-  ipcMain.handle(LIST_BRAND_KITS, () => envelope(() => api.listBrandKits()));
-
-  ipcMain.handle(SAVE_BRAND_KIT, (_event, kit) =>
-    envelope(() => api.saveBrandKit(kit as Omit<BrandKit, 'id' | 'createdAt'>)),
-  );
-
-  ipcMain.handle(DELETE_BRAND_KIT, (_event, id) =>
-    envelope(() => api.deleteBrandKit(id as string)),
-  );
-
-  // ── Read-only Canvas page access (token-free; baseUrl only) ──────────────────
-  ipcMain.handle(FETCH_CANVAS_PAGE, (_event, baseUrl, courseId, pageId) =>
-    envelope(() =>
-      api.fetchCanvasPage(baseUrl as string, courseId as string, pageId as string),
-    ),
-  );
-
-  ipcMain.handle(LIST_CANVAS_PAGES, (_event, baseUrl, courseId) =>
-    envelope(() => api.listCanvasPages(baseUrl as string, courseId as string)),
-  );
-
-  // ── Local document conversion ─────────────────────────────────────────────
-  ipcMain.handle(CONVERT_DOCUMENT, (_event, document) =>
-    envelope(() => api.convertDocument(document as UploadedDocument)),
-  );
-
-  // ── Catalog enrichment (OPTIONAL; degrades to absent when the CLI isn't installed) ──
-  ipcMain.handle(CATALOG_AVAILABLE, () => envelope(() => api.catalogAvailable()));
-
-  ipcMain.handle(CATALOG_SEARCH, (_event, query) =>
-    envelope(() => api.catalogSearch(query as string)),
-  );
-
-  ipcMain.handle(CATALOG_GET, (_event, id) => envelope(() => api.catalogGet(id as number)));
-
-  // ── Screenshot capture ─────────────────────────────────────────────────────
-  ipcMain.handle(SCREENSHOT_PERMISSION_STATUS, () =>
-    envelope(() => api.screenshotPermissionStatus()),
-  );
-
-  ipcMain.handle(LIST_SCREENSHOT_SOURCES, () =>
-    envelope(() => api.listScreenshotSources()),
-  );
-
-  ipcMain.handle(CAPTURE_SCREENSHOT, (_event, sourceId) =>
-    envelope(() => api.captureScreenshot(sourceId as string)),
-  );
+  // ── Everything else, derived from the channel table ────────────────────────
+  // The remaining twenty channels are uniformly
+  // `(…args) => envelope(() => api.method(...args))`, so they are derived by
+  // looping `CHANNELS` rather than hand-written. `CHANNELS` carries a
+  // `satisfies Record<keyof AppApi, string>` constraint (see `channels.ts`),
+  // so a new `AppApi` method cannot reach this loop without a channel — which
+  // is what makes the registration exhaustive by construction. The three
+  // streaming channels above are skipped because they are already registered.
+  for (const [method, channel] of Object.entries(CHANNELS) as [keyof AppApi, string][]) {
+    if (handled.has(channel)) continue;
+    // TypeScript cannot correlate `method` to `Parameters<AppApi[typeof method]>`
+    // across a runtime-computed key, so the call is erased to `unknown[]` here.
+    // The arguments were already `unknown` at the `IpcMainLike.handle` seam, so
+    // this widens nothing that was narrow — but it does mean a change to a
+    // method's parameter list gets no compiler feedback in this file.
+    const apiMethod = api[method] as (...args: unknown[]) => Promise<unknown>;
+    handle(channel, (_event, ...args) => envelope(() => apiMethod.apply(api, args)));
+  }
 }
