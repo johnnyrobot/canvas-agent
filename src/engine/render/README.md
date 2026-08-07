@@ -17,30 +17,53 @@ unconditional output gate (`enforceGate` → `audit(html)` in
 
 | Export | What |
 | --- | --- |
-| `audit: Auditor` | Production audit (Chromium + axe-core + computed contrast). |
+| `audit: Auditor` | **One-shot** production audit — launch, scan once, close. |
 | `createAuditor(runner, options?)` | The **pure mapping core** (DI seam; this is what the unit tests drive). |
-| `playwrightRunner` / `createPlaywrightRunner(opts?)` | The real headless-Chromium `ScanRunner`. |
+| `createPlaywrightRunner(opts?)` | The real headless-Chromium runner. **Owns a browser — dispose it.** |
 | `severityForImpact`, `semanticCategory`, types | Mapping helpers + the local axe/scan type surface. |
 
 `audit` launches a browser **only when called**. `playwright`/`axe-core` are
 loaded via dynamic `import()` *inside* `run()`, so importing this module (or
 wiring `audit`) never touches a browser.
 
+## Browser lifetime (ADR-0005)
+
+A runner from `createPlaywrightRunner()` holds **one** Chromium for its own
+lifetime: launched lazily on the first `run()`, reused by every later `run()`,
+released by `dispose()`. Construct one **per turn** and dispose it in a
+`finally` — a remediate turn scans up to five times (source gate, first repair,
+up to three re-audits) and those five scans used to be five launches.
+
+There is deliberately **no module-level runner**. One would hold a Chromium
+process nobody closes: the app has no shutdown path to hang a teardown off, so
+a process-wide instance is a leak, not a cache. `audit` therefore constructs and
+disposes its own runner per call — right for a single audit (the build gate),
+wrong for a loop.
+
+`ScanRunner` stays a **single method** on purpose. `dispose()` lives on the
+wider `DisposableScanRunner`, returned only by the factory that actually
+allocates something; putting it on `ScanRunner` would force every injected test
+fake to grow a lifecycle it does not have.
+
 ## Architecture (so tests stay offline)
 
 ```
-audit(html) = createAuditor(playwrightRunner)
+audit(html) = createAuditor(createPlaywrightRunner())   ← one-shot; disposed after
                    │                  │
        pure mapping (offline)   ScanRunner (Chromium) — injected
+
+per turn:   runner = createPlaywrightRunner()   ← ONE browser…
+            createAuditor(runner)(html) × 5     ← …reused by every scan
+            runner.dispose()                    ← …closed in a finally
 ```
 
 - **`ScanRunner`** (`types.ts`): `run(html) → { axe, textRuns }`. The injection
-  seam. Production = `playwrightRunner`; unit tests = a fake returning canned data.
+  seam. Production = `createPlaywrightRunner()`; unit tests = a fake returning canned data.
   Each `TextRun` carries a classified `ResolvedBackground` (`layers`, `gradient`,
   `image` with sampled swatches, or `unresolvable`).
 - **`createAuditor(runner)`** (`auditor.ts`): pure axe-results + contrast-pairs →
   `IssueSet`. **No browser, no network.** This is the bulk of the test coverage.
-- **`playwrightRunner`** (`playwright-runner.ts`): launches Chromium, injects the
+- **`createPlaywrightRunner()`** (`playwright-runner.ts`): launches Chromium, injects the
   fragment into the Canvas-like shell, injects `axe.source`, runs axe at the
   WCAG A/AA tags, and for each visible text run resolves the foreground color and
   classifies the background into a `ResolvedBackground` discriminated union

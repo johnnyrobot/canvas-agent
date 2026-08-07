@@ -13,8 +13,15 @@
  */
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import type { LaunchOptions } from 'playwright';
-import type { AxeResults, ImageAlt, ScanResult, ScanRunner, TextRun, ResolvedBackground } from './types.js';
+import type { Browser, LaunchOptions } from 'playwright';
+import type {
+  AxeResults,
+  DisposableScanRunner,
+  ImageAlt,
+  ScanResult,
+  TextRun,
+  ResolvedBackground,
+} from './types.js';
 import type { TextSize } from '../../contracts/index.js';
 import { decodePng } from './png.js';
 import { sampleBackground } from './sample.js';
@@ -29,6 +36,22 @@ export interface PlaywrightRunnerOptions {
   settleDelayMs?: number;
   /** Extra Chromium launch options (e.g. `executablePath`, `channel`, `headless`). */
   launchOptions?: LaunchOptions;
+  /**
+   * Injection seam for `chromium.launch` so the runner's BROWSER LIFETIME can be
+   * unit-tested offline (how many launches, when the close happens) without a
+   * Chromium binary. Production never sets this.
+   */
+  launch?: (options: LaunchOptions) => Promise<Browser>;
+}
+
+/**
+ * The real launcher. `playwright` is loaded by dynamic `import()` so that merely
+ * importing this module never pulls the browser driver in — that is what keeps
+ * `npm test` offline.
+ */
+async function defaultLaunch(options: LaunchOptions): Promise<Browser> {
+  const { chromium } = await import('playwright');
+  return chromium.launch(options);
 }
 
 /**
@@ -228,17 +251,75 @@ function clampClip(rect: { x: number; y: number; width: number; height: number }
 }
 
 /**
- * Build a Chromium-backed `ScanRunner`. One browser is launched per `run()` and
- * always closed; a single fragment is small, so per-call launch keeps the runner
- * stateless and leak-free (the orchestrator scans one fragment at a time).
+ * Build a Chromium-backed `ScanRunner` that holds ONE browser for its own
+ * lifetime (ADR-0005).
+ *
+ * The browser is launched lazily on the first `run()`, reused by every later
+ * `run()`, and closed by `dispose()`. A remediate turn audits up to five times —
+ * source gate, first repair, then up to three re-audits — and those five scans
+ * used to be five Chromium launches.
+ *
+ * The runner therefore OWNS a process, which makes disposal mandatory:
+ * construct one per turn and `dispose()` it in a `finally`. There is
+ * deliberately no module-level instance — nobody would be there to dispose it,
+ * and the app has no shutdown path to hang one off (ADR-0005).
  */
-export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): ScanRunner {
+export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): DisposableScanRunner {
   const viewportWidth = options.viewportWidth ?? envInt('RENDER_VIEWPORT_WIDTH', 1200);
   const viewportHeight = options.viewportHeight ?? envInt('RENDER_VIEWPORT_HEIGHT', 900);
   const settleDelayMs = options.settleDelayMs ?? envInt('RENDER_SETTLE_DELAY_MS', 1000);
   const launchOptions = options.launchOptions ?? {};
 
+  /** The one browser, as an in-flight promise so concurrent `run()`s share a launch. */
+  let browserPromise: Promise<Browser> | undefined;
+  /** Disposal is FINAL — see `browserFor`. */
+  let disposed = false;
+
+  const launch = options.launch ?? defaultLaunch;
+
+  const browserFor = (): Promise<Browser> => {
+    // Refuse to launch after disposal rather than quietly starting a browser
+    // that the disposer is no longer around to close. `run()` awaits the
+    // axe-core import BEFORE it reaches here, so a `dispose()` landing in that
+    // window would otherwise leak an entire Chromium.
+    if (disposed) {
+      return Promise.reject(new Error('This ScanRunner has been disposed; construct a new one.'));
+    }
+    if (!browserPromise) {
+      browserPromise = launch({
+        headless: true,
+        // Use the open-source **chromium-headless-shell** (BSD) rather than the
+        // full "Chrome for Testing" build. The auditor only needs headless
+        // rendering + screenshots, and the shell carries no Widevine CDM
+        // (proprietary DRM we may not redistribute) or Google-proprietary
+        // Chrome-for-Testing bits — and it is ~340MB smaller. Skipped when a
+        // caller pins an explicit `executablePath` (e.g. a test binary);
+        // `launchOptions` still overrides everything.
+        ...(launchOptions.executablePath ? {} : { channel: 'chromium-headless-shell' }),
+        ...launchOptions,
+      }).catch((err: unknown) => {
+        // A failed LAUNCH must not be cached — the next scan should retry. A
+        // failed SCAN, by contrast, leaves a perfectly good browser in place.
+        browserPromise = undefined;
+        throw err;
+      });
+    }
+    return browserPromise;
+  };
+
   return {
+    async dispose(): Promise<void> {
+      disposed = true;
+      const pending = browserPromise;
+      if (!pending) return;
+      browserPromise = undefined;
+      // Swallow a close failure: dispose runs in a `finally`, and masking the
+      // turn's real error with a teardown error would be strictly worse. A
+      // launch that rejected has already cleared the cache above, so awaiting
+      // it here cannot resurrect it.
+      await pending.then((browser) => browser.close()).catch(() => {});
+    },
+
     async run(html: string): Promise<ScanResult> {
       // When packaged, point playwright at the bundled Chromium BEFORE it loads, so
       // `chromium.launch()` resolves the in-`.app` browser instead of a dev-only
@@ -250,22 +331,13 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
         if (bundled) process.env.PLAYWRIGHT_BROWSERS_PATH = bundled;
       }
 
-      const { chromium } = await import('playwright');
       const axeSource = (await import('axe-core')).default.source;
-
-      // Use the open-source **chromium-headless-shell** (BSD) rather than the full
-      // "Chrome for Testing" build. The auditor only needs headless rendering +
-      // screenshots, and the shell carries no Widevine CDM (proprietary DRM we may
-      // not redistribute) or Google-proprietary Chrome-for-Testing bits — and it is
-      // ~340MB smaller. Skipped when a caller pins an explicit `executablePath`
-      // (e.g. a test binary); `launchOptions` still overrides everything.
-      const browser = await chromium.launch({
-        headless: true,
-        ...(launchOptions.executablePath ? {} : { channel: 'chromium-headless-shell' }),
-        ...launchOptions,
-      });
+      const browser = await browserFor();
+      // The BROWSER outlives this call now, so the per-scan context must not:
+      // without this close, a five-audit turn would hold five contexts (and
+      // their pages) until dispose(). `browser.close()` used to sweep them.
+      const context = await browser.newContext({ viewport: { width: viewportWidth, height: viewportHeight } });
       try {
-        const context = await browser.newContext({ viewport: { width: viewportWidth, height: viewportHeight } });
         const page = await context.newPage();
         await page.setContent(wrapInCanvasShell(html), { waitUntil: 'load' });
         if (settleDelayMs > 0) await page.waitForTimeout(settleDelayMs);
@@ -304,11 +376,8 @@ export function createPlaywrightRunner(options: PlaywrightRunnerOptions = {}): S
 
         return { axe, textRuns, images };
       } finally {
-        await browser.close();
+        await context.close();
       }
     },
   };
 }
-
-/** Default Chromium-backed runner used by the exported `audit`. */
-export const playwrightRunner: ScanRunner = createPlaywrightRunner();

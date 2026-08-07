@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { AXE_RULE_OVERRIDES, AXE_TAGS, resolveBundledBrowsersPath } from './playwright-runner.js';
+import type { Browser } from 'playwright';
+import {
+  AXE_RULE_OVERRIDES,
+  AXE_TAGS,
+  createPlaywrightRunner,
+  resolveBundledBrowsersPath,
+} from './playwright-runner.js';
 
 // Browser-free: asserts the COVERAGE CLAIM encoded in the axe tag set. The product
 // states WCAG 2.2 AA; axe-core 4.12 tags rules by version+level, so the scan must
@@ -54,4 +60,191 @@ test('rule opt-ins do not widen the WCAG tag set', () => {
   // wholesale, which would drag in dozens of unrelated non-WCAG rules.
   assert.ok(!AXE_TAGS.includes('best-practice'));
   assert.ok(!AXE_TAGS.includes('experimental'));
+});
+
+// ── Browser lifetime (ADR-0005) ───────────────────────────────────────────────
+// These never launch Chromium either: they inject the `launch` seam and assert
+// only how often it is called and when the browser is closed. The real
+// render-and-scan behaviour is covered by the env-gated `integration.test.ts`.
+
+/**
+ * A browser that hands out contexts but whose pages cannot be created, so every
+ * `run()` fails AFTER the launch and AFTER the context exists. That is exactly
+ * the shape these tests need: the launch is the expensive thing to count, a
+ * failed scan must not invalidate a healthy browser, and the context must still
+ * be closed on the way out.
+ */
+function fakeBrowser() {
+  let closed = 0;
+  let contexts = 0;
+  let contextCloses = 0;
+  const browser = {
+    newContext: async () => {
+      contexts += 1;
+      return {
+        newPage: () => Promise.reject(new Error('no real browser in this test')),
+        close: async () => {
+          contextCloses += 1;
+        },
+      };
+    },
+    close: async () => {
+      closed += 1;
+    },
+  } as unknown as Browser;
+  return {
+    browser,
+    closes: () => closed,
+    contexts: () => contexts,
+    contextCloses: () => contextCloses,
+  };
+}
+
+function fakeLaunch() {
+  let launches = 0;
+  const browsers: Array<ReturnType<typeof fakeBrowser>> = [];
+  const launch = async () => {
+    launches += 1;
+    const b = fakeBrowser();
+    browsers.push(b);
+    return b.browser;
+  };
+  return { launch, launches: () => launches, browsers };
+}
+
+test('the browser is launched lazily — constructing a runner touches nothing', async () => {
+  const l = fakeLaunch();
+  createPlaywrightRunner({ launch: l.launch });
+  assert.equal(l.launches(), 0, 'constructing a runner must not launch Chromium');
+});
+
+test('one browser is REUSED across every run() on the same runner', async () => {
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+
+  // Five scans — the measured remediate-turn worst case (before + 1 repair + 3 re-audits).
+  for (let i = 0; i < 5; i++) {
+    await assert.rejects(() => runner.run('<p>x</p>'));
+  }
+
+  assert.equal(l.launches(), 1, 'five scans, one Chromium launch');
+});
+
+test('concurrent run() calls share a single launch', async () => {
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+
+  await Promise.allSettled([runner.run('<p>a</p>'), runner.run('<p>b</p>'), runner.run('<p>c</p>')]);
+
+  assert.equal(l.launches(), 1, 'the in-flight launch is shared, not raced');
+});
+
+test('dispose() closes the browser', async () => {
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+  await assert.rejects(() => runner.run('<p>x</p>'));
+
+  await runner.dispose();
+
+  assert.equal(l.browsers[0]!.closes(), 1, 'the browser is closed exactly once');
+});
+
+test('dispose() is safe on a runner that never ran', async () => {
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+
+  await runner.dispose();
+
+  assert.equal(l.launches(), 0, 'nothing was launched, so nothing is closed');
+});
+
+test('dispose() is idempotent', async () => {
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+  await assert.rejects(() => runner.run('<p>x</p>'));
+
+  await runner.dispose();
+  await runner.dispose();
+
+  assert.equal(l.browsers[0]!.closes(), 1, 'a second dispose must not re-close');
+});
+
+test('disposal is FINAL — a later run() refuses rather than launching a second browser', async () => {
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+  await assert.rejects(() => runner.run('<p>x</p>'));
+  await runner.dispose();
+
+  await assert.rejects(() => runner.run('<p>y</p>'), /disposed/i);
+
+  assert.equal(l.launches(), 1, 'a disposed runner never launches again — nobody is left to close it');
+});
+
+test('each run() closes its own context, so contexts do not pile up behind the reused browser', async () => {
+  // The browser now OUTLIVES the scan, so `browser.close()` no longer sweeps
+  // per-scan contexts. Five audits in a turn must not leave five contexts (and
+  // their pages) alive until dispose().
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+
+  for (let i = 0; i < 5; i++) {
+    await assert.rejects(() => runner.run('<p>x</p>'));
+  }
+
+  assert.equal(l.browsers[0]!.contexts(), 5, 'a fresh context per scan');
+  assert.equal(l.browsers[0]!.contextCloses(), 5, 'every one of them closed');
+});
+
+// A runner is used sequentially inside one turn's try/finally, so neither race
+// below is reachable in practice — but "unreachable" is an invariant of the
+// CALLER, and the failure mode if it ever breaks is a leaked Chromium. There
+// are two windows, because `run()` awaits the axe-core import before it ever
+// asks for a browser.
+
+test('dispose() BEFORE run() reaches the browser: nothing is ever launched', async () => {
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+
+  const scan = runner.run('<p>x</p>'); // still inside the axe-core import
+  await runner.dispose();
+
+  await assert.rejects(() => scan, /disposed/i);
+  assert.equal(l.launches(), 0, 'a browser started here would have no one to close it');
+});
+
+test('dispose() racing an IN-FLIGHT launch still closes the late-arriving browser', async () => {
+  let release!: (b: Browser) => void;
+  let launchStarted = false;
+  const b = fakeBrowser();
+  const runner = createPlaywrightRunner({
+    launch: () => {
+      launchStarted = true;
+      return new Promise<Browser>((resolve) => {
+        release = resolve;
+      });
+    },
+  });
+
+  const scan = runner.run('<p>x</p>');
+  while (!launchStarted) await new Promise((r) => setImmediate(r)); // let run() reach the launch
+
+  const disposing = runner.dispose(); // now the launch is genuinely in flight
+  release(b.browser);
+  await Promise.allSettled([scan, disposing]);
+
+  assert.equal(b.closes(), 1, 'the browser that arrived after dispose() is still closed');
+});
+
+test('a failed scan does not discard the browser', async () => {
+  // `run()` rejects here on every call (newContext throws). A runner that tore
+  // the browser down on scan failure would relaunch each time — the leak-shaped
+  // mistake in the other direction.
+  const l = fakeLaunch();
+  const runner = createPlaywrightRunner({ launch: l.launch });
+
+  await assert.rejects(() => runner.run('<p>x</p>'));
+  await assert.rejects(() => runner.run('<p>x</p>'));
+
+  assert.equal(l.launches(), 1);
+  assert.equal(l.browsers[0]!.closes(), 0, 'a scan failure is not a browser failure');
 });
