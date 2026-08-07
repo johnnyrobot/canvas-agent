@@ -19,6 +19,7 @@ unconditional output gate (`enforceGate` → `audit(html)` in
 | --- | --- |
 | `audit: Auditor` | **One-shot** production audit — launch, scan once, close. |
 | `createAuditor(runner, options?)` | The **pure mapping core** (DI seam; this is what the unit tests drive). |
+| `CHECKS` / `Check` | The check registry — **add a check here** (`checks.ts`). |
 | `createPlaywrightRunner(opts?)` | The real headless-Chromium runner. **Owns a browser — dispose it.** |
 | `severityForImpact`, `semanticCategory`, types | Mapping helpers + the local axe/scan type surface. |
 
@@ -61,8 +62,9 @@ per turn:   runner = createPlaywrightRunner()   ← ONE browser…
   seam. Production = `createPlaywrightRunner()`; unit tests = a fake returning canned data.
   Each `TextRun` carries a classified `ResolvedBackground` (`layers`, `gradient`,
   `image` with sampled swatches, or `unresolvable`).
-- **`createAuditor(runner)`** (`auditor.ts`): pure axe-results + contrast-pairs →
-  `IssueSet`. **No browser, no network.** This is the bulk of the test coverage.
+- **`createAuditor(runner)`** (`auditor.ts`): scan once, then run every
+  registered check over the result and concatenate their issues. **No browser,
+  no network.** It contains no rule logic of its own any more — just the loop.
 - **`createPlaywrightRunner()`** (`playwright-runner.ts`): launches Chromium, injects the
   fragment into the Canvas-like shell, injects `axe.source`, runs axe at the
   WCAG A/AA tags, and for each visible text run resolves the foreground color and
@@ -150,3 +152,29 @@ RUN_BROWSER_INTEGRATION=1 npx tsx --test src/engine/render/integration.test.ts
 This track is the sanctioned exception to the repo's zero-deps rule: it adds
 `playwright` and `axe-core` (and nothing else). The Chromium binary is **not**
 downloaded by `npm install` here (kept entirely behind the env-gated test).
+
+## Adding an accessibility check (ADR-0003)
+
+Checks are registered in **one** place. Adding one used to mean editing seven
+files, because `auditor.ts` hardcoded a numbered pass per rule.
+
+1. Write the rule as a `Check` — `(scan: ScanResult, options) => AuditIssue[]`.
+   Pure and synchronous: all the I/O already happened in the `ScanRunner`.
+2. Add it to `CHECKS` in `checks.ts`. That is the whole registration.
+3. If it needs page data nobody collects yet, add the field to `ScanResult` as
+   **optional** and extract it in `playwright-runner.ts`.
+
+Two rules make this cheap, and both are deliberate:
+
+- **A check gets the WHOLE `ScanResult`.** There is no per-check declaration of
+  required data, and so no plumbing to extend when a check wants more. The
+  declared-requirements alternative was rejected as machinery sized for a rule
+  count that doesn't exist — there are four checks.
+- **New `ScanResult` fields are OPTIONAL.** That is what stops every existing
+  fake fixture from breaking when the next check needs new data. `images` is
+  optional for this reason too, retroactively — a rule with one permanent
+  exception is one people stop believing.
+
+What a registry does **not** remove: step 3. When a check needs data the runner
+doesn't gather, you still write the browser-side extraction. The win is roughly
+four of the seven files, not seven.

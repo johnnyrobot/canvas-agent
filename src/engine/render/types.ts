@@ -57,11 +57,20 @@ export interface ImageAlt {
   presentation: boolean;
 }
 
-/** What a single render-and-scan pass yields for the pure auditor to map. */
+/**
+ * What a single render-and-scan pass yields for the registered checks to map.
+ *
+ * Fields added here for a NEW check must be OPTIONAL (ADR-0003), so that every
+ * existing check and every fake fixture keeps compiling. `images` is optional
+ * for exactly that reason rather than being grandfathered in as the one
+ * permanent exception — a rule with a single standing exception is one people
+ * stop believing.
+ */
 export interface ScanResult {
   axe: AxeResults;
   textRuns: TextRun[];
-  images: ImageAlt[];
+  /** Present when the runner extracted images; absent in fixtures that don't need them. */
+  images?: ImageAlt[];
 }
 
 /**
