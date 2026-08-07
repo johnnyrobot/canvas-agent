@@ -31,6 +31,14 @@ designed against while it was still moving.
 
 The optional-field rule is applied **retroactively**: the existing
 `ScanResult.images` (`src/engine/render/types.ts:64`) becomes optional as part of
-this, rather than grandfathering it. It is read in one production path
-(`alt-text.ts`) and two test fixtures, so the retrofit is cheap — and a rule with a
-single permanent exception is one people stop believing.
+this, rather than grandfathering it. It is read in one production path and two
+test fixtures, so the retrofit is cheap — and a rule with a single permanent
+exception is one people stop believing.
+
+> **Amended while implementing this ADR (PR #20).** The paragraph above
+> originally named `alt-text.ts` as that one production read. The code says
+> otherwise: `altTextIssue(image: ImageAlt)` takes a single already-extracted
+> image and never touches `ScanResult.images`. The array is read by whatever
+> *calls* it — `auditor.ts`'s numbered pass [4] before this change, and
+> `altTextQuality` in the new `checks.ts` after it. The retrofit was exactly as
+> cheap as claimed; only the file reference was wrong.

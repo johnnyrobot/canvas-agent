@@ -39,6 +39,8 @@ export const audit: Auditor = async (html) => {
 
 export { createAuditor } from './auditor.js';
 export type { AuditorOptions } from './auditor.js';
+export { CHECKS, axeViolations, axeIncomplete, computedContrast, altTextQuality } from './checks.js';
+export type { Check, CheckOptions } from './checks.js';
 export { createPlaywrightRunner } from './playwright-runner.js';
 export type { PlaywrightRunnerOptions } from './playwright-runner.js';
 export { severityForImpact, semanticCategory, DEFAULT_VIOLATION_SEVERITY } from './mapping.js';
