@@ -13,7 +13,7 @@ import type {
 } from './types.js';
 import { loadLLMConfig, type Env } from './config.js';
 import { OllamaClient, OllamaError, type FetchLike } from './client.js';
-import { OllamaProcess, type OllamaProcessLogger } from './process.js';
+import { OllamaProcess, type SidecarLogger } from './process.js';
 import { Mutex } from './mutex.js';
 import { toRawBase64 } from './payload.js';
 
@@ -40,7 +40,7 @@ export class OllamaJsonError extends Error {
 
 export interface CreateSidecarOptions {
   env?: Env;
-  logger?: OllamaProcessLogger;
+  logger?: SidecarLogger;
   /** Injectable transport for the chat client (tests pass a fake; default global `fetch`). */
   fetch?: FetchLike;
   /** Injectable daemon lifecycle manager (tests pass a double; default a real `OllamaProcess`). */
@@ -59,7 +59,14 @@ export class OllamaSidecar {
     this.process = options.process ?? new OllamaProcess(this.config, options.logger);
   }
 
-  /** Ensure the daemon is running and the model(s) are warm. Idempotent-ish. */
+  /**
+   * Ensure the daemon is running and the model(s) are warm.
+   *
+   * `ensureRunning` is memoized inside the shared lifecycle (ADR-0004), so
+   * repeat calls no longer re-run the attach/spawn probe. `warmLoad` is not
+   * memoized — it is a model concern, not lifecycle, and re-warming an
+   * already-loaded model is a cheap no-op that also refreshes `keep_alive`.
+   */
   async start(): Promise<void> {
     await this.process.ensureRunning();
     await this.process.warmLoad();

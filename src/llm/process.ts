@@ -1,7 +1,11 @@
 /**
- * Lifecycle manager for the bundled `ollama serve` sidecar.
+ * The `ollama serve` sidecar adapter.
  *
- * Behavior:
+ * Attach/spawn/stop/respawn is NOT here — it is the shared `SidecarLifecycle`
+ * (`src/sidecar`, ADR-0004). This file supplies only what is specific to
+ * Ollama: the health check, the spawn spec, and the model warm load.
+ *
+ * Behavior (unchanged, and now shared with Docling):
  *  - If Ollama is already healthy (user/another process started it), we ATTACH
  *    and never kill it on shutdown.
  *  - Otherwise, if `manageProcess` is enabled, we spawn `ollama serve`, OWN it,
@@ -9,61 +13,45 @@
  *  - On `start()` we warm-load the model(s) so the first user request doesn't pay
  *    the multi-second cold load (PRD §15.1/§21).
  */
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { setTimeout as delay } from 'node:timers/promises';
 import type { LLMConfig } from './types.js';
 import { uniqueModels } from './config.js';
 import { resolveSidecarCommand } from '../runtime/bundled-resources.js';
+import {
+  SidecarLifecycle,
+  type RespawnPolicy,
+  type SidecarLogger,
+  type SpawnLike,
+  type SpawnSpec,
+} from '../sidecar/index.js';
 
-export interface OllamaProcessLogger {
-  info(msg: string): void;
-  warn(msg: string): void;
-  error(msg: string): void;
-}
+// Re-exported so callers and tests keep importing the process seams from the
+// sidecar they belong to, rather than reaching into `src/sidecar` directly.
+export type { RespawnPolicy, SidecarLogger, SpawnLike };
 
-const noopLogger: OllamaProcessLogger = {
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-};
-
-/** Injection seam for `child_process.spawn` so the lifecycle is unit-testable. */
-export type SpawnLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
-
-/** Bound on how often a crashed daemon is respawned before we give up (anti crash-loop). */
-export interface RespawnPolicy {
-  /** Max respawns permitted within `windowMs`. */
-  maxRespawns: number;
-  /** Sliding window (ms) the respawn count is measured over. */
-  windowMs: number;
-}
-
-const DEFAULT_RESPAWN_POLICY: RespawnPolicy = { maxRespawns: 3, windowMs: 60_000 };
-
-export class OllamaProcess {
-  private child: ChildProcess | undefined;
-  private owned = false;
-  /** Set by the child's `error` event (e.g. ENOENT when the binary isn't on PATH). */
-  private spawnError: Error | undefined;
-  /** Epoch-ms of recent respawns, pruned to `respawnPolicy.windowMs` (crash-loop guard). */
-  private respawns: number[] = [];
-
+export class OllamaProcess extends SidecarLifecycle {
   constructor(
     private readonly config: LLMConfig,
-    private readonly log: OllamaProcessLogger = noopLogger,
-    private readonly spawnImpl: SpawnLike = spawn,
+    log?: SidecarLogger,
+    spawnImpl?: SpawnLike,
     /** Resolve the `ollama` command — bundled abs path when packaged, else PATH. */
     private readonly resolveCommand: (name: string) => string = resolveSidecarCommand,
-    private readonly respawnPolicy: RespawnPolicy = DEFAULT_RESPAWN_POLICY,
-  ) {}
-
-  /** Whether this manager spawned (and therefore owns) the daemon. */
-  get isOwned(): boolean {
-    return this.owned;
+    respawnPolicy?: RespawnPolicy,
+  ) {
+    super({
+      displayName: 'Ollama',
+      commandLabel: 'ollama serve',
+      logTag: 'ollama',
+      unmanagedMessage:
+        `No Ollama daemon at ${config.nativeUrl} and LLM_MANAGE_PROCESS is disabled.`,
+      manageProcess: config.manageProcess,
+      ...(log ? { log } : {}),
+      ...(spawnImpl ? { spawnImpl } : {}),
+      ...(respawnPolicy ? { respawnPolicy } : {}),
+    });
   }
 
   /** Ping the native `/api/version` endpoint. */
-  async isHealthy(): Promise<boolean> {
+  override async isHealthy(): Promise<boolean> {
     try {
       const res = await fetch(this.config.nativeUrl + '/api/version', {
         signal: AbortSignal.timeout(2000),
@@ -74,115 +62,20 @@ export class OllamaProcess {
     }
   }
 
-  /** Ensure a healthy daemon is reachable, spawning one if permitted. */
-  async ensureRunning(): Promise<void> {
-    if (await this.isHealthy()) {
-      this.log.info('Ollama already running — attaching (will not manage).');
-      this.owned = false;
-      return;
-    }
-    if (!this.config.manageProcess) {
-      throw new Error(
-        `No Ollama daemon at ${this.config.nativeUrl} and LLM_MANAGE_PROCESS is disabled.`,
-      );
-    }
-    this.spawn();
-    await this.waitUntilReady();
-    this.owned = true;
-  }
-
-  /**
-   * Lazily make sure the daemon is still up before a request, respawning a crashed
-   * one (the `exit` handler only nulls `this.child`, so without this a mid-session
-   * crash leaves the LLM dead until app restart). Cheap on the happy path — a fast
-   * local `/api/version` ping — and bounded by `respawnPolicy` so a crash-looping
-   * daemon surfaces a clear error instead of being restarted forever.
-   *
-   * Honors attach-don't-kill: a healthy daemon (ours or the user's) is never touched,
-   * and when `manageProcess` is off we never start one — the call fails naturally.
-   */
-  async ensureAlive(): Promise<void> {
-    if (!this.config.manageProcess) return; // not ours to manage; let the request fail naturally
-    if (await this.isHealthy()) return; // up (owned or attached) — leave it alone
-    this.recordRespawn(); // throws once the crash-loop budget is spent
-    this.log.warn('Ollama daemon is unreachable mid-session — respawning.');
-    // Reap any child we still hold before replacing it. The daemon is unreachable
-    // but its process may still be alive (hung, not yet exited); dropping the
-    // reference alone would orphan it and let it fight the replacement for
-    // OLLAMA_HOST. Best-effort — if the `exit` handler already nulled it, there is
-    // nothing to kill.
-    const stale = this.child;
-    this.child = undefined;
-    if (stale) stale.kill('SIGKILL');
-    this.owned = false;
-    this.spawn();
-    await this.waitUntilReady();
-    this.owned = true;
-    this.log.info('Ollama daemon respawned.');
-  }
-
-  /** Record a respawn attempt against the sliding-window budget; throw when exhausted. */
-  private recordRespawn(): void {
-    const now = Date.now();
-    this.respawns = this.respawns.filter((t) => now - t < this.respawnPolicy.windowMs);
-    if (this.respawns.length >= this.respawnPolicy.maxRespawns) {
-      throw new Error(
-        `Ollama daemon keeps dying — exceeded ${this.respawnPolicy.maxRespawns} respawns ` +
-          `within ${this.respawnPolicy.windowMs}ms; giving up.`,
-      );
-    }
-    this.respawns.push(now);
-  }
-
-  private spawn(): void {
+  protected spawnSpec(): SpawnSpec {
     // Resolve the bundled binary when packaged; a Finder-launched .app does not
     // inherit the user's shell PATH, so a bare `ollama` would ENOENT (see
     // resolveSidecarCommand). Falls back to the PATH name in dev.
-    const command = this.resolveCommand('ollama');
-    this.log.info(`Spawning \`${command} serve\`…`);
-    this.spawnError = undefined;
-    const child = this.spawnImpl(command, ['serve'], {
+    return {
+      command: this.resolveCommand('ollama'),
+      args: ['serve'],
       env: {
         ...process.env,
         OLLAMA_HOST: this.config.ollamaHost,
         OLLAMA_NUM_PARALLEL: String(this.config.numParallel),
         OLLAMA_KEEP_ALIVE: this.config.keepAlive,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    this.child = child;
-    child.stderr?.on('data', (d: Buffer) => this.log.warn(`[ollama] ${d.toString().trim()}`));
-    // A spawn failure (ENOENT — the binary isn't on PATH, e.g. a Finder-launched
-    // .app) emits an `error` event; WITHOUT this listener it is an *uncaught*
-    // exception that crashes the Electron main process. Record it so the readiness
-    // wait can reject cleanly and the caller can degrade gracefully.
-    child.on('error', (err: Error) => {
-      this.spawnError = err;
-      // Only clear our handle if `child` is still the tracked process — a late
-      // event from a replaced child must not wipe out its live replacement.
-      if (this.child === child) this.child = undefined;
-      this.log.error(`Failed to spawn ollama serve: ${err.message}`);
-    });
-    child.on('exit', (code) => {
-      if (this.owned) this.log.error(`ollama serve exited (code ${code ?? 'null'}).`);
-      // Guard against a stale `exit` from a daemon we have already respawned: a
-      // queued event from the old child could otherwise null out the new one,
-      // leaving stop() unable to terminate the live daemon (it would leak).
-      if (this.child === child) this.child = undefined;
-    });
-  }
-
-  private async waitUntilReady(timeoutMs = 30_000, intervalMs = 500): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (this.spawnError) throw new Error(`Failed to spawn ollama serve: ${this.spawnError.message}`);
-      if (await this.isHealthy()) {
-        this.log.info('Ollama is ready.');
-        return;
-      }
-      await delay(intervalMs);
-    }
-    throw new Error(`Ollama did not become ready within ${timeoutMs}ms.`);
+    };
   }
 
   /** Preload models into memory so the first real request is warm. */
@@ -201,21 +94,5 @@ export class OllamaProcess {
         this.log.warn(`Warm-load of ${model} failed: ${(err as Error).message}`);
       }
     }
-  }
-
-  /** Stop the daemon if (and only if) we own it. */
-  async stop(): Promise<void> {
-    if (!this.owned || !this.child) return;
-    this.log.info('Stopping owned `ollama serve`…');
-    const child = this.child;
-    child.kill('SIGTERM');
-    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    const timedOut = delay(5_000).then(() => 'timeout' as const);
-    if ((await Promise.race([exited.then(() => 'exit' as const), timedOut])) === 'timeout') {
-      this.log.warn('ollama serve did not exit; sending SIGKILL.');
-      child.kill('SIGKILL');
-    }
-    this.child = undefined;
-    this.owned = false;
   }
 }

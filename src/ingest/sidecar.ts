@@ -13,17 +13,20 @@ import type {
 } from './types.js';
 import { loadIngestConfig, type Env } from './config.js';
 import { DoclingClient } from './client.js';
-import { DoclingProcess, type IngestProcessLogger } from './process.js';
+import { DoclingProcess, type SidecarLogger } from './process.js';
 import { downloadModels, type DownloadSpawnLike } from './model-download.js';
 
 /** The convert surface the sidecar facade needs (real `DoclingClient` satisfies it). */
 type ConvertClient = Pick<DoclingClient, 'convertFile' | 'convertUrl'>;
 /** The lifecycle surface the facade needs (real `DoclingProcess` satisfies it). */
-type SidecarProcess = Pick<DoclingProcess, 'ensureRunning' | 'stop' | 'isHealthy' | 'modelsPresent'>;
+type SidecarProcess = Pick<
+  DoclingProcess,
+  'ensureRunning' | 'ensureAlive' | 'stop' | 'isHealthy' | 'modelsPresent'
+>;
 
 export interface CreateIngestOptions {
   env?: Env;
-  logger?: IngestProcessLogger;
+  logger?: SidecarLogger;
   /** Test seam: inject a fake convert client (defaults to the real `DoclingClient`). */
   client?: ConvertClient;
   /** Test seam: inject a fake process lifecycle (defaults to the real `DoclingProcess`). */
@@ -86,31 +89,31 @@ export class DoclingSidecar {
     }
   }
 
-  /** Memoized in-flight start so concurrent/repeat conversions spawn the daemon once. */
-  private starting: Promise<void> | undefined;
-
   /**
-   * Ensure the daemon is up before any conversion (attach-if-running /
-   * spawn-if-not). Memoized on success; cleared on failure so a later call can
-   * retry. Without this, `convert*` hit a dead endpoint because nothing ever
-   * starts the sidecar (the lifecycle was never wired into the runtime).
+   * Start the daemon if it has never started, then respawn it if it has since
+   * died. Run before every conversion, mirroring what `OllamaSidecar` does
+   * before every chat. Without the first half, `convert*` hit a dead endpoint
+   * because nothing ever started the sidecar.
+   *
+   * `ensureRunning` alone is not enough: it memoizes a successful start (that
+   * memo used to live HERE, on this facade, and moved down into
+   * `SidecarLifecycle` per ADR-0004), so after a mid-session crash it is a
+   * no-op and the conversion would hit a dead endpoint again. `ensureAlive` is
+   * the crash recovery — cheap on the happy path (one local health ping), a
+   * no-op when the daemon is not ours to manage, and bounded by the shared
+   * respawn budget so a crash-looping daemon reports a clear error rather than
+   * restarting forever.
    */
-  private ensureStarted(): Promise<void> {
-    if (!this.starting) {
-      this.starting = this.process.ensureRunning().catch((err: unknown) => {
-        this.starting = undefined;
-        throw err;
-      });
-    }
-    return this.starting;
+  private async ensureConvertible(): Promise<void> {
+    await this.process.ensureRunning();
+    await this.process.ensureAlive();
   }
 
   async start(): Promise<void> {
-    await this.ensureStarted();
+    await this.process.ensureRunning();
   }
 
   async stop(): Promise<void> {
-    this.starting = undefined;
     await this.process.stop();
   }
 
@@ -120,20 +123,20 @@ export class DoclingSidecar {
 
   /** Convert a user-supplied file (base64 + filename). */
   async convert(file: FileSource, opts?: ConvertOptions): Promise<ConvertedDocument> {
-    await this.ensureStarted();
+    await this.ensureConvertible();
     return this.client.convertFile(file, opts);
   }
 
   /** Convenience: read a local file from disk and convert it. */
   async convertPath(path: string, opts?: ConvertOptions): Promise<ConvertedDocument> {
-    await this.ensureStarted();
+    await this.ensureConvertible();
     const base64 = (await readFile(path)).toString('base64');
     return this.client.convertFile({ base64, filename: basename(path) }, opts);
   }
 
   /** Convert a document by URL. */
   async convertUrl(url: string, opts?: ConvertOptions): Promise<ConvertedDocument> {
-    await this.ensureStarted();
+    await this.ensureConvertible();
     return this.client.convertUrl(url, opts);
   }
 }

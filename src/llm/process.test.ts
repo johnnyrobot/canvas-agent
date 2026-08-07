@@ -21,32 +21,6 @@ test('ensureRunning rejects (does not crash) when the ollama binary cannot be sp
   await assert.rejects(() => proc.ensureRunning(), /ENOENT|spawn|ollama/i);
 });
 
-// ── Daemon-crash characterization (deferred respawn supervisor) ───────────────
-
-const flush = () => new Promise((r) => setTimeout(r, 0));
-
-interface FakeChild extends EventEmitter {
-  stderr: EventEmitter;
-  kill(sig?: string): boolean;
-  kills: Array<string | undefined>;
-}
-
-function fakeSpawn() {
-  const children: FakeChild[] = [];
-  const spawn: SpawnLike = () => {
-    const ee = new EventEmitter() as FakeChild;
-    ee.stderr = new EventEmitter();
-    ee.kills = [];
-    ee.kill = (sig?: string) => {
-      ee.kills.push(sig);
-      return true;
-    };
-    children.push(ee);
-    return ee as unknown as ChildProcess;
-  };
-  return { spawn, children };
-}
-
 /** OllamaProcess whose health is test-controlled (no real fetch to a daemon). */
 class ControlledHealthProcess extends OllamaProcess {
   public healthy = false;
@@ -55,140 +29,54 @@ class ControlledHealthProcess extends OllamaProcess {
   }
 }
 
-test('spawn() uses the resolved (bundled) command, not a bare PATH name (packaging)', async () => {
-  const calls: Array<{ command: string; args: readonly string[] }> = [];
-  const spawn: SpawnLike = (command, args) => {
-    calls.push({ command, args });
-    const ee = new EventEmitter() as FakeChild;
+test('the spawn spec uses the resolved (bundled) command, not a bare PATH name (packaging)', async () => {
+  const calls: Array<{ command: string; args: readonly string[]; env: NodeJS.ProcessEnv }> = [];
+  const spawn: SpawnLike = (command, args, options) => {
+    calls.push({ command, args, env: (options.env ?? {}) as NodeJS.ProcessEnv });
+    const ee = new EventEmitter() as EventEmitter & { stderr: EventEmitter; kill: () => boolean };
     ee.stderr = new EventEmitter();
-    ee.kills = [];
     ee.kill = () => true;
     return ee as unknown as ChildProcess;
   };
   // Stand in for resolveSidecarCommand returning a bundled abs path (packaged .app).
   const resolveCommand = (name: string) => `/Resources/sidecars/${name}/${name}`;
-  const proc = new ControlledHealthProcess(
-    { ...loadLLMConfig({}), manageProcess: true },
-    undefined,
-    spawn,
-    resolveCommand,
-  );
+  const config = { ...loadLLMConfig({}), manageProcess: true };
+  const proc = new ControlledHealthProcess(config, undefined, spawn, resolveCommand);
+
   const running = proc.ensureRunning();
   proc.healthy = true;
   await running;
+
   assert.equal(calls.length, 1, 'spawned exactly once');
   assert.equal(calls[0]!.command, '/Resources/sidecars/ollama/ollama', 'spawns the resolved bundled binary');
   assert.deepEqual([...calls[0]!.args], ['serve']);
 });
 
-test('daemon crash: exit nulls the child, owned stays true, no auto-respawn (characterization)', async () => {
-  const { spawn, children } = fakeSpawn();
-  const proc = new ControlledHealthProcess({ ...loadLLMConfig({}), manageProcess: true }, undefined, spawn);
+test('the spawn spec carries the Ollama tuning env', async () => {
+  const calls: NodeJS.ProcessEnv[] = [];
+  const spawn: SpawnLike = (_command, _args, options) => {
+    calls.push((options.env ?? {}) as NodeJS.ProcessEnv);
+    const ee = new EventEmitter() as EventEmitter & { stderr: EventEmitter; kill: () => boolean };
+    ee.stderr = new EventEmitter();
+    ee.kill = () => true;
+    return ee as unknown as ChildProcess;
+  };
+  const config = { ...loadLLMConfig({}), manageProcess: true };
+  const proc = new ControlledHealthProcess(config, undefined, spawn, (n) => n);
 
-  // Not healthy at first → spawn path; flip healthy so waitUntilReady resolves fast.
   const running = proc.ensureRunning();
   proc.healthy = true;
   await running;
-  assert.equal(proc.isOwned, true, 'owns the daemon after a successful spawn');
-  assert.equal(children.length, 1, 'spawned exactly once');
 
-  // The daemon crashes.
-  children[0]!.emit('exit', 1);
-  await flush();
-
-  // Characterized CURRENT behavior (deferred supervisor — flip these when it lands):
-  assert.equal(proc.isOwned, true, 'owned does NOT flip on exit today (no auto-recovery)');
-  assert.equal(children.length, 1, 'there is no auto-respawn after a crash');
-  // The child was nulled, so stop() is a clean no-op and must NOT signal a dead child.
-  await proc.stop();
-  assert.deepEqual(children[0]!.kills, [], 'stop() does not kill an already-exited child');
+  assert.equal(calls[0]!.OLLAMA_HOST, config.ollamaHost);
+  assert.equal(calls[0]!.OLLAMA_NUM_PARALLEL, String(config.numParallel));
+  assert.equal(calls[0]!.OLLAMA_KEEP_ALIVE, config.keepAlive);
 });
 
-// ── Respawn supervisor (ensureAlive) ──────────────────────────────────────────
-
-test('ensureAlive is a no-op when the daemon is healthy (never touches an attached daemon)', async () => {
-  const { spawn, children } = fakeSpawn();
-  const proc = new ControlledHealthProcess({ ...loadLLMConfig({}), manageProcess: true }, undefined, spawn);
-  proc.healthy = true;
-  await proc.ensureAlive();
-  assert.equal(children.length, 0, 'a healthy daemon is left alone — no spawn');
-});
-
-test('ensureAlive is a no-op when LLM_MANAGE_PROCESS is disabled (we never manage the daemon)', async () => {
-  const { spawn, children } = fakeSpawn();
-  const proc = new ControlledHealthProcess({ ...loadLLMConfig({}), manageProcess: false }, undefined, spawn);
-  proc.healthy = false; // daemon down, but it is not ours to start
-  await proc.ensureAlive(); // must not throw and must not spawn
-  assert.equal(children.length, 0, 'no respawn when process management is off');
-});
-
-test('ensureAlive respawns a crashed daemon, then enforces the restart budget', async () => {
-  const { spawn, children } = fakeSpawn();
-  const proc = new ControlledHealthProcess(
-    { ...loadLLMConfig({}), manageProcess: true },
-    undefined,
-    spawn,
-    undefined,
-    { maxRespawns: 2, windowMs: 60_000 },
-  );
-
-  // Initial start (owned).
-  let running = proc.ensureRunning();
-  proc.healthy = true;
-  await running;
-  assert.equal(children.length, 1, 'spawned once on start');
-
-  // Crash #1 → ensureAlive brings it back.
-  proc.healthy = false;
-  running = proc.ensureAlive();
-  proc.healthy = true;
-  await running;
-  assert.equal(children.length, 2, 'respawned after the first crash');
-  assert.equal(proc.isOwned, true, 'owns the respawned daemon');
-
-  // Crash #2 → second (and last) respawn allowed in the window.
-  proc.healthy = false;
-  running = proc.ensureAlive();
-  proc.healthy = true;
-  await running;
-  assert.equal(children.length, 3, 'respawned after the second crash');
-
-  // Crash #3 → budget exhausted → surfaces a clear error instead of looping.
-  proc.healthy = false;
-  await assert.rejects(() => proc.ensureAlive(), /respawn|giving up|keeps dying/i);
-  assert.equal(children.length, 3, 'no respawn once the restart budget is spent');
-});
-
-test('ensureAlive: a late exit from the replaced daemon does not orphan the live one (respawn race)', async () => {
-  const { spawn, children } = fakeSpawn();
-  const proc = new ControlledHealthProcess({ ...loadLLMConfig({}), manageProcess: true }, undefined, spawn);
-
-  // Initial start (owned) → child[0].
-  let running = proc.ensureRunning();
-  proc.healthy = true;
-  await running;
-  assert.equal(children.length, 1, 'spawned once on start');
-
-  // Daemon goes unreachable → respawn brings up child[1].
-  proc.healthy = false;
-  running = proc.ensureAlive();
-  proc.healthy = true;
-  await running;
-  assert.equal(children.length, 2, 'respawned the crashed daemon');
-
-  // The ORIGINAL child finally delivers its (delayed) `exit` event *after* the
-  // replacement is already live. An exit handler bound to `this` (rather than to
-  // the specific child) would null out the new child here, silently dropping our
-  // handle to a still-running daemon.
-  children[0]!.emit('exit', 1);
-  await flush();
-
-  // The live daemon must still be tracked: stop() must terminate child[1].
-  const stopping = proc.stop();
-  await flush();
-  children[1]!.emit('exit', 0); // let stop()'s exit-wait resolve without the 5s timeout
-  await stopping;
-
-  assert.ok(children[0]!.kills.includes('SIGKILL'), 'the stale/hung original is reaped before respawn');
-  assert.ok(children[1]!.kills.includes('SIGTERM'), 'stop() terminates the live respawned daemon');
-});
+// The generic crash/respawn behaviour that used to be characterized here —
+// exit nulling the child, `ensureAlive` no-ops, the restart budget, the
+// replaced-child race — moved to `src/sidecar/lifecycle.test.ts` along with the
+// lifecycle itself (ADR-0004). It is shared with docling-serve now, so testing
+// it through the Ollama adapter would only re-test the base class twice. What
+// stays here is what is genuinely Ollama-specific: the spawn spec above, and
+// the ENOENT path, which exercises the adapter's own `resolveCommand`.

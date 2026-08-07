@@ -17,6 +17,9 @@ function fakes(modelsPresent = true) {
       started++;
       calls.push('ensureRunning');
     },
+    ensureAlive: async () => {
+      calls.push('ensureAlive');
+    },
     stop: async () => {},
     isHealthy: async () => true,
     modelsPresent: () => modelsPresent,
@@ -38,15 +41,53 @@ test('convert ensures the docling-serve sidecar is running BEFORE converting (C4
   const f = fakes();
   const sidecar = createDoclingSidecar({ process: f.process, client: f.client });
   await sidecar.convert({ base64: 'QUJD', filename: 'syllabus.pdf' });
-  assert.deepEqual(f.calls, ['ensureRunning', 'convertFile']);
+  assert.deepEqual(f.calls, ['ensureRunning', 'ensureAlive', 'convertFile']);
 });
 
-test('the sidecar is started at most once across repeated conversions (C4)', async () => {
+test('every conversion re-checks liveness, so a mid-session crash self-heals', async () => {
+  // The respawn supervisor built for Ollama never reached Docling, because
+  // `DoclingProcess` had no `ensureAlive` — a mid-session crash stayed dead
+  // until the app restarted. Sharing one lifecycle (ADR-0004) makes the
+  // supervisor available; these are the call sites that use it.
+  const f = fakes();
+  const sidecar = createDoclingSidecar({ process: f.process, client: f.client });
+
+  await sidecar.convert({ base64: 'QUJD', filename: 'a.pdf' });
+  await sidecar.convertPath('/dev/null');
+  await sidecar.convertUrl('https://example.edu/syllabus.pdf');
+
+  assert.equal(
+    f.calls.filter((c) => c === 'ensureAlive').length,
+    3,
+    'every conversion path checks liveness, not just the first',
+  );
+  for (const [i, call] of f.calls.entries()) {
+    if (call === 'ensureAlive') {
+      assert.equal(f.calls[i - 1], 'ensureRunning', 'liveness is checked after the start, before the convert');
+    }
+  }
+});
+
+test('every conversion defers the start decision to the process lifecycle (C4)', async () => {
   const f = fakes();
   const sidecar = createDoclingSidecar({ process: f.process, client: f.client });
   await sidecar.convert({ base64: 'QUJD', filename: 'a.pdf' });
   await sidecar.convert({ base64: 'QUJD', filename: 'b.pdf' });
-  assert.equal(f.started(), 1);
+  // At-most-once used to be enforced HERE, by a memo on `DoclingSidecar`.
+  // ADR-0004 moved that memo down into `SidecarLifecycle.ensureRunning` — i.e.
+  // below this injected fake — so the facade now asks per conversion and the
+  // lifecycle dedupes. The at-most-one-SPAWN guarantee is tested against a real
+  // spawn fake in `src/sidecar/lifecycle.test.ts`; what is left to assert here
+  // is that the facade never converts without asking first.
+  assert.deepEqual(f.calls, [
+    'ensureRunning',
+    'ensureAlive',
+    'convertFile',
+    'ensureRunning',
+    'ensureAlive',
+    'convertFile',
+  ]);
+  assert.equal(f.started(), 2, 'asks every time; the lifecycle below decides');
 });
 
 test('modelStatus reflects whether the models are present on disk', async () => {
