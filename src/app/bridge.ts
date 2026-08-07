@@ -67,6 +67,12 @@ function unwrap<T>(result: unknown): T {
 
 /** Build the `window.canvasAgent` object that mirrors `AppApi` over IPC. */
 export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
+  // KEEP THIS AN OBJECT LITERAL. Because it is returned directly at an
+  // `AppApi`-typed position, TypeScript checks it for completeness AND applies
+  // excess-property checking — which is the only thing guaranteeing the preload
+  // surface is exactly `AppApi`. Rewriting this as a spread (`{ ...base, … }`)
+  // silently disables the excess-property half and lets the surface drift.
+  // ADR-0001 deleted the test that asserted the key list on the strength of it.
   return {
     async runTurn(req, onChunk) {
       // No callback ⇒ a plain request/response turn, no streaming subscription.

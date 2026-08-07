@@ -4,29 +4,9 @@ import {
   CHANNELS,
   CHUNK,
   RUN_TURN,
-  SAVE_CANVAS_AUTH,
   IMPORT_CANVAS,
   HEALTH,
-  PULL_MODEL,
-  PULL_INGEST_MODEL,
   INGEST_PULL_PROGRESS,
-  CREATE_SESSION,
-  LIST_SESSIONS,
-  LOAD_SESSION,
-  DELETE_SESSION,
-  RESOLVE_BRAND_THEME,
-  LIST_BRAND_KITS,
-  SAVE_BRAND_KIT,
-  DELETE_BRAND_KIT,
-  FETCH_CANVAS_PAGE,
-  LIST_CANVAS_PAGES,
-  CONVERT_DOCUMENT,
-  SCREENSHOT_PERMISSION_STATUS,
-  LIST_SCREENSHOT_SOURCES,
-  CAPTURE_SCREENSHOT,
-  CATALOG_AVAILABLE,
-  CATALOG_SEARCH,
-  CATALOG_GET,
 } from './channels.js';
 
 test('exposes the original three IPC channel names', () => {
@@ -35,33 +15,11 @@ test('exposes the original three IPC channel names', () => {
   assert.equal(HEALTH, 'canvasAgent:health');
 });
 
-test('CHANNELS bundles every request/response channel, keyed by AppApi method', () => {
-  assert.deepEqual(CHANNELS, {
-    runTurn: RUN_TURN,
-    saveCanvasAuth: SAVE_CANVAS_AUTH,
-    importCanvas: IMPORT_CANVAS,
-    health: HEALTH,
-    pullModel: PULL_MODEL,
-    pullIngestModel: PULL_INGEST_MODEL,
-    createSession: CREATE_SESSION,
-    listSessions: LIST_SESSIONS,
-    loadSession: LOAD_SESSION,
-    deleteSession: DELETE_SESSION,
-    resolveBrandTheme: RESOLVE_BRAND_THEME,
-    listBrandKits: LIST_BRAND_KITS,
-    saveBrandKit: SAVE_BRAND_KIT,
-    deleteBrandKit: DELETE_BRAND_KIT,
-    fetchCanvasPage: FETCH_CANVAS_PAGE,
-    listCanvasPages: LIST_CANVAS_PAGES,
-    convertDocument: CONVERT_DOCUMENT,
-    screenshotPermissionStatus: SCREENSHOT_PERMISSION_STATUS,
-    listScreenshotSources: LIST_SCREENSHOT_SOURCES,
-    captureScreenshot: CAPTURE_SCREENSHOT,
-    catalogAvailable: CATALOG_AVAILABLE,
-    catalogSearch: CATALOG_SEARCH,
-    catalogGet: CATALOG_GET,
-  });
-});
+// NOTE: the former 'CHANNELS bundles every request/response channel' test was
+// deleted per ADR-0001. It compared `CHANNELS` to its own constituent constants,
+// which proved nothing the file didn't already say. The real invariant — one
+// channel per `AppApi` method, and nothing else — is now the
+// `satisfies Record<keyof AppApi, string>` constraint on `CHANNELS` itself.
 
 test('channel names are all distinct', () => {
   const values = Object.values(CHANNELS);

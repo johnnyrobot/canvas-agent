@@ -7,6 +7,8 @@
  * (`src/contracts`). They are namespaced to avoid colliding with any other
  * `ipcMain.handle` channel.
  */
+import type { AppApi } from '../contracts/index.js';
+
 
 export const RUN_TURN = 'canvasAgent:runTurn';
 export const SAVE_CANVAS_AUTH = 'canvasAgent:saveCanvasAuth';
@@ -66,7 +68,16 @@ export const PULL_PROGRESS = 'canvasAgent:pullProgress';
  */
 export const INGEST_PULL_PROGRESS = 'canvasAgent:ingestPullProgress';
 
-/** All request/response IPC channels, keyed by the `AppApi` method they back. */
+/**
+ * All request/response IPC channels, keyed by the `AppApi` method they back.
+ *
+ * The `satisfies Record<keyof AppApi, string>` constraint is what makes this
+ * table the single source of truth: adding a method to `AppApi` fails the build
+ * here until a channel is added, and a key that is not an `AppApi` method fails
+ * too (which is why the one-way `send` events below are excluded — they have no
+ * handler to derive). `as const` is kept so `ChannelName` stays a literal union
+ * rather than widening to `string`.
+ */
 export const CHANNELS = {
   runTurn: RUN_TURN,
   saveCanvasAuth: SAVE_CANVAS_AUTH,
@@ -91,7 +102,7 @@ export const CHANNELS = {
   screenshotPermissionStatus: SCREENSHOT_PERMISSION_STATUS,
   listScreenshotSources: LIST_SCREENSHOT_SOURCES,
   captureScreenshot: CAPTURE_SCREENSHOT,
-} as const;
+} as const satisfies Record<keyof AppApi, string>;
 
 /** Union of every channel name (handy for typing a generic invoke). */
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

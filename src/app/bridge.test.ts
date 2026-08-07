@@ -110,35 +110,11 @@ const CATALOG_COURSE: CatalogCourse = {
   source: 'live',
 };
 
-test('createBridge exposes exactly the AppApi methods', () => {
-  const { invoke } = fakeInvoke({});
-  const bridge = createBridge(invoke, noSub);
-  assert.deepEqual(Object.keys(bridge).sort(), [
-    'captureScreenshot',
-    'catalogAvailable',
-    'catalogGet',
-    'catalogSearch',
-    'convertDocument',
-    'createSession',
-    'deleteBrandKit',
-    'deleteSession',
-    'fetchCanvasPage',
-    'health',
-    'importCanvas',
-    'listBrandKits',
-    'listCanvasPages',
-    'listScreenshotSources',
-    'listSessions',
-    'loadSession',
-    'pullIngestModel',
-    'pullModel',
-    'resolveBrandTheme',
-    'runTurn',
-    'saveBrandKit',
-    'saveCanvasAuth',
-    'screenshotPermissionStatus',
-  ]);
-});
+// NOTE: the former 'createBridge exposes exactly the AppApi methods' test was
+// deleted per ADR-0001. `createBridge(): AppApi` returns an object literal, so
+// TypeScript already enforces the exact key list — a missing method fails, and
+// excess-property checking rejects an extra one. See the comment on that return
+// for the one way this escapes the compiler.
 
 test('runTurn without onChunk invokes { req } and never subscribes', async () => {
   let subscribed = false;
