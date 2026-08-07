@@ -115,6 +115,26 @@ Source lives under `src/`, organized by concern; each module has its own README:
 | `knowledge/` | On-device knowledge packs (templates, rubrics, WCAG basics) |
 | `canvas/`, `storage/`, `templates/`, `theme/`, `runtime/`, `contracts/` | Canvas integration, persistence, theming, and runtime wiring |
 
+## Agent skills
+
+Conventions that coding agents working in this repo should follow. The linked
+files under [`docs/agents/`](docs/agents/) hold the detail.
+
+### Issue tracker
+
+GitHub Issues on `johnnyrobot/canvas-agent`, via the `gh` CLI. See
+[`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+The five canonical roles, used verbatim as label strings. See
+[`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context — `CONTEXT.md` + `docs/adr/` at the repo root. See
+[`docs/agents/domain.md`](docs/agents/domain.md).
+
 ## Privacy & security posture
 
 - **On-device only** — no network calls to model or document APIs.
