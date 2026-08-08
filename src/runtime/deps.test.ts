@@ -4,6 +4,9 @@ import type { AllowlistResult, ContrastResult, IssueSet, KbResult, TemplateResul
 import type { Auditor } from '../contracts/index.js';
 import { createEngineDeps, runtimeLlmEnv, SHIPPED_MODEL_LICENCES, PERMISSIVE_LICENCES } from './deps.js';
 import { loadLLMConfig, requiredModelTags } from '../llm/config.js';
+// The renderer's DOM-free first-run module; imported here only so the shipped
+// defaults and their declared download sizes are guarded in one place.
+import { MODEL_DOWNLOAD_SIZES_GB } from '../app/renderer/model-health.js';
 
 /** A scripted offline auditor (the real Playwright audit is browser-bound). */
 const cleanAudit: Auditor = async () => ({ issues: [] });
@@ -161,6 +164,24 @@ test('every shipped model default is declared and permissively licensed (ADR-000
     assert.ok(
       (PERMISSIVE_LICENCES as readonly string[]).includes(licence),
       `${tag} is licensed ${licence}, which is not permissive — see ADR-0007`,
+    );
+  }
+});
+
+test('every shipped model default declares its download size (first-run copy, #32)', () => {
+  // The sibling of the licence guard above, and undeclarable in the same way: the
+  // first-run screen states the total download BEFORE the user commits to it, and
+  // an undeclared tag silently downgrades that sentence to a floor ("more than
+  // 5.3 GB") instead of failing. A new default (vision, #33) is caught here.
+  const shipped = Object.entries(runtimeLlmEnv({}))
+    .filter(([k]) => k.startsWith('MODEL_'))
+    .map(([, tag]) => tag as string);
+
+  for (const tag of shipped) {
+    const gb: number | undefined = MODEL_DOWNLOAD_SIZES_GB[tag];
+    assert.ok(
+      typeof gb === 'number' && gb > 0,
+      `${tag} ships as a default but declares no download size in MODEL_DOWNLOAD_SIZES_GB`,
     );
   }
 });
