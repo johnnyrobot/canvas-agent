@@ -19,7 +19,9 @@ argument to `registerIpc` is the only integration seam.
 | `bridge.ts` | ✅ | PURE `createBridge(invoke)` — builds the renderer-side object mirroring `AppApi`; invokes channels and unwraps the envelope (re-throwing real errors). |
 | `stub-api.ts` | ✅ | `createStubApi(): AppApi` — canned `TurnView` (one passing-gate fragment + one `badgeWithheld` fragment), `CanvasImportResult`, `RuntimeHealth`. |
 | `view.ts` | ✅ | PURE `turnViewToVm(view)` — maps a `TurnView` to a render-ready VM; derives the badge from the gate (never the model). |
-| `main.ts` | smoke | Electron `app`/`BrowserWindow` bootstrap with secure defaults; `registerIpc(ipcMain, createStubApi())`. |
+| `build-api.ts` | ✅ | `buildApi(createReal: () => RuntimeHandle): RuntimeHandle` — tries the real runtime, falls back to the HONEST degraded `createUnavailableApi` (never the demo stub) if construction throws. Carries a `RuntimeHandle`, not a bare `AppApi`, so `main.ts` can still reach `dispose` on the degraded path (a no-op there — nothing was started). |
+| `shutdown.ts` | ✅ | `registerShutdown(host: QuitHost, dispose, options?)` — runs `dispose()` on `before-quit` with a deadline, then exits. Takes a narrow `QuitHost` port (`on('before-quit', …)` + `exit(code)`) rather than Electron's `app`, so quit sequencing is unit-testable without Electron. |
+| `main.ts` | smoke | Electron `app`/`BrowserWindow` bootstrap with secure defaults; wires `buildApi(createRuntimeHandle)`'s `api` to `registerIpc` and its `dispose` to `registerShutdown(app, …)` (#13, ADR-0006). Also routes `SIGINT`/`SIGTERM` through `app.quit()` so `npm run app`'s Ctrl-C hits the same shutdown path. |
 | `preload.ts` | smoke | `contextBridge.exposeInMainWorld('canvasAgent', createBridge(ipcRenderer.invoke))`. |
 | `renderer/index.html` + `renderer/renderer.ts` | smoke | The UI shell: screens, DOM construction and I/O. Decision logic is extracted to the DOM-free modules below. |
 | `renderer/remediate-review.ts` | ✅ | The remediate-review SCREEN MODEL (ADR-0002) — owns which finding is selected and every transition over it; maps a run to the panel view model and decides what the instructor may do with the repaired page. DOM-free: returns a `ReviewAction` for `renderer.ts` to perform. |
@@ -48,6 +50,21 @@ confined to those two files and never reaches the `node:test` path.
   bridge — no `ipcRenderer`/Node in the renderer.
 - A strict CSP in `index.html` (`default-src 'none'; script-src 'self'`) — the
   app is fully on-device, so the renderer needs no remote origins.
+
+### Shutdown (#13, ADR-0006)
+
+`main.ts` no longer just wires an `AppApi` to IPC — it wires a `RuntimeHandle`
+(`{ api, dispose }`, from `buildApi(createRuntimeHandle)`) and registers
+`dispose` with `registerShutdown(app, dispose)` so quitting the app stops the
+Ollama and Docling sidecars it started, instead of orphaning them. `SIGINT`/
+`SIGTERM` are routed through `app.quit()` so the dev inner loop (`npm run
+app`, Ctrl-C) hits the same path — those signals don't fire `before-quit` on
+their own.
+
+**What this does *not* buy you:** the shutdown path only runs when the main
+process exits normally. A crash or a Force Quit still orphans the sidecars —
+there is no OS-level supervision here, only a cooperative handler on
+`before-quit`.
 
 ### The output gate is the sanitizer
 The renderer injects each fragment's `gate.html` via `innerHTML`. That is **by

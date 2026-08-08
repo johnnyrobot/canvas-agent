@@ -5,6 +5,14 @@ Wires the finished modules into a runnable turn pipeline and exposes the **froze
 Electron app-shell track consumes `AppApi` over IPC and never imports the real
 runtime (it builds against a fake `AppApi` in its own tests).
 
+The app shell's integration seam is `createRuntime`, not `createAppApi`
+directly: `createRuntime(opts): RuntimeHandle` returns `{ api, dispose }`,
+where `dispose` stops every sidecar process this call started (Ollama, Docling)
+so `main.ts` can tear them down on quit (#13, ADR-0006). `createAppApi` remains
+the injectable assembler underneath it — the thing `createRuntime` calls and
+the thing tests construct directly when they don't need process lifetime —
+`createRuntime` is the only path that constructs the *real* sidecars.
+
 ```
 TurnRequest ──► routeIntent (guidance | build | remediate)
       │
@@ -31,8 +39,11 @@ Canvas page access** — all on top of the same unconditional gate.
 | File | Responsibility |
 |---|---|
 | `deps.ts` | `createEngineDeps(opts)` — adapt the REAL modules onto the orchestrator's `EngineDeps` |
-| `app-api.ts` | `createAppApi(opts): AppApi` — the turn pipeline + gate + importer + health |
-| `index.ts` | Public surface (`createAppApi`, `createEngineDeps`, re-exported contract types) |
+| `app-api.ts` | `createAppApi(opts): AppApi` — the turn pipeline + gate + importer + health; the injectable assembler `createRuntime` builds on |
+| `runtime.ts` | `createRuntime(opts): RuntimeHandle` — the composition root: builds the real Ollama + Docling sidecars, calls `createAppApi` over them, and returns `{ api, dispose }` so the owner can stop what it started |
+| `activity.ts` | `createActivityTracker` / `noopActivityTracker` — idle-lifetime seam `createRuntime` threads through |
+| `database.ts` | `createLazyDatabase` — lazy on-device SQLite open/`migrate()`, the lifetime seam `createRuntime` owns and disposes |
+| `index.ts` | Public surface (`createRuntime`, `createAppApi`, `createEngineDeps`, re-exported contract types) |
 | `*.test.ts` | Offline unit tests (scripted runner, fake sidecars, real engine/theme/templates/knowledge/gate) |
 
 The end-to-end tests live in **`/e2e`** (a sibling of `src`, intentionally
