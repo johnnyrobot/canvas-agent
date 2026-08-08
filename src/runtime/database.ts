@@ -11,10 +11,11 @@
  *
  * Once closed, the database stays closed: `close()` latches a `closed` flag
  * before anything else, so a later `open()` fails loudly instead of silently
- * opening a brand-new handle that nothing will ever close. And a `close()`
- * that races an in-flight `open()` takes over that same pending promise
- * rather than letting the original caller receive a handle that gets closed
- * out from under it with no signal.
+ * opening a brand-new handle that nothing will ever close. And if `close()`
+ * lands while an `open()` is still in flight, that `open()` call rejects
+ * instead of resolving to a handle that `close()` has already (or is about
+ * to) close out from under it — the caller gets a clear error, not a silent
+ * use-after-close.
  */
 import { ensureAppDirs, migrate, openDatabase, resolveAppPaths } from '../storage/index.js';
 import type { Database } from '../contracts/index.js';
@@ -48,7 +49,13 @@ export function createLazyDatabase(options: LazyDatabaseOptions = {}): LazyDatab
       if (closed) {
         return Promise.reject(new Error('LazyDatabase is closed; the app is shutting down.'));
       }
-      return (opening ??= openImpl());
+      const pending = (opening ??= openImpl());
+      return pending.then((db) => {
+        if (closed) {
+          throw new Error('LazyDatabase was closed while opening; the app is shutting down.');
+        }
+        return db;
+      });
     },
 
     async close() {

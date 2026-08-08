@@ -112,7 +112,26 @@ test('close() during an in-flight open() still closes exactly one handle', async
   const closePromise = lazy.close();
   resolveOpen(db);
 
-  await openPromise;
+  // The in-flight open() now rejects rather than yielding a closed handle
+  // (see the dedicated test below) — this test only cares that the handle
+  // itself is still closed exactly once.
+  await openPromise.catch(() => {});
+  await closePromise;
+  assert.equal(db.closed, 1);
+});
+
+test('an open() in flight when close() lands rejects instead of yielding a closed handle', async () => {
+  const db = fakeDb();
+  let resolveOpen!: (db: Database) => void;
+  const lazy = createLazyDatabase({
+    openImpl: () => new Promise((resolve) => (resolveOpen = resolve)),
+  });
+
+  const openPromise = lazy.open();
+  const closePromise = lazy.close();
+  resolveOpen(db);
+
+  await assert.rejects(() => openPromise, /closed/);
   await closePromise;
   assert.equal(db.closed, 1);
 });
