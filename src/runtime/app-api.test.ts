@@ -19,6 +19,8 @@ import type { ChatRunner } from '../orchestrator/index.js';
 import { createInMemorySecretStore, migrate, openDatabase } from '../storage/index.js';
 import type { SessionStore } from '../storage/index.js';
 import { createAppApi } from './app-api.js';
+import { createActivityTracker } from './activity.js';
+import { createLazyDatabase } from './database.js';
 
 /** A scripted model: returns queued responses, records what each call saw. */
 class ScriptedRunner implements ChatRunner {
@@ -798,4 +800,82 @@ test('catalogGet propagates a CatalogClient rejection rather than swallowing it'
     },
   });
   await assert.rejects(() => api(runner, { catalog }).catalogGet(1), /course not found/);
+});
+
+test('runTurn brackets the turn in the activity tracker so shutdown can drain it', async () => {
+  const tracker = createActivityTracker();
+  const runner = new ScriptedRunner([text('Here is your page.')]);
+  await api(runner, { activity: tracker }).runTurn({ user: 'make a welcome page' });
+  assert.equal(await tracker.whenIdle(10), true, 'the bracket must be released when the turn ends');
+});
+
+test('the activity bracket stays open until runTurn RESOLVES, not merely until it is called', async () => {
+  // Guards the `opts.audit` early-return path in withTurnAuditor: `return fn(...)`
+  // without `await` runs the enclosing `finally` at return time, so the bracket
+  // would close while the turn was still running and shutdown would kill the
+  // sidecars underneath it.
+  const tracker = createActivityTracker();
+  let releaseModel!: () => void;
+  const modelBlocked = new Promise<void>((r) => {
+    releaseModel = r;
+  });
+  const slowRunner: ChatRunner = {
+    async chat() {
+      await modelBlocked;
+      return text('done');
+    },
+  };
+  const turn = api(slowRunner, { activity: tracker }).runTurn({ user: 'hello' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(await tracker.whenIdle(10), false, 'bracket closed before the turn resolved');
+  releaseModel();
+  await turn;
+  assert.equal(await tracker.whenIdle(10), true);
+});
+
+test('a rejected turn still releases the activity bracket', async () => {
+  const tracker = createActivityTracker();
+  const throwingRunner: ChatRunner = {
+    async chat() {
+      throw new Error('model exploded');
+    },
+  };
+  await assert.rejects(() => api(throwingRunner, { activity: tracker }).runTurn({ user: 'hi' }));
+  assert.equal(await tracker.whenIdle(10), true, 'a failed turn must not wedge shutdown forever');
+});
+
+test('the activity bracket stays open until a REJECTING turn settles, too', async () => {
+  const tracker = createActivityTracker();
+  let releaseFailure!: () => void;
+  const blocked = new Promise<void>((r) => {
+    releaseFailure = r;
+  });
+  const slowFailingRunner: ChatRunner = {
+    async chat() {
+      await blocked;
+      throw new Error('model exploded late');
+    },
+  };
+  const turn = api(slowFailingRunner, { activity: tracker }).runTurn({ user: 'hi' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(await tracker.whenIdle(10), false, 'bracket closed before the failing turn settled');
+  releaseFailure();
+  await assert.rejects(() => turn);
+  assert.equal(await tracker.whenIdle(10), true, 'a failed turn must not wedge shutdown forever');
+});
+
+test('an injected LazyDatabase is what session persistence uses', async () => {
+  const db = await freshDb();
+  let opens = 0;
+  const lazy = createLazyDatabase({
+    openImpl: async () => {
+      opens += 1;
+      return db;
+    },
+  });
+  const runner = new ScriptedRunner([text('hello')]);
+  const built = api(runner, { database: lazy });
+  const session = await built.createSession({ title: 'Shutdown test', mode: 'build' });
+  await built.runTurn({ user: 'hi', sessionId: session.id });
+  assert.equal(opens, 1, 'the injected lazy database is opened once and reused');
 });
