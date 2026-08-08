@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveNativeUrl, loadLLMConfig, uniqueModels } from './config.js';
+import { deriveNativeUrl, loadLLMConfig, requiredModelTags, uniqueModels } from './config.js';
+import { REQUIRED_MODEL_ROLES } from './types.js';
 
 // This module holds no shipping default (ADR-0007), so every config here names
 // its own model. A placeholder tag, not a real one: these tests are about
@@ -39,6 +40,33 @@ test('deriveNativeUrl strips a trailing /v1', () => {
 test('uniqueModels dedups across roles (for warm-loading)', () => {
   const c = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_CHEAP: 'test-cheap:0.5b' });
   assert.deepEqual(uniqueModels(c).sort(), ['test-cheap:0.5b', TEXT].sort());
+});
+
+test('the required model set is exactly text and vision (ADR-0009)', () => {
+  assert.deepEqual([...REQUIRED_MODEL_ROLES], ['text', 'vision']);
+});
+
+test('requiredModelTags returns one tag per distinct required role', () => {
+  const c = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_VISION: 'test-vision:2b' });
+  assert.deepEqual(requiredModelTags(c), [TEXT, 'test-vision:2b']);
+});
+
+test('requiredModelTags dedups a tag shared by both required roles', () => {
+  // Today's defaults: vision inherits the text model, so this is ONE download.
+  const c = loadLLMConfig({ MODEL_TEXT: TEXT });
+  assert.deepEqual(requiredModelTags(c), [TEXT]);
+});
+
+test('requiredModelTags ignores roles outside the required set (ADR-0009)', () => {
+  // MODEL_DEEP=granite4.1:30b is a real 17 GB tag no production path calls;
+  // provisioning must never be steered into pulling it.
+  const c = loadLLMConfig({
+    MODEL_TEXT: TEXT,
+    MODEL_DEEP: 'test-deep:30b',
+    MODEL_FAST: 'test-fast:1b',
+    MODEL_CHEAP: 'test-cheap:0.5b',
+  });
+  assert.deepEqual(requiredModelTags(c), [TEXT]);
 });
 
 test('invalid numeric env throws', () => {

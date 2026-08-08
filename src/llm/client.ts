@@ -65,6 +65,9 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortS
 
 export type FetchLike = typeof fetch;
 
+/** `/api/tags` backs a probe the first-run UI waits on — fail fast, not slow. */
+const TAGS_PROBE_TIMEOUT_MS = 2000;
+
 export class OllamaClient {
   constructor(
     private readonly config: LLMConfig,
@@ -127,6 +130,29 @@ export class OllamaClient {
       }
       if (done) return;
     }
+  }
+
+  /**
+   * The set of model tags present in the local Ollama store (`/api/tags`).
+   *
+   * A set of *tags*, not a list of models: Ollama reports both `name` and
+   * `model` for each entry and either may carry the tag a caller asks about, so
+   * both go in and membership is the only question worth asking of the result.
+   *
+   * A short, fixed timeout rather than the config's `timeoutMs`: this backs a
+   * status probe the UI waits on, so an unresponsive daemon must read as "no
+   * models" quickly instead of stalling first-run setup for minutes. A failure
+   * to reach the daemon is a rejection — the caller decides what absent means.
+   */
+  async localModelTags(): Promise<Set<string>> {
+    const res = await this.fetchImpl(this.config.nativeUrl + '/api/tags', {
+      signal: AbortSignal.timeout(TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new OllamaError(`Ollama /api/tags returned ${res.status}`, res.status);
+    const data = (await res.json()) as { models?: Array<{ name?: string; model?: string }> };
+    return new Set(
+      (data.models ?? []).flatMap((m) => [m.name, m.model].filter((n): n is string => typeof n === 'string')),
+    );
   }
 
   /**

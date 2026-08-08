@@ -219,6 +219,30 @@ test('health() reports injected model availability when supplied', async () => {
   assert.match(health.model?.installCommand ?? '', /^ollama pull /);
 });
 
+test('health() reports NOT available when only part of the required model set is installed', async () => {
+  // A SEAM GUARD, not a regression proof: health already forwards the sidecar's
+  // aggregate, so this passes on the pre-#30 code too. What it pins is that the
+  // richer required-set answer (ADR-0009) keeps arriving here as not-ready when
+  // one model is missing — the reading #31 builds its per-model report on. A
+  // future reader that indexed `models[0]` and called that "the model" would
+  // fail here. The failing-capable coverage lives in `src/llm/sidecar.test.ts`.
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({
+        available: false,
+        models: [
+          { role: 'text' as const, tag: 'text:1b', available: true },
+          { role: 'vision' as const, tag: 'vision:2b', available: false },
+        ],
+      }),
+    },
+  });
+  assert.equal((await view.health()).model?.available, false);
+});
+
 test('screenshot attachments are summarized before the model sees the turn', async () => {
   const runner = new ScriptedRunner([text('answer')]);
   const seenImages: string[] = [];

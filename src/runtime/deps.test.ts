@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { AllowlistResult, ContrastResult, IssueSet, KbResult, TemplateResult, ThemeResult } from '../contracts/index.js';
 import type { Auditor } from '../contracts/index.js';
 import { createEngineDeps, runtimeLlmEnv, SHIPPED_MODEL_LICENCES, PERMISSIVE_LICENCES } from './deps.js';
+import { loadLLMConfig, requiredModelTags } from '../llm/config.js';
 
 /** A scripted offline auditor (the real Playwright audit is browser-bound). */
 const cleanAudit: Auditor = async () => ({ issues: [] });
@@ -128,6 +129,16 @@ test('runtimeLlmEnv injects the shipping text default, and an explicit override 
     'an operator override is never overridden',
   );
   assert.equal(runtimeLlmEnv({ MODEL_TEXT: '' }).MODEL_TEXT, 'granite4.1:8b', 'empty means unset');
+});
+
+test('the shipping defaults still provision ONE download (vision inherits text)', () => {
+  // The required-set machinery (#30) lands before anything depends on it, so
+  // production behaviour must be unchanged: two required roles, one distinct
+  // tag, one pull. This is a deliberate tripwire — when #33 gives vision its
+  // own default, this assertion becomes the two shipped tags, and having to
+  // change it here is the point at which someone confirms the second download
+  // is intended.
+  assert.deepEqual(requiredModelTags(loadLLMConfig(runtimeLlmEnv({}))), ['granite4.1:8b']);
 });
 
 test('every shipped model default is declared and permissively licensed (ADR-0007)', () => {
