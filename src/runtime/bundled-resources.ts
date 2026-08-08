@@ -27,7 +27,7 @@
  * falls back to PATH, so a mis-stage degrades to the pre-existing behavior rather
  * than pointing at a wrong file.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 export function resolveSidecarCommand(
@@ -39,4 +39,39 @@ export function resolveSidecarCommand(
   if (!resourcesPath) return fallback;
   const bin = path.join(resourcesPath, 'sidecars', name, name);
   return exists(bin) ? bin : fallback;
+}
+
+/** True when `dir` exists and holds at least one entry. */
+function nonEmptyDir(dir: string): boolean {
+  try {
+    return existsSync(dir) && readdirSync(dir).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export interface IngestModelEnvOptions {
+  /** Electron's `app.isPackaged`. Dev builds are left entirely alone. */
+  packaged: boolean;
+  /** The per-user model store used when the build carries no bundled models. */
+  userModelsDir: string;
+  /** Environment to inspect for an existing operator override. */
+  env?: Record<string, string | undefined>;
+  resourcesPath?: string | undefined;
+  isNonEmptyDir?: (p: string) => boolean;
+}
+
+export function resolveIngestModelEnv(opts: IngestModelEnvOptions): Record<string, string> {
+  if (!opts.packaged) return {};
+  const configured = opts.env?.DOCLING_MODELS_DIR;
+  if (configured !== undefined && configured !== '') return {};
+
+  const isNonEmptyDir = opts.isNonEmptyDir ?? nonEmptyDir;
+  const bundled = opts.resourcesPath
+    ? path.join(opts.resourcesPath, 'sidecars', 'docling-serve', 'models')
+    : undefined;
+  if (bundled && isNonEmptyDir(bundled)) {
+    return { DOCLING_MODELS_DIR: bundled, DOCLING_MODELS_BUNDLED: '1' };
+  }
+  return { DOCLING_MODELS_DIR: opts.userModelsDir };
 }

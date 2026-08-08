@@ -47,15 +47,24 @@ export class DoclingProcess extends SidecarLifecycle {
   }
 
   /**
-   * Whether the downloaded conversion models are present on disk. Only meaningful
-   * when `config.modelsDir` is set (the packaged app's per-user store); without
-   * it we can't tell (the bundled launcher may have its own `models/`), so we
-   * optimistically report `true` and let conversion surface any real gap.
+   * Whether the conversion models are available to serve.
+   *
+   * A bundled build (ADR-0008) answers `true` from KNOWLEDGE: the models ship
+   * inside the app, so there is nothing to probe and nothing to download. This
+   * branch is deliberately not left to the optimistic fallback below — being
+   * right by luck is how the app ends up offering a download that would write
+   * into a read-only, code-signed bundle.
+   *
+   * Otherwise this is only meaningful when `config.modelsDir` is set (the
+   * packaged app's per-user store); without it we can't tell (the bundled
+   * launcher may have its own `models/`), so we optimistically report `true` and
+   * let conversion surface any real gap.
    *
    * Stays here rather than moving into the shared lifecycle: this is first-run
    * provisioning, not lifecycle (ADR-0004).
    */
   modelsPresent(): boolean {
+    if (this.config.bundledModels) return true;
     const dir = this.config.modelsDir;
     if (!dir) return true;
     try {

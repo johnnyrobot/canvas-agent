@@ -45,3 +45,12 @@ test('parseExportFormats validates and falls back', () => {
 test('DOCLING_OCR_ENABLED=false is respected', () => {
   assert.equal(loadIngestConfig({ DOCLING_OCR_ENABLED: 'false' }).ocrEnabled, false);
 });
+
+test('bundledModels: false by default, true when the build marks itself bundled', () => {
+  assert.equal(loadIngestConfig({}).bundledModels, false, 'default build downloads on first run');
+  assert.equal(
+    loadIngestConfig({ DOCLING_MODELS_BUNDLED: '1' }).bundledModels,
+    true,
+    'the models ship inside the app (ADR-0008)',
+  );
+});

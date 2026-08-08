@@ -33,6 +33,21 @@ const build = pkg.build ?? {};
 const results = [];
 const check = (ok, level, label, detail = '') => results.push({ ok: !!ok, level, label, detail });
 
+/** Total size of `dir` in MB, recursively. 0 when absent/unreadable. */
+function dirSizeMb(dir) {
+  if (!existsSync(dir)) return 0;
+  let bytes = 0;
+  try {
+    for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      bytes += statSync(path.join(entry.parentPath ?? entry.path, entry.name)).size;
+    }
+  } catch {
+    return 0;
+  }
+  return bytes / 1048576;
+}
+
 /**
  * "Staged" means the extraResources entry holds real payload. A directory counts
  * when it has a real child beyond .gitkeep / dotfiles; a single file entry (e.g.
@@ -107,6 +122,22 @@ for (const res of build.extraResources ?? []) {
       check(seedOk, 'staged', 'catalog seed present: sidecars/laccd-courses-pp-cli/seed/data.db',
         seedOk ? `present (${seedMb.toFixed(0)} MB)`
           : `MISSING/PARTIAL (${seedMb.toFixed(0)} MB, expected ~900 MB+) — offline catalog search would be empty or miss whole colleges; rebuild with \`CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs\``);
+    }
+    // The document models ship INSIDE the app (ADR-0008), so ingestion is offline
+    // out of the box and the first-run download is gone. Stage them with
+    // DOCLING_BUNDLE_MODELS=1. Gate on SIZE, not presence: `download_models`
+    // fetches several models in sequence, so an interrupted or partially-failed
+    // fetch leaves a populated-but-incomplete dir that a presence check waves
+    // through — exactly how a 461 MB half-mirrored catalog once passed. A
+    // complete payload (classic pipeline + Granite-Docling MLX) is ~1.2 GB;
+    // 800 MB is the floor. Re-tighten it once a real build has been measured.
+    if (name === 'docling-serve') {
+      const models = path.join(from, 'models');
+      const mb = dirSizeMb(models);
+      const ok = mb > 800;
+      check(ok, 'staged', 'docling models bundled: sidecars/docling-serve/models',
+        ok ? `present (${mb.toFixed(0)} MB)`
+          : `MISSING/PARTIAL (${mb.toFixed(0)} MB, expected ~1.2 GB) — PDF and scanned-image conversion would need a first-run download; re-stage with \`DOCLING_BUNDLE_MODELS=1 npm run stage:sidecars\``);
     }
   }
 }
