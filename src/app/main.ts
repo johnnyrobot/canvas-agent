@@ -1,14 +1,16 @@
 /**
  * Electron main process — the only place that boots a `BrowserWindow`.
  *
- * Kept deliberately thin: all testable logic lives in `ipc.ts` / `stub-api.ts`.
- * This file just creates the window with secure defaults and wires the IPC
- * surface to an `AppApi`. The single integration seam is the argument to
- * `registerIpc`: today it's `createStubApi()`; post-merge the lead swaps in the
- * integration track's `createAppApi()` and nothing else here changes.
+ * Kept deliberately thin: all testable logic lives in the modules it wires —
+ * `ipc.ts` (the IPC boundary), `build-api.ts` (the C3 fallback policy),
+ * `shutdown.ts` (quit sequencing), and `../runtime` (the composition root that
+ * owns the sidecar processes). This file creates the window with secure
+ * defaults, wires the IPC surface to the runtime's `AppApi`, and connects that
+ * runtime's `dispose` to quit.
  *
- * Not unit-tested (Electron can't launch headless under `node:test`); exercised
- * via the manual `npm run app` smoke the lead adds after merge.
+ * Not unit-tested (Electron can't launch headless under `node:test`); its
+ * behaviour is covered by those modules' own suites, the scripted E2E matrix,
+ * and a real-app smoke.
  */
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';

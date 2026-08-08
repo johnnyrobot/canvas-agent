@@ -11,7 +11,11 @@ where `dispose` stops every sidecar process this call started (Ollama, Docling)
 so `main.ts` can tear them down on quit (#13, ADR-0006). `createAppApi` remains
 the injectable assembler underneath it — the thing `createRuntime` calls and
 the thing tests construct directly when they don't need process lifetime —
-`createRuntime` is the only path that constructs the *real* sidecars.
+`createRuntime` is the only path that constructs the *real* sidecars. `dispose`
+only stops those sidecars when something calls it; `main.ts` is that caller on
+a normal quit, but a crash or Force Quit bypasses it entirely — see
+`src/app/README.md`'s Shutdown section for what the app shell's shutdown path
+does and does not cover.
 
 ```
 TurnRequest ──► routeIntent (guidance | build | remediate)
