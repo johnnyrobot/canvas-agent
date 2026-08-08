@@ -87,3 +87,32 @@ test('close() surfaces a failure from the underlying close', async () => {
   await lazy.open();
   await assert.rejects(() => lazy.close(), /close failed/);
 });
+
+test('open() after close() rejects rather than opening an unowned handle', async () => {
+  let opens = 0;
+  const lazy = createLazyDatabase({
+    openImpl: async () => {
+      opens += 1;
+      return fakeDb();
+    },
+  });
+  await lazy.close();
+  await assert.rejects(() => lazy.open(), /closed/);
+  assert.equal(opens, 0, 'a post-shutdown open() must not create a handle nobody owns');
+});
+
+test('close() during an in-flight open() still closes exactly one handle', async () => {
+  const db = fakeDb();
+  let resolveOpen!: (db: Database) => void;
+  const lazy = createLazyDatabase({
+    openImpl: () => new Promise((resolve) => (resolveOpen = resolve)),
+  });
+
+  const openPromise = lazy.open();
+  const closePromise = lazy.close();
+  resolveOpen(db);
+
+  await openPromise;
+  await closePromise;
+  assert.equal(db.closed, 1);
+});

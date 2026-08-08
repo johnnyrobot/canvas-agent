@@ -8,6 +8,13 @@
  * `close()` is a NO-OP when `open()` was never called: a session that never
  * touched a session or brand kit never creates the file, and shutdown must not
  * open one just to close it.
+ *
+ * Once closed, the database stays closed: `close()` latches a `closed` flag
+ * before anything else, so a later `open()` fails loudly instead of silently
+ * opening a brand-new handle that nothing will ever close. And a `close()`
+ * that races an in-flight `open()` takes over that same pending promise
+ * rather than letting the original caller receive a handle that gets closed
+ * out from under it with no signal.
  */
 import { ensureAppDirs, migrate, openDatabase, resolveAppPaths } from '../storage/index.js';
 import type { Database } from '../contracts/index.js';
@@ -34,13 +41,18 @@ async function openOnDevice(): Promise<Database> {
 export function createLazyDatabase(options: LazyDatabaseOptions = {}): LazyDatabase {
   const openImpl = options.openImpl ?? openOnDevice;
   let opening: Promise<Database> | undefined;
+  let closed = false;
 
   return {
     open() {
+      if (closed) {
+        return Promise.reject(new Error('LazyDatabase is closed; the app is shutting down.'));
+      }
       return (opening ??= openImpl());
     },
 
     async close() {
+      closed = true; // no new handles after this, even if we never opened one
       if (!opening) return; // never opened — nothing to close
       const pending = opening;
       opening = undefined; // idempotent: a second close finds nothing
