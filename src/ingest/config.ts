@@ -61,6 +61,7 @@ export function loadIngestConfig(env: Env = process.env): IngestConfig {
     // INGEST_PIPELINE=vlm (preset overridable via INGEST_VLM_PRESET).
     pipeline: parsePipeline(str(env, 'INGEST_PIPELINE', 'standard')),
     vlmPreset: str(env, 'INGEST_VLM_PRESET', 'granite_docling'),
+    bundledModels: bool(env, 'DOCLING_MODELS_BUNDLED', false),
     timeoutMs: num(env, 'DOCLING_TIMEOUT_MS', 300000),
     manageProcess: bool(env, 'DOCLING_MANAGE_PROCESS', true),
   };

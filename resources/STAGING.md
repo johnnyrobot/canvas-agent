@@ -49,9 +49,17 @@ node scripts/build-catalog-seed.mjs
 # CATALOG_SEED_HOME=~/.cache/canvas-agent/catalog-seed-home \
 # CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" node scripts/build-catalog-seed.mjs
 
-# 3. The on-device sidecar binaries (point at your local installs).
+# 3a. The docling-serve bundle, INCLUDING its models (~1.2 GB). Bundled by default
+#     (ADR-0008) so PDF/scanned-image conversion is offline out of the box with no
+#     first-run download. Slow on a cold run; it skips the fetch when `models/` is
+#     already populated, so a rebuild resumes. `DOCLING_BUNDLE_MODELS=0` skips the
+#     embed, but `pre-release --strict` then REJECTS the build.
+bash scripts/build-docling-bundle.sh
+
+# 3b. The on-device sidecar binaries (point at your local installs).
 #    DOCLING_SERVE_DIR = the onedir app dir whose immediate child is the
 #    `docling-serve` launcher (e.g. .../dist/docling-serve), NOT the parent `dist`.
+#    Its `models/` dir is copied along with it.
 OLLAMA_BIN="$(command -v ollama)" \
 DOCLING_SERVE_DIR="/path/to/docling-serve" \
 CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" \

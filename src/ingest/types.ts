@@ -97,6 +97,13 @@ export interface IngestConfig {
    * (the bundled launcher's own `models/` or HF cache is used). Absolute path.
    */
   modelsDir?: string;
+  /**
+   * True when the conversion models ship INSIDE the app (ADR-0008). `modelsDir`
+   * then points at the app bundle, which is read-only and code-signed: the
+   * models are served from it and never written to, so the first-run download
+   * is refused rather than merely unreached.
+   */
+  bundledModels: boolean;
   /** Per-request timeout (ms). Conversions can be slow on big PDFs. */
   timeoutMs: number;
   /** If false, never spawn `docling-serve` — assume an external instance. */

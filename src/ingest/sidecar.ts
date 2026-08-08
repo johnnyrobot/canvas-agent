@@ -73,6 +73,15 @@ export class DoclingSidecar {
     onProgress?: (p: IngestPullProgress) => void,
     signal?: AbortSignal,
   ): Promise<void> {
+    // A bundled build (ADR-0008) serves from the app bundle, which is read-only
+    // and code-signed: downloading would write into it and break the signature.
+    // Checked on the config BEFORE the presence probe, so the refusal survives
+    // any future change to how presence is determined — structurally impossible,
+    // not merely unreached.
+    if (this.config.bundledModels) {
+      onProgress?.({ status: 'success', percent: 100 });
+      return;
+    }
     if (this.process.modelsPresent()) {
       onProgress?.({ status: 'success', percent: 100 });
       return;

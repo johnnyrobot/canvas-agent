@@ -136,3 +136,34 @@ test('pullModel drives the download driver and streams progress when models are 
   );
   assert.equal(seen[1]!.percent, 100);
 });
+
+test('pullModel refuses to download in a bundled build, even if presence reports missing', async () => {
+  // ADR-0008: the bundle is read-only and code-signed — a download would write
+  // into it and break the signature Gatekeeper checks. The presence probe is
+  // forced to `false` here so the refusal cannot be credited to the
+  // already-present short-circuit: it must hold on the config alone.
+  const f = fakes(false);
+  let spawned = 0;
+  const downloadSpawn: DownloadSpawnLike = () => {
+    spawned += 1;
+    throw new Error('a bundled build must never spawn the model download');
+  };
+  const sidecar = createDoclingSidecar({
+    env: {
+      DOCLING_MODELS_DIR: '/Apps/Canvas Agent.app/Contents/Resources/sidecars/docling-serve/models',
+      DOCLING_MODELS_BUNDLED: '1',
+    },
+    process: f.process,
+    client: f.client,
+    downloadSpawn,
+    downloadResolveCommand: (n) => `/Resources/sidecars/${n}/${n}`,
+  });
+  const seen: IngestPullProgress[] = [];
+  await sidecar.pullModel((p) => seen.push(p));
+  assert.equal(spawned, 0, 'no download process was started');
+  assert.deepEqual(
+    seen.map((p) => p.status),
+    ['success'],
+    'reports success: the models are already here',
+  );
+});

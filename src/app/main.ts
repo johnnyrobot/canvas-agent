@@ -24,7 +24,7 @@ import { isInAppUrl, externalOpenTarget } from './navigation.js';
 import { withScreenshotCapture } from './screenshot.js';
 import { createRuntime } from '../runtime/index.js';
 import type { RuntimeHandle } from '../runtime/index.js';
-import { resolveSidecarCommand } from '../runtime/bundled-resources.js';
+import { resolveSidecarCommand, resolveIngestModelEnv } from '../runtime/bundled-resources.js';
 import { ensureCatalogHome } from '../runtime/catalog-home.js';
 import { createCatalogClient } from '../catalog/index.js';
 import { resolveAppPaths } from '../storage/index.js';
@@ -120,13 +120,17 @@ function createRuntimeHandle(): RuntimeHandle {
     // The scripted E2E API owns no processes, so it has nothing to tear down.
     return { api: createE2eAppApi(process.env.CANVAS_AGENT_E2E_SCENARIO), dispose: async () => {} };
   }
-  // Packaged app only: point Docling at the per-user model store so the (un-bundled)
-  // conversion models download there on first run and are then served fully offline.
-  // In dev we leave it unset so the bundled `docling-serve` launcher's own defaults
-  // (its `models/` dir or the HF cache) apply unchanged.
-  if (app.isPackaged && !process.env.DOCLING_MODELS_DIR) {
-    process.env.DOCLING_MODELS_DIR = resolveAppPaths().modelsDir;
-  }
+  // Which model store Docling serves from. Every branch — dev, operator override,
+  // bundled models, per-user store — lives in the resolver, which is pure and
+  // unit-tested; this file imports Electron and cannot be (ADR-0006).
+  Object.assign(
+    process.env,
+    resolveIngestModelEnv({
+      packaged: app.isPackaged,
+      userModelsDir: resolveAppPaths().modelsDir,
+      env: process.env,
+    }),
+  );
   // `exactOptionalPropertyTypes` treats `{ catalog: undefined }` as distinct from
   // omitting the key, so the key is only included when a packaged client exists;
   // omitting it (dev) still falls through to `opts.catalog ?? createCatalogClient()`.

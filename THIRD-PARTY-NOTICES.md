@@ -104,6 +104,7 @@ redistributed inside the application. All are under permissive licenses:
 | `docling-project/docling-layout-heron` | Apache-2.0 | <https://huggingface.co/docling-project> |
 | `docling-project/docling-models` (TableFormer) | CDLA-Permissive-2.0 | <https://huggingface.co/docling-project> |
 | `docling-project/DocumentFigureClassifier-v2.5` | MIT | <https://huggingface.co/docling-project> |
+| `ibm-granite/granite-docling-258M-mlx` (Granite-Docling VLM) | Apache-2.0 | <https://huggingface.co/ibm-granite/granite-docling-258M-mlx> |
 | RapidOCR (PaddleOCR **PP-OCRv4** weights) | Apache-2.0 | <https://github.com/RapidAI/RapidOCR>, <https://github.com/PaddlePaddle/PaddleOCR> |
 
 Each model's card (`README.md`) ships alongside its weights in

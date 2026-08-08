@@ -92,3 +92,36 @@ test('modelsPresent: true when no modelsDir (dev); reflects dir contents when se
   const missing = new DoclingProcess(loadIngestConfig({ DOCLING_MODELS_DIR: '/nope/does/not/exist' }));
   assert.equal(missing.modelsPresent(), false, 'configured but empty/absent → not present');
 });
+
+test('modelsPresent: a bundled build answers from knowledge, not from a dir probe', () => {
+  // ADR-0008: in a bundled build the models ship inside the app. Reporting them
+  // missing would offer a download that writes into a read-only, code-signed
+  // bundle. The dir here is deliberately absent: presence must not depend on a
+  // filesystem probe succeeding inside the .app.
+  const bundled = new DoclingProcess(
+    loadIngestConfig({ DOCLING_MODELS_DIR: '/nope/does/not/exist', DOCLING_MODELS_BUNDLED: '1' }),
+  );
+  assert.equal(bundled.modelsPresent(), true, 'bundled models are present by construction');
+});
+
+test('spawn() keeps ALL FOUR offline settings, including deferred model loading', async () => {
+  // The fourth (LOAD_MODELS_AT_BOOT=0) is the one the bundle launcher never sets
+  // and that a naive "stop setting modelsDir when bundled" fix would drop —
+  // re-enabling boot-time loading of the heaviest payload we ship (ADR-0008).
+  const { spawn, calls } = capturingSpawn();
+  const config = loadIngestConfig({
+    DOCLING_SERVE_URL: 'http://127.0.0.1:5001',
+    DOCLING_MANAGE_PROCESS: 'true',
+    DOCLING_MODELS_DIR: '/Apps/Canvas Agent.app/Contents/Resources/sidecars/docling-serve/models',
+    DOCLING_MODELS_BUNDLED: '1',
+  });
+  const proc = new ControlledHealthDocling(config, undefined, spawn, (n) => n);
+  const running = proc.ensureRunning();
+  proc.healthy = true;
+  await running;
+  const env = calls[0]!.env;
+  assert.equal(env.DOCLING_SERVE_ARTIFACTS_PATH, '/Apps/Canvas Agent.app/Contents/Resources/sidecars/docling-serve/models');
+  assert.equal(env.HF_HUB_OFFLINE, '1');
+  assert.equal(env.TRANSFORMERS_OFFLINE, '1');
+  assert.equal(env.DOCLING_SERVE_LOAD_MODELS_AT_BOOT, '0', 'defer model loading past daemon startup');
+});
