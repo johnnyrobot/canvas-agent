@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { registerShutdown, type QuitEvent, type QuitHost } from './shutdown.js';
+import { registerShutdown, SHUTDOWN_TIMEOUT_MS, type QuitEvent, type QuitHost } from './shutdown.js';
 
 /** A QuitHost double: captures the listener so the test can fire `before-quit`. */
 function fakeHost() {
@@ -106,19 +106,39 @@ test('a repeat before-quit is prevented even though teardown already started', a
   await settle(60);
 });
 
-test('exits promptly (no leaked timer) when dispose rejects under the default timeout', async () => {
-  const h = fakeHost();
-  const start = performance.now();
-  registerShutdown(h.host, async () => {
-    throw new Error('stop failed');
-  }, { log: () => {} });
-  h.quit();
-  await settle(30);
-  assert.deepEqual(h.exits, [0]);
-  assert.ok(
-    performance.now() - start < 500,
-    'a rejected dispose must not wait out the default 8s timeout — the timer must be cleared',
-  );
+test('the timeout timer is cleared even when dispose rejects', async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const armed: unknown[] = [];
+  const cleared: unknown[] = [];
+  globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    const handle = (realSetTimeout as unknown as (...a: unknown[]) => unknown)(fn, ms, ...rest);
+    // Only the shutdown deadline matters; settle() uses short waits.
+    if (ms === SHUTDOWN_TIMEOUT_MS) armed.push(handle);
+    return handle;
+  }) as unknown as typeof globalThis.setTimeout;
+  globalThis.clearTimeout = ((handle: unknown) => {
+    cleared.push(handle);
+    return (realClearTimeout as unknown as (h: unknown) => void)(handle);
+  }) as unknown as typeof globalThis.clearTimeout;
+
+  try {
+    const h = fakeHost();
+    registerShutdown(h.host, async () => {
+      throw new Error('stop failed');
+    }, { log: () => {} });
+    h.quit();
+    await settle(30);
+    assert.equal(armed.length, 1, 'the shutdown deadline should be armed exactly once');
+    assert.ok(
+      cleared.includes(armed[0]),
+      'the deadline timer must be cleared even when dispose rejects — otherwise it holds the event loop open',
+    );
+    assert.deepEqual(h.exits, [0]);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
 });
 
 test('the timeout path logs why it gave up', async () => {
