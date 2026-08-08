@@ -158,6 +158,32 @@ test('dispose drains an in-flight turn BEFORE it signals anything', async () => 
   assert.deepEqual(order, ['drain-start', 'drain-end', 'stop']);
 });
 
+test('a timed-out drain is reported, and dispose still stops both sidecars', async () => {
+  const llm = fakeLlm();
+  const ingest = fakeIngest();
+  const logs: string[] = [];
+  const tracker: ActivityTracker = {
+    begin: () => () => {},
+    async whenIdle() {
+      return false; // simulates the drain deadline elapsing with a turn still in flight
+    },
+  };
+  const runtime = createRuntime({
+    createLlm: () => llm.llm,
+    createIngest: () => ingest.ingest,
+    createDatabase: () => fakeLazyDb().database,
+    createActivity: () => tracker,
+    log: (msg) => logs.push(msg),
+  });
+  await runtime.dispose();
+  assert.ok(
+    logs.some((l) => /still in flight/.test(l)),
+    `expected a log line reporting the timed-out drain, got: ${JSON.stringify(logs)}`,
+  );
+  assert.equal(llm.state.stops, 1, 'a timed-out drain must not prevent the LLM from being stopped');
+  assert.equal(ingest.state.stops, 1, 'a timed-out drain must not prevent docling from being stopped');
+});
+
 test('the api it returns is a working AppApi', async () => {
   const runtime = createRuntime({
     createLlm: () => fakeLlm().llm,

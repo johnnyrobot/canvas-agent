@@ -34,7 +34,16 @@ export interface RuntimeHandle {
   dispose(): Promise<void>;
 }
 
-export interface CreateRuntimeOptions extends AppApiOptions {
+/**
+ * `database` and `activity` are omitted from the base options because this root
+ * OWNS those two lifetimes: it supplies them to `createAppApi` itself, built via
+ * `createDatabase` / `createActivity` below. Accepting them directly here as well
+ * would silently discard a caller-supplied instance (later object-literal keys
+ * win), leaving that instance never opened/closed and never drained — no type
+ * error, no runtime error, just a leak. Making them unavailable on this type
+ * turns that mistake into a compile error instead of a documentation note.
+ */
+export interface CreateRuntimeOptions extends Omit<AppApiOptions, 'database' | 'activity'> {
   /** Test seam: build the owned LLM sidecar. Default: a real `OllamaSidecar`. */
   createLlm?: () => OwnedLlm;
   /** Test seam: build the owned Docling sidecar. Default: a real `DoclingSidecar`. */
@@ -76,7 +85,10 @@ export function createRuntime(options: CreateRuntimeOptions = {}): RuntimeHandle
       // Let an in-flight turn settle first: it owns a per-turn Chromium
       // (ADR-0005) disposed by its own `finally`. Bounded — a turn that will not
       // settle must not block quit.
-      await activity.whenIdle(DRAIN_TIMEOUT_MS);
+      const drained = await activity.whenIdle(DRAIN_TIMEOUT_MS);
+      if (!drained) {
+        log(`[shutdown] a turn was still in flight after ${DRAIN_TIMEOUT_MS}ms; stopping anyway.`);
+      }
       // allSettled, not all: a docling that fails to stop must not prevent
       // Ollama — the far larger leak — from being signalled.
       const results = await Promise.allSettled([llm.stop(), ingest.stop(), database.close()]);
