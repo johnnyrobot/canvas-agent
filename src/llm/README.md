@@ -1,6 +1,6 @@
 # `src/llm` — Local LLM inference sidecar
 
-Manages the on-device **Gemma 4 12B** model via **Ollama** and exposes a small,
+Manages the on-device model via **Ollama** and exposes a small,
 role-based API to the rest of the app. There is **no cloud LLM and no external
 API** — this is the runtime layer the orchestrator (PRD §13/§15) sits on top of.
 
@@ -60,7 +60,7 @@ Wire `llm.stop()` to `SIGINT`/`SIGTERM` (see `example.ts`).
 
 See PRD Appendix H. Key vars: `LLM_BASE_URL` (default `http://localhost:11434/v1`),
 `MODEL_TEXT`/`MODEL_VISION`/`MODEL_FAST`/`MODEL_DEEP`/`MODEL_CHEAP`
-(default `gemma4:12b-mlx`), `OLLAMA_HOST`, `OLLAMA_KEEP_ALIVE`,
+(**required** — the runtime injects it; see ADR-0007), `OLLAMA_HOST`, `OLLAMA_KEEP_ALIVE`,
 `OLLAMA_NUM_PARALLEL`, `LLM_NUM_CTX`, `LLM_MAX_OUTPUT_TOKENS`, `LLM_TEMPERATURE`,
 `LLM_TIMEOUT_MS`, `LLM_VISION_ENABLED`, `LLM_MANAGE_PROCESS`.
 
@@ -71,7 +71,7 @@ npm install
 npm run typecheck     # tsc --noEmit
 npm test              # unit tests for the pure logic (no Ollama needed)
 
-# Integration smoke (requires `ollama` + `ollama pull gemma4:12b-mlx`):
+# Integration smoke (requires `ollama` + `ollama pull granite4.1:8b`):
 npm run llm:smoke -- "Explain accessible headings in one sentence."
 npm run llm:smoke -- "Describe this image" ./some-image.png
 ```
@@ -84,6 +84,6 @@ npm run llm:smoke -- "Describe this image" ./some-image.png
 - ⬜ Retry/backoff policy and structured error taxonomy.
 - ⬜ `chatJSON` repair/retry loop — currently throws `OllamaJsonError`; the
   orchestrator owns repair + schema validation (PRD §15.4).
-- ⬜ Audio input helper (Gemma 4 supports ≤30 s audio) — add when the ingest/STT
+- ⬜ Audio input helper (when the configured model supports audio) — add when the ingest/STT
   path is specified.
 - ⬜ Health/readiness surfaced to the app UI (warm vs cold).

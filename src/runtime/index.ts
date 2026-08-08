@@ -18,6 +18,8 @@ export type { LazyDatabase } from './database.js';
 export {
   createEngineDeps,
   runtimeLlmEnv,
+  SHIPPED_MODEL_LICENCES,
+  PERMISSIVE_LICENCES,
   RUNTIME_DEFAULT_MODEL,
 } from './deps.js';
 export type {

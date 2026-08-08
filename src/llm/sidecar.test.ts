@@ -5,7 +5,7 @@ import { OllamaProcess } from './process.js';
 import { loadLLMConfig } from './config.js';
 import type { FetchLike } from './client.js';
 
-const baseEnv = { LLM_BASE_URL: 'http://localhost:11434/v1', LLM_MANAGE_PROCESS: 'false' };
+const baseEnv = { LLM_BASE_URL: 'http://localhost:11434/v1', LLM_MANAGE_PROCESS: 'false', MODEL_TEXT: 'test-text:1b' };
 
 /** A process double that counts liveness checks (no real daemon / spawn). */
 class CountingProcess extends OllamaProcess {

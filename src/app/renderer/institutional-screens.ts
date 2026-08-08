@@ -84,7 +84,7 @@ export interface InstScreen {
 
 export interface InstAskData {
   question: string;
-  /** Meta line, e.g. "Answered on-device · Gemma · 2 tools". */
+  /** Meta line, e.g. "Answered on-device · 2 tools". */
   meta: string;
   /** The answer prose; split on blank lines into paragraphs. */
   answer: string;
@@ -384,7 +384,7 @@ export function createInstAsk(_deps: InstDeps, data?: InstAskData, ask?: InstAsk
       'div',
       { class: 'inst-meta' },
       el('span', { class: 'inst-dot' }),
-      el('span', {}, data ? data.meta : 'Answered on-device · Gemma · 1.2s · 3 sources cited'),
+      el('span', {}, data ? data.meta : 'Answered on-device · 1.2s · 3 sources cited'),
     ),
   );
 

@@ -43,22 +43,51 @@ export type RuntimeEnv = Record<string, string | undefined>;
 /**
  * The on-device model the runtime selects by default.
  *
- * Sized for the machines this ships to, not for the dev box: `gemma4:e2b` is
- * ~7 GB resident and runs on 16 GB Macs with Chromium alongside it. The former
- * default (`gemma4:31b`, ~20 GB) excluded most target hardware.
+ * Permissively licensed, by rule (ADR-0007): every default the app pulls on a
+ * user's behalf must be Apache-2.0 or MIT, so that running an Apache-2.0
+ * accessibility tool never obliges an instructor — or the district reviewing it
+ * — to accept a third-party acceptable-use policy. That rule, not benchmark
+ * scores, is what moved this off Gemma; `SHIPPED_MODEL_LICENCES` below is the
+ * declaration the guard test checks.
  *
- * The trade is real and bounded. e2b is pass-biased on unaided WCAG judgment
- * (it under-reports violations), so it must not be the sole arbiter of whether
- * content conforms. That is already the design: axe-core detects issues
- * deterministically and the gate re-scans every proposed fix. The exposed
- * surfaces are the ones where the model *is* the judge — contrast adjudication
- * and alt-text — which is why those are the ones being measured before any
- * further promotion. Evidence: `scripts/model-eval/` (three-arm harness).
+ * Sized for the machines this ships to, not for the dev box: `granite4.1:8b` is
+ * ~5.3 GB and runs on 16 GB Macs with Chromium alongside it. That argument only
+ * got stronger — the previous default was ~7 GB, and the one before that
+ * (`gemma4:31b`, ~20 GB) excluded most target hardware outright.
+ *
+ * The trade is real and bounded, and the warning is unchanged by the switch: a
+ * general-purpose model is pass-biased on unaided WCAG judgment (it under-reports
+ * violations), so it must never be the sole arbiter of whether content conforms.
+ * That is already the design — axe-core detects issues deterministically and the
+ * gate re-scans every proposed fix. The exposed surfaces are the ones where the
+ * model *is* the judge — contrast adjudication and alt-text suggestion — which is
+ * why those are the ones being measured before any further promotion. Evidence:
+ * `scripts/model-eval/`.
  *
  * We never edit `src/llm`; we steer model selection through the existing
  * env-override mechanism (`MODEL_TEXT` → every role; see `src/llm/config.ts`).
  */
-export const RUNTIME_DEFAULT_MODEL = 'gemma4:e2b';
+export const RUNTIME_DEFAULT_MODEL = 'granite4.1:8b';
+
+/** The only licences a shipped default may carry (ADR-0007). */
+export const PERMISSIVE_LICENCES = ['Apache-2.0', 'MIT'] as const;
+export type PermissiveLicence = (typeof PERMISSIVE_LICENCES)[number];
+
+/**
+ * Every model tag this app ships as a default, with the licence its weights are
+ * under. Adding a default without adding it here fails the guard test in
+ * `deps.test.ts` — which is the point: a model tag is only a string, so the
+ * licence constraint of ADR-0007 is invisible in the code it governs and has to
+ * be asserted somewhere. Licences are verified from each model's card.
+ *
+ * The value type is the permissive union, so a non-permissive licence is a
+ * COMPILE error here rather than a runtime assertion — you cannot declare
+ * `'Gemma Terms of Use'` at all. The guard test still runs, because it catches
+ * the other half: a default that was never declared here.
+ */
+export const SHIPPED_MODEL_LICENCES: Readonly<Record<string, PermissiveLicence>> = {
+  'granite4.1:8b': 'Apache-2.0',
+};
 
 /** Build an env that points the LLM sidecar at an installed model (override-safe). */
 export function runtimeLlmEnv(base: RuntimeEnv = process.env): RuntimeEnv {

@@ -1,7 +1,7 @@
 /**
  * Local LLM inference sidecar — public surface.
  *
- * Single on-device model (Gemma 4 12B via Ollama MLX) for text + vision + audio;
+ * Single on-device model (via Ollama MLX) for text + vision + audio;
  * no cloud, no external API (PRD §15.1, no-cloud constraint). Consumed by the
  * orchestrator (PRD §13/§15); the deterministic accessibility gate lives
  * elsewhere — this module is transport only.

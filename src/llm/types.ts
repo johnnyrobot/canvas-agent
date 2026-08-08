@@ -1,7 +1,7 @@
 /**
  * Public types for the local LLM (Ollama) inference sidecar.
  *
- * The product runs a single on-device model (Gemma 4 12B via Ollama's MLX
+ * The product runs a single on-device model (via Ollama's MLX
  * engine) for text, vision and audio. There is NO cloud LLM and no external
  * API — see PRD §15.1 and the no-cloud constraint. Callers select a *role*,
  * never a hard-coded model string (PRD §15.1).

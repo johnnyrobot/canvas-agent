@@ -4,7 +4,7 @@ import { OllamaClient, type FetchLike } from './client.js';
 import { loadLLMConfig } from './config.js';
 import type { ChatChunk } from './types.js';
 
-const config = loadLLMConfig({});
+const config = loadLLMConfig({ MODEL_TEXT: 'test-text:1b' });
 
 /** A fetch that returns the given NDJSON body as a streaming Response. */
 function ndjsonFetch(lines: object[]): FetchLike {

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AllowlistResult, ContrastResult, IssueSet, KbResult, TemplateResult, ThemeResult } from '../contracts/index.js';
 import type { Auditor } from '../contracts/index.js';
-import { createEngineDeps } from './deps.js';
+import { createEngineDeps, runtimeLlmEnv, SHIPPED_MODEL_LICENCES, PERMISSIVE_LICENCES } from './deps.js';
 
 /** A scripted offline auditor (the real Playwright audit is browser-bound). */
 const cleanAudit: Auditor = async () => ({ issues: [] });
@@ -116,4 +116,40 @@ test('the wired deps satisfy createCanonicalTools (no NotImplemented for any too
   await reg.get('check_contrast')!.execute({ fg: '#000', bg: '#fff' }, {});
   await reg.get('retrieve_kb')!.execute({ query: 'x' }, {});
   await reg.get('render_template')!.execute({ type: 'syllabus', slots: {} }, {});
+});
+
+// --- shipping model defaults (ADR-0007) --------------------------------------
+
+test('runtimeLlmEnv injects the shipping text default, and an explicit override wins', () => {
+  assert.equal(runtimeLlmEnv({}).MODEL_TEXT, 'granite4.1:8b', 'permissively licensed default');
+  assert.equal(
+    runtimeLlmEnv({ MODEL_TEXT: 'my-own:tag' }).MODEL_TEXT,
+    'my-own:tag',
+    'an operator override is never overridden',
+  );
+  assert.equal(runtimeLlmEnv({ MODEL_TEXT: '' }).MODEL_TEXT, 'granite4.1:8b', 'empty means unset');
+});
+
+test('every shipped model default is declared and permissively licensed (ADR-0007)', () => {
+  // The constraint is invisible in the code it governs — a model tag is only a
+  // string — so it is asserted here or nowhere. Injecting the defaults rather
+  // than reading the constants means a NEW default role (vision, #33) is caught
+  // too, not just a change to an existing one.
+  const injected = runtimeLlmEnv({});
+  const shipped = Object.entries(injected)
+    .filter(([k]) => k.startsWith('MODEL_'))
+    .map(([, tag]) => tag as string);
+
+  assert.ok(shipped.length > 0, 'runtimeLlmEnv should inject at least the text model');
+  for (const tag of shipped) {
+    // `SHIPPED_MODEL_LICENCES` is typed to the permissive union, so a
+    // non-permissive value cannot be declared — tsc rejects it. What tsc cannot
+    // see is a default that was never declared at all, which is this assertion.
+    const licence: string | undefined = SHIPPED_MODEL_LICENCES[tag];
+    assert.ok(licence, `${tag} ships as a default but is not declared in SHIPPED_MODEL_LICENCES`);
+    assert.ok(
+      (PERMISSIVE_LICENCES as readonly string[]).includes(licence),
+      `${tag} is licensed ${licence}, which is not permissive — see ADR-0007`,
+    );
+  }
 });

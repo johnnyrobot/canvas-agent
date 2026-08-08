@@ -179,28 +179,32 @@ Docling `convertPath`).
 
 ## Model selection (no cloud; local Ollama)
 
-The product runs a single on-device model. `src/llm` defaults to
-`gemma4:12b-mlx`; the runtime never edits `src/llm`, it steers selection through
-the existing env-override mechanism (`src/llm/config.ts`): `runtimeLlmEnv()`
-sets `MODEL_TEXT` (which every role falls back to) to `RUNTIME_DEFAULT_MODEL`
-unless `MODEL_TEXT` is already set.
+The product runs a single on-device model. **`src/llm` carries no default at
+all** — `MODEL_TEXT` is required there and `loadLLMConfig` throws without it
+(ADR-0007). Shipping defaults live in exactly one place, this module: the runtime
+never edits `src/llm`, it steers selection through the existing env-override
+mechanism (`src/llm/config.ts`): `runtimeLlmEnv()` sets `MODEL_TEXT` (which every
+role falls back to) to `RUNTIME_DEFAULT_MODEL` unless it is already set.
 
-`RUNTIME_DEFAULT_MODEL` is **`gemma4:e2b`** (~7 GB resident): sized for the
-machines the app ships to, not for the dev box. It replaced `gemma4:31b`
-(~20 GB), which excluded most target hardware.
+`RUNTIME_DEFAULT_MODEL` is **`granite4.1:8b`** (~5.3 GB): permissively licensed
+by rule (ADR-0007 — no default may oblige a user to accept a third-party
+acceptable-use policy), and sized for the machines the app ships to rather than
+the dev box. `SHIPPED_MODEL_LICENCES` declares each shipped tag's licence, and a
+guard test in `deps.test.ts` fails if a default is undeclared or non-permissive.
 
-The quality trade is deliberate and bounded. e2b is **pass-biased** on unaided
-WCAG judgment — on a 13-case unambiguous probe it scored 8/13, and *every* miss
-was a false pass (it cleared an `h1`→`h4` skip, a header-less data table,
-"click here" link text, and 2.85:1 contrast). JSON validity was 13/13, so the
-`format` constraint holds; it is the judgment that does not. This is safe only
-because the model is **not** the detector: axe-core finds issues
-deterministically and the gate re-scans every proposed fix. The surfaces where
-the model *is* the judge — contrast adjudication and alt-text — are the ones
-moving to task-tuned adapters.
+The quality trade is deliberate and bounded, and it is a property of
+general-purpose models rather than of any one tag: they are **pass-biased** on
+unaided WCAG judgment. On a 13-case unambiguous probe the previous default scored
+8/13 and *every* miss was a false pass (it cleared an `h1`→`h4` skip, a
+header-less data table, "click here" link text, and 2.85:1 contrast); JSON
+validity was 13/13, so the `format` constraint holds and it is the judgment that
+does not. This is safe only because the model is **not** the detector: axe-core
+finds issues deterministically and the gate re-scans every proposed fix. The
+surfaces where the model *is* the judge — contrast adjudication and alt-text
+suggestion — are the ones being measured by `scripts/model-eval/`.
 
 ```bash
-MODEL_TEXT=gemma4:31b-mlx   # opt in to the heavy model (needs ~20 GB free RAM)
+MODEL_TEXT=granite4.1:30b   # opt in to the heavy model (needs ~20 GB free RAM)
 ```
 
 ## Testing
@@ -218,7 +222,7 @@ npx tsx --test 'e2e/**/*.test.ts'       # offline e2e + (skipped) live paths
 - **`e2e/live.test.ts`** — gated, **skipped by default**. Drives the REAL
   sidecars through `AppApi`:
   ```bash
-  RUN_OLLAMA_INTEGRATION=1  npx tsx --test 'e2e/**/*.test.ts'   # real Gemma turn + LLM health
+  RUN_OLLAMA_INTEGRATION=1  npx tsx --test 'e2e/**/*.test.ts'   # real model turn + LLM health
   RUN_DOCLING_INTEGRATION=1 npx tsx --test 'e2e/**/*.test.ts'   # real Docling reachability
   ```
 
