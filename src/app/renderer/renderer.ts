@@ -14,7 +14,8 @@ import { previewFrame, previewSrcdoc } from './preview.js';
 import { api, byId, copyText, el, errorMessage, later, onReady, readStorage, writeStorage, type El } from './ui.js';
 import { turnViewToVm, type FragmentVm } from '../view.js';
 import { appChromeClass, themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
-import { createRemediationPanel, type RemediationDeps, type RemediationIssue, type RemediationView } from './remediation.js';
+import { createRemediationPanel, type RemediationDeps } from './remediation.js';
+import { createRemediateReviewModel, type ReviewAction, type ReviewSource } from './remediate-review.js';
 import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
 import {
   createInstHome,
@@ -31,8 +32,6 @@ import {
   type InstRole,
 } from './institutional-screens.js';
 import type {
-  AuditIssue,
-  Severity as GateSeverity,
   BrandKit,
   CanvasPage,
   CatalogCourse,
@@ -1009,113 +1008,50 @@ function canvasPageRow(page: CanvasPage): El {
 // "02 · Accessibility remediation" via remediation.ts), bound to the live
 // remediation run in state.remediateView. With no run to show it renders an
 // empty state that routes to the remediate-source input flow.
-let reviewSelectedId = '';
+//
+// The screen's STATE AND TRANSITIONS live in `remediate-review.ts` (ADR-0002),
+// not here: which finding is selected, how a run becomes a panel view model,
+// what each action means, and what the instructor is allowed to do with the
+// repaired page. This file keeps only the DOM and the I/O. The model instance
+// is module-scope because the renderer replaces the whole DOM subtree on every
+// render — it has to outlive that.
+const reviewModel = createRemediateReviewModel();
 
-// Map a live remediation run (state.remediateView) into the panel's view model.
-// Real findings carry id/severity/message/category — but no per-element contrast
-// tiles or CSS diff — so the panel renders the page-level before/after HTML
-// instead. Returns undefined when there is no usable run (→ empty state).
-function gateSeverityToPanel(severity: GateSeverity): 'fail' | 'warn' {
-  return severity === 'blocker' || severity === 'error' ? 'fail' : 'warn';
-}
-
-function auditCategoryLabel(category: AuditIssue['category']): string {
-  switch (category) {
-    case 'contrast':
-      return 'Contrast';
-    case 'aria':
-      return 'ARIA';
-    case 'structure':
-      return 'Structure';
-    case 'error':
-      return 'Error';
-    case 'alert':
-      return 'Alert';
-    case 'feature':
-      return 'Feature';
-    default:
-      return 'Issue';
-  }
-}
-
-function reviewPageContext(): { title: string; path: string } {
+/** The renderer's source state, in the shape the screen model consumes. */
+function reviewSource(): ReviewSource {
   if (state.sourceMode === 'canvas') {
-    const page = state.canvasPages.find((p) => p.id === state.selectedCanvasPageId);
-    return { title: page?.title ?? 'Imported Canvas page', path: state.canvasBaseUrl || 'canvas' };
-  }
-  if (state.sourceMode === 'document') {
-    return { title: state.documentFileName ?? 'Converted document', path: 'document' };
-  }
-  return { title: 'Pasted HTML', path: 'pasted-source' };
-}
-
-function realRemediationView(): RemediationView | undefined {
-  const view = state.remediateView;
-  if (!view) return undefined;
-  const frag = view.fragments.find((f) => f.remediateResult) ?? view.fragments[0];
-  if (!frag) return undefined;
-  const conf = frag.gate.conformance;
-  const toIssue = (i: AuditIssue): RemediationIssue => ({
-    id: i.id,
-    title: i.message,
-    element: auditCategoryLabel(i.category),
-    severity: gateSeverityToPanel(i.severity),
-  });
-  const issues: RemediationIssue[] = [
-    ...conf.blockers.map(toIssue),
-    ...conf.warnings.map(toIssue),
-    ...conf.needsHumanReview.map(toIssue),
-  ];
-  const remediate = frag.remediateResult;
-  if (issues.length === 0 && !remediate) return undefined;
-  const fixedCount = remediate ? remediate.issueDiffs.filter((d) => d.fixed).length : 0;
-  const fixedNote = `${fixedCount} ${fixedCount === 1 ? 'issue was' : 'issues were'} auto-fixed by the gate.`;
-  const htmlBefore = remediate?.before ?? '';
-  const htmlAfter = remediate?.after ?? frag.html;
-  const page = reviewPageContext();
-  const summary = {
-    fail: conf.blockers.length,
-    warn: conf.warnings.length + conf.needsHumanReview.length,
-    pass: fixedCount,
-  };
-
-  if (issues.length === 0) {
     return {
-      page,
-      summary,
-      issues: [],
-      selectedId: '',
-      detail: {
-        tag: 'Audit clear',
-        severity: 'warn',
-        wcag: 'On-device audit',
-        position: 'No blocking issues',
-        title: 'No blocking issues found',
-        description: `The repaired page passed the on-device accessibility audit. ${fixedNote}`,
-        htmlBefore,
-        htmlAfter,
-      },
+      kind: 'canvas',
+      pageTitle: state.canvasPages.find((p) => p.id === state.selectedCanvasPageId)?.title,
+      baseUrl: state.canvasBaseUrl,
+      courseId: state.canvasCourseId,
+      pageId: state.selectedCanvasPageId,
     };
   }
+  if (state.sourceMode === 'document') return { kind: 'document', fileName: state.documentFileName };
+  return { kind: 'paste' };
+}
 
-  const selected = issues.find((i) => i.id === reviewSelectedId) ?? issues[0]!;
-  const idx = issues.findIndex((i) => i.id === selected.id);
-  return {
-    page,
-    summary,
-    issues,
-    selectedId: selected.id,
-    detail: {
-      tag: selected.severity === 'fail' ? 'Fails checks' : 'Needs review',
-      severity: selected.severity,
-      wcag: `On-device audit · ${selected.element}`,
-      position: `Issue ${idx + 1} of ${issues.length}`,
-      title: selected.title,
-      description: `Surfaced by the on-device accessibility audit. The repaired, Canvas-safe page is shown below; ${fixedNote}`,
-      htmlBefore,
-      htmlAfter,
-    },
-  };
+/** Perform what the screen model decided, then re-render. */
+function runReviewAction(action: ReviewAction): void {
+  switch (action.kind) {
+    case 'rerender':
+      render();
+      return;
+    case 'notice':
+      state.notice = action.text;
+      render();
+      return;
+    case 'download':
+      downloadHtml(action.html);
+      return;
+    case 'copy':
+      void copyText(action.text).then((ok) => {
+        state.notice = ok ? action.copied : 'Clipboard unavailable.';
+        render();
+      });
+      return;
+  }
 }
 
 function renderRemediationEmpty(): El {
@@ -1130,74 +1066,29 @@ function renderRemediationEmpty(): El {
   );
 }
 
-/**
- * The Canvas page-edit URL for the current remediation source, when it was a
- * live Canvas import (source mode is `canvas` AND base URL, course ID, and a
- * selected page are all present) — else `undefined` (pasted-HTML and
- * converted-document remediations get copy-only, no "Open in Canvas" link).
- */
-function currentCanvasEditUrl(): string | undefined {
-  if (state.sourceMode !== 'canvas') return undefined;
-  const baseUrl = state.canvasBaseUrl.trim().replace(/\/+$/, '');
-  const courseId = state.canvasCourseId.trim();
-  const pageId = state.selectedCanvasPageId;
-  if (!baseUrl || !courseId || !pageId) return undefined;
-  return `${baseUrl}/courses/${courseId}/pages/${pageId}/edit`;
-}
-
 function renderRemediationReview(): El {
-  const view = realRemediationView();
-  if (!view) return renderRemediationEmpty();
-  // Click-time callbacks re-read the live view so they act on fresh state; the
-  // render-time view is the fallback only for type narrowing (state.remediateView
-  // cannot be cleared while the panel is mounted).
-  const current = (): RemediationView => realRemediationView() ?? view;
-  // Only offer the corrected-HTML download when the run left no failures — the
-  // same safety invariant the retired remediate-result screen enforced by
-  // disabling its download/copy affordances on a withheld result.
-  const passed = view.summary.fail === 0;
+  const screen = reviewModel.screenFor({ run: state.remediateView, source: reviewSource() });
+  if (screen.kind === 'empty') return renderRemediationEmpty();
+
   const deps: RemediationDeps = {
-    onSelect: (id) => {
-      reviewSelectedId = id;
-      render();
-    },
-    onApply: (id) => {
-      const issue = current().issues.find((i) => i.id === id);
-      state.notice = issue ? `Fix for "${issue.title}" is in the repaired page.` : 'Repaired page is ready.';
-      render();
-    },
-    onSkip: () => {
-      state.notice = 'Issue skipped.';
-      render();
-    },
-    onCopyFix: () => {
-      const { detail } = current();
-      const text = detail.fix ? `${detail.fix.removed}\n${detail.fix.added}` : detail.htmlAfter ?? '';
-      void copyText(text).then((ok) => {
-        state.notice = ok ? 'Copied to clipboard.' : 'Clipboard unavailable.';
-        render();
-      });
-    },
-    // "More" (jump to saved work) carried over from the retired remediate-result screen.
+    onSelect: (id) => runReviewAction(reviewModel.select(id)),
+    onApply: (id) => runReviewAction(reviewModel.apply(id)),
+    onSkip: () => runReviewAction(reviewModel.skip()),
+    onCopyFix: () => runReviewAction(reviewModel.copyFix()),
+    // "More" (jump to saved work) carried over from the retired remediate-result
+    // screen. Navigation, not review state, so it stays here.
     onOpenSaved: () => {
       state.previousScreen = 'remediate-review';
       go('saved-work');
     },
   };
-  if (passed) {
-    deps.onDownload = () => downloadHtml(current().detail.htmlAfter ?? '');
-    deps.onCopyForCanvas = () => {
-      const text = current().detail.htmlAfter ?? '';
-      void copyText(text).then((ok) => {
-        state.notice = ok ? 'Copied — paste into the Canvas editor' : 'Clipboard unavailable.';
-        render();
-      });
-    };
-  }
-  const canvasEditUrl = currentCanvasEditUrl();
-  if (canvasEditUrl) deps.canvasEditUrl = canvasEditUrl;
-  const panel = createRemediationPanel(view, deps);
-  return el('main', { class: 'remed-screen' }, panel.element);
+  // Offered only when the run left no failures — the model decides; this file
+  // just declines to render the affordance.
+  if (screen.can.download) deps.onDownload = () => runReviewAction(reviewModel.download());
+  if (screen.can.copyForCanvas) deps.onCopyForCanvas = () => runReviewAction(reviewModel.copyForCanvas());
+  if (screen.can.canvasEditUrl) deps.canvasEditUrl = screen.can.canvasEditUrl;
+
+  return el('main', { class: 'remed-screen' }, createRemediationPanel(screen.view, deps).element);
 }
 
 function renderAlignment(): El {

@@ -21,7 +21,9 @@ argument to `registerIpc` is the only integration seam.
 | `view.ts` | ✅ | PURE `turnViewToVm(view)` — maps a `TurnView` to a render-ready VM; derives the badge from the gate (never the model). |
 | `main.ts` | smoke | Electron `app`/`BrowserWindow` bootstrap with secure defaults; `registerIpc(ipcMain, createStubApi())`. |
 | `preload.ts` | smoke | `contextBridge.exposeInMainWorld('canvasAgent', createBridge(ipcRenderer.invoke))`. |
-| `renderer/index.html` + `renderer/renderer.ts` | smoke | Minimal vanilla-TS UI: prompt box, transcript, fragment rendering with badges. |
+| `renderer/index.html` + `renderer/renderer.ts` | smoke | The UI shell: screens, DOM construction and I/O. Decision logic is extracted to the DOM-free modules below. |
+| `renderer/remediate-review.ts` | ✅ | The remediate-review SCREEN MODEL (ADR-0002) — owns which finding is selected and every transition over it; maps a run to the panel view model and decides what the instructor may do with the repaired page. DOM-free: returns a `ReviewAction` for `renderer.ts` to perform. |
+| `renderer/ui-theme.ts`, `renderer/catalog-view.ts` | ✅ | DOM-free view helpers (theme class resolution, catalog labels/prompt lines). Pure functions over a snapshot — unlike `remediate-review.ts`, which owns state; see ADR-0002 for why the two shapes differ. |
 | `index.ts` | — | Public surface — re-exports ONLY the Electron-free pieces (safe to import from `node:test` / the integration track). |
 
 ## Architecture
