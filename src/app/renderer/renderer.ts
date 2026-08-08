@@ -18,6 +18,15 @@ import { createRemediationPanel, type RemediationDeps } from './remediation.js';
 import { createRemediateReviewModel, type ReviewAction, type ReviewSource } from './remediate-review.js';
 import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
 import {
+  advanceModelPull,
+  downloadModelAffordance,
+  missingModelsText,
+  missingRequiredModels,
+  requiredTagsFromHealth,
+  startModelPull,
+  type ModelPullState,
+} from './model-health.js';
+import {
   createInstHome,
   createInstAsk,
   createInstBrand,
@@ -37,6 +46,7 @@ import type {
   CatalogCourse,
   CatalogCourseSummary,
   DocumentConversionResult,
+  ModelHealth,
   ProductMode,
   ScreenshotAttachment,
   ScreenshotPermissionStatus,
@@ -106,10 +116,22 @@ interface State {
   notice: string | undefined;
   health: 'checking' | 'ready' | 'degraded';
   healthText: string;
-  /** Set when the configured model isn't installed — drives the in-app download affordance. */
-  modelMissingTag: string | undefined;
-  /** Set while a first-run model download is in flight. */
-  modelPull: { text: string; percent: number | undefined } | undefined;
+  /**
+   * Which REQUIRED models (ADR-0009: text and vision) aren't installed — drives
+   * the in-app download affordance. Empty when the runtime is fully provisioned.
+   */
+  modelsMissing: ModelHealth[];
+  /**
+   * Every REQUIRED tag the runtime reports, installed or not — the denominator
+   * of the first-run progress bar, since `pullModel` covers the whole set.
+   */
+  modelTags: string[];
+  /**
+   * Set while a first-run model download is in flight, aggregated across the
+   * required set. It lives HERE, in the screen state, and not in the DOM: every
+   * progress line re-renders, and render() replaces the whole subtree.
+   */
+  modelPull: ModelPullState | undefined;
   /** Set when the Docling conversion models aren't installed (PDF/scanned-doc support). */
   ingestModelMissing: boolean;
   /** Set while a first-run Docling model download is in flight. */
@@ -217,7 +239,8 @@ const state: State = {
   notice: undefined,
   health: 'checking',
   healthText: 'Local runtime checking',
-  modelMissingTag: undefined,
+  modelsMissing: [],
+  modelTags: [],
   modelPull: undefined,
   ingestModelMissing: false,
   ingestPull: undefined,
@@ -556,7 +579,7 @@ function instHomeHeader(): El {
     el('div', { class: 'appbar__mark' }, 'CA'),
     el('div', { class: 'appbar__title-main' }, 'Canvas Agent'),
     el('div', { class: 'appbar__spacer' }),
-    healthStatus(),
+    currentHealthStatus(),
   );
 }
 
@@ -626,37 +649,70 @@ function progressWrap(pct: number, label: string): El {
   );
 }
 
-function healthStatus(): El {
-  const cls = state.health === 'ready' ? 'status' : 'status status--warn';
-  const children: Array<El | string> = [el('span', { class: 'status__dot' }), state.healthText];
-  if (state.modelPull) {
+/**
+ * Everything the status indicator renders from. Passed in rather than read off
+ * `state`, so the first-run affordance — the screen an instructor meets before
+ * anything else works — is exercisable at the DOM level without booting the app.
+ */
+export interface HealthStatusView {
+  health: 'checking' | 'ready' | 'degraded';
+  healthText: string;
+  modelsMissing: readonly ModelHealth[];
+  modelPull: ModelPullState | undefined;
+  ingestModelMissing: boolean;
+  ingestPull: { text: string; percent: number | undefined } | undefined;
+  onDownloadModel: () => void;
+  onDownloadIngestModel: () => void;
+}
+
+export function healthStatus(view: HealthStatusView): El {
+  const cls = view.health === 'ready' ? 'status' : 'status status--warn';
+  const children: Array<El | string> = [el('span', { class: 'status__dot' })];
+  // A running pull REPLACES the health text rather than sitting beside it. The
+  // text necessarily still reads "Models not installed" — that is the condition
+  // being fixed — and next to a bar at 60% it reads as a failure. It is stale
+  // the moment the download starts, not merely when a later probe rewrites it,
+  // so suppressing it here (not in the probe) is what actually clears it.
+  if (!view.modelPull) children.push(view.healthText);
+  if (view.modelPull) {
+    // ONE bar for the whole required set: it advances from where the previous
+    // model left off, because a reset to zero after a single stated size reads
+    // as a failure and a restart rather than as progress (ADR-0009).
     children.push(
-      progressWrap(state.modelPull.percent ?? 0, 'Model download progress'),
-      el('span', { class: 'status__pull' }, state.modelPull.text),
+      progressWrap(view.modelPull.percent, 'Model download progress'),
+      el('span', { class: 'status__pull' }, view.modelPull.text),
     );
-  } else if (state.modelMissingTag) {
+  } else if (view.modelsMissing.length > 0) {
+    const affordance = downloadModelAffordance(view.modelsMissing);
+    // The size goes BEFORE the button: it is what the decision to start is made on.
+    if (affordance.sizeText !== '') {
+      children.push(
+        el('span', { class: 'status__pull', 'data-testid': 'download-size' }, affordance.sizeText),
+      );
+    }
     children.push(
       actionButton(
-        'Download model',
-        () => void downloadModel(),
+        affordance.text,
+        view.onDownloadModel,
         'btn btn--small',
-        `Download model ${state.modelMissingTag}`,
+        affordance.label,
         'download-model',
       ),
     );
   }
-  // Docling document models (independent of the LLM): offer a first-run download
-  // for PDF/scanned-doc support. Office/web docs convert without them.
-  if (state.ingestPull) {
+  // Docling document models (independent of the LLM, and NOT part of the required
+  // set): offer a first-run download for PDF/scanned-doc support. Office/web
+  // documents convert without them, so this never joins the bar above.
+  if (view.ingestPull) {
     children.push(
-      progressWrap(state.ingestPull.percent ?? 0, 'Document model download progress'),
-      el('span', { class: 'status__pull' }, state.ingestPull.text),
+      progressWrap(view.ingestPull.percent ?? 0, 'Document model download progress'),
+      el('span', { class: 'status__pull' }, view.ingestPull.text),
     );
-  } else if (state.ingestModelMissing) {
+  } else if (view.ingestModelMissing) {
     children.push(
       actionButton(
         'Download document models',
-        () => void downloadIngestModel(),
+        view.onDownloadIngestModel,
         'btn btn--small',
         'Download Docling document-conversion models (for PDF and scanned documents)',
         'download-ingest-model',
@@ -664,6 +720,20 @@ function healthStatus(): El {
     );
   }
   return el('div', { class: cls, 'data-testid': 'health' }, ...children);
+}
+
+/** The live status indicator: `healthStatus` over the current screen state. */
+function currentHealthStatus(): El {
+  return healthStatus({
+    health: state.health,
+    healthText: state.healthText,
+    modelsMissing: state.modelsMissing,
+    modelPull: state.modelPull,
+    ingestModelMissing: state.ingestModelMissing,
+    ingestPull: state.ingestPull,
+    onDownloadModel: () => void downloadModel(),
+    onDownloadIngestModel: () => void downloadIngestModel(),
+  });
 }
 
 function screen(...children: El[]): El {
@@ -1507,15 +1577,21 @@ async function refreshHealth(): Promise<void> {
     const health = await api().health();
     const ok = health.llm && health.ingest;
     state.health = ok ? 'ready' : 'degraded';
-    if (health.model && !health.model.available) {
+    // Every required tag, installed or not: the first-run bar's denominator.
+    state.modelTags = requiredTagsFromHealth(health);
+    // EITHER required model missing (text or vision, ADR-0009) marks the runtime
+    // degraded — unlike the Docling models below, which only gate PDF conversion.
+    const missing = missingRequiredModels(health);
+    if (missing.length > 0) {
       state.health = 'degraded';
-      // Don't surface a bare CLI command — the app downloads the model itself via
-      // the bundled Ollama (see downloadModel()); the affordance is rendered next
-      // to the status. Skip while a download is already in flight.
-      if (!state.modelPull) state.modelMissingTag = health.model.tag;
-      state.healthText = `Model not installed (${health.model.tag})`;
+      // Don't surface a bare CLI command — the app downloads the models itself
+      // via the bundled Ollama (see downloadModel(), which pulls the whole
+      // required set); the affordance is rendered next to the status. Skip while
+      // a download is already in flight.
+      if (!state.modelPull) state.modelsMissing = missing;
+      state.healthText = missingModelsText(missing);
     } else {
-      state.modelMissingTag = undefined;
+      state.modelsMissing = [];
       state.healthText = ok
         ? `Local runtime ready${health.model ? ` - ${health.model.tag}` : ''}`
         : `Local runtime: llm ${health.llm ? 'up' : 'down'}, ingest ${health.ingest ? 'up' : 'down'}`;
@@ -1536,30 +1612,34 @@ async function refreshHealth(): Promise<void> {
 }
 
 /**
- * First-run model provisioning: download the configured model into the bundled
- * Ollama, streaming progress into the status indicator. On success, re-probe
- * health (which clears the missing-model state); on failure, surface the error.
+ * First-run pull: fetch the REQUIRED models (ADR-0009) into the
+ * bundled Ollama, streaming progress into the status indicator as one bar across
+ * the whole set. On success, re-probe health (which clears the missing-model
+ * state); on failure, surface the error and leave health to report honestly what
+ * is still missing, so retrying fixes it rather than compounding it.
+ *
+ * Every progress line re-renders the whole DOM subtree, so the aggregate lives in
+ * `state.modelPull` and is rebuilt from there each frame.
  */
 async function downloadModel(): Promise<void> {
   if (state.modelPull) return; // a download is already running
   state.error = undefined;
-  state.modelPull = { text: 'Starting download…', percent: undefined };
+  // The pull covers the required set, not just the missing part of it, so the
+  // denominator is every required tag the runtime reported.
+  let pull = startModelPull(state.modelTags);
+  state.modelPull = pull;
   render();
   try {
     await api().pullModel((p) => {
-      const percent = typeof p.percent === 'number' ? p.percent : undefined;
-      const text =
-        p.status === 'success'
-          ? 'Finishing…'
-          : percent !== undefined
-            ? `${p.status} ${percent}%`
-            : p.status;
-      state.modelPull = { text, percent };
+      pull = advanceModelPull(pull, p);
+      state.modelPull = pull;
       render();
     });
     state.modelPull = undefined;
-    state.modelMissingTag = undefined;
-    state.notice = 'Model downloaded.';
+    state.modelsMissing = [];
+    // The snapshot, not `state.modelTags`: a probe can refresh the live tags
+    // mid-pull, and the notice must describe the download that just finished.
+    state.notice = pull.expected.length > 1 ? 'Models downloaded.' : 'Model downloaded.';
     await refreshHealth();
   } catch (err) {
     state.modelPull = undefined;

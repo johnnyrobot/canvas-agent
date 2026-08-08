@@ -221,7 +221,9 @@ test('M18 saved work restores a persisted remediation into the review panel', { 
 
 test('M19 runtime-down scenario degrades health and never fabricates a badge', { skip, timeout: 60_000 }, async () => {
   await withApp('runtime-down', async (win) => {
-    await waitForText(win.getByTestId('health'), /Model missing|Model not installed|Local runtime/);
+    // Plural admitted: the scripted API reports BOTH required models (ADR-0009),
+    // so a down runtime names two missing models, not one.
+    await waitForText(win.getByTestId('health'), /Models? (missing|not installed)|Local runtime/);
     await win.getByTestId('inst-task-ask').click();
     await win.getByTestId('inst-ask-input').fill('Can I get a fake result?');
     await win.getByTestId('inst-ask-submit').click();
@@ -302,5 +304,117 @@ test('M20 review-panel before/after HTML is inert escaped text, never live marku
     const afterInner = await win.getByTestId('remed-html-after').evaluate((el) => el.innerHTML);
     assert.match(afterInner, /Safety goggles/);
     assert.equal(afterInner.includes('<img src="goggles.png" alt='), false);
+  });
+});
+
+test('M25 first-run two-model pull shows ONE bar that never resets', { skip, timeout: 60_000 }, async () => {
+  await withApp('models-missing', async (win) => {
+    // Both required models absent, sidecars up: the first-run case (ADR-0009).
+    const health = win.getByTestId('health');
+    await waitForText(health, /not installed/);
+    const affordance = win.getByTestId('download-model');
+    assert.match((await affordance.getAttribute('aria-label')) ?? '', /e2e-scripted.*e2e-scripted-vision/);
+
+    await affordance.click();
+
+    // Sample the live bar. Every progress line re-renders the WHOLE subtree, so
+    // each sample lands on elements the previous frame destroyed — the aggregate
+    // is only ever redrawn from screen state. One `evaluate` per frame keeps the
+    // bar count, its value and the status text from straddling a re-render.
+    const samples: number[] = [];
+    const named = new Set<string>();
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const frame = await win
+        .locator('#app')
+        .evaluate((app) => {
+          const status = app.querySelector('[data-testid="health"]');
+          const bars = status ? status.querySelectorAll('[role="progressbar"]') : [];
+          return {
+            bars: bars.length,
+            value: bars.length > 0 ? bars[0]!.getAttribute('aria-valuenow') : null,
+            text: status?.textContent ?? '',
+          };
+        })
+        .catch(() => null);
+      if (frame === null) {
+        await sleep(25); // the subtree was mid-replacement; sample the next frame
+        continue;
+      }
+      if (frame.bars === 0) {
+        if (samples.length > 0) break; // the download finished and the bar was cleared
+        await sleep(25);
+        continue;
+      }
+      assert.equal(frame.bars, 1, 'ONE bar for the whole set, not one per model');
+      const now = Number(frame.value ?? '0');
+      if (Number.isFinite(now)) samples.push(now);
+      for (const tag of ['e2e-scripted', 'e2e-scripted-vision']) {
+        if (frame.text.includes(tag)) named.add(tag);
+      }
+      await sleep(25);
+    }
+
+    assert.ok(samples.length >= 5, `expected to observe the download in flight, saw ${samples.length} frames`);
+    for (let i = 1; i < samples.length; i++) {
+      assert.ok(samples[i]! >= samples[i - 1]!, `bar reset mid-download: ${samples.join(' → ')}`);
+    }
+    assert.ok(Math.max(...samples) > Math.min(...samples), `bar never advanced: ${samples.join(' → ')}`);
+    assert.ok(named.has('e2e-scripted-vision'), 'the model currently transferring is named');
+    // Both models installed afterwards: no second offer to download gigabytes.
+    await waitForText(health, /Local runtime ready/);
+    assert.equal(await win.getByTestId('download-model').count(), 0);
+  });
+});
+
+test('M26 a health probe landing mid-pull does not contradict the running bar', { skip, timeout: 60_000 }, async () => {
+  await withApp('models-missing', async (win) => {
+    await waitForText(win.getByTestId('health'), /not installed/);
+    // Start the model pull (streams for ~1s), then finish the INDEPENDENT
+    // document-model download, whose completion calls straight back into the
+    // health probe. That probe must not overwrite the bar's status line with
+    // "Models not installed" while the bar is at 60%.
+    await win.getByTestId('download-model').click();
+    await win.getByTestId('download-ingest-model').click();
+
+    const contradictions: string[] = [];
+    let sawProbeLandMidPull = false;
+    let frames = 0;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const frame = await win
+        .locator('#app')
+        .evaluate((app) => {
+          const status = app.querySelector('[data-testid="health"]');
+          return {
+            bars: status ? status.querySelectorAll('[role="progressbar"]').length : 0,
+            ingestOffered: !!app.querySelector('[data-testid="download-ingest-model"]'),
+            text: status?.textContent ?? '',
+          };
+        })
+        .catch(() => null);
+      if (frame === null) {
+        await sleep(25);
+        continue;
+      }
+      if (frame.bars === 0) {
+        if (frames > 0) break;
+        await sleep(25);
+        continue;
+      }
+      frames++;
+      if (frame.text.includes('not installed')) contradictions.push(frame.text);
+      // The document-model download has completed (its affordance is gone) while
+      // the model bar is still running — i.e. its probe really did land mid-pull.
+      if (!frame.ingestOffered) sawProbeLandMidPull = true;
+      await sleep(25);
+    }
+
+    assert.ok(frames >= 5, `expected to observe the pull in flight, saw ${frames} frames`);
+    assert.ok(
+      sawProbeLandMidPull,
+      'the document-model download never completed during the model pull — this test proved nothing',
+    );
+    assert.deepEqual(contradictions, [], 'status said "not installed" beside a running progress bar');
   });
 });

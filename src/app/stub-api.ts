@@ -226,10 +226,16 @@ export function createStubApi(): AppApi {
     },
 
     async health(): Promise<RuntimeHealth> {
+      // Both required models (ADR-0009) are reported. They share a tag here
+      // because at today's shipping defaults `vision` inherits the text model —
+      // the demo should mirror what the real runtime reports, not invent a
+      // second tag the app does not actually pull.
+      const model = { tag: 'granite4.1:8b', available: true, installCommand: 'ollama pull granite4.1:8b' };
       return {
         llm: true,
         ingest: true,
-        model: { tag: 'granite4.1:8b', available: true, installCommand: 'ollama pull granite4.1:8b' },
+        model,
+        visionModel: { ...model },
         ingestModel: { available: true },
       };
     },

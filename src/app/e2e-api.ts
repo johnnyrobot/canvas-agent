@@ -6,6 +6,7 @@
  * real guided renderer and IPC bridge without waiting on local model inference.
  */
 import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { WCAG } from '../contracts/index.js';
 import type {
   AppApi,
@@ -42,6 +43,7 @@ export type E2eScenario =
   | 'remediate-residual'
   | 'canvas-import'
   | 'guidance'
+  | 'models-missing'
   | 'runtime-down';
 
 const SOURCE_HTML =
@@ -250,6 +252,7 @@ function scenarioFromEnv(value: string | undefined): E2eScenario {
     'remediate-residual',
     'canvas-import',
     'guidance',
+    'models-missing',
     'runtime-down',
   ];
   return known.includes(value as E2eScenario) ? value as E2eScenario : 'default';
@@ -261,6 +264,10 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
     if (scenario === 'runtime-down') throw new Error('E2E scripted runtime is down');
   };
   const savedCanvasAuth: string[] = [];
+  /** Flipped by `pullModel` so a scripted first run can complete and stay complete. */
+  let modelsPulled = false;
+  /** The same, for the INDEPENDENT document-model download. */
+  let ingestPulled = false;
 
   return {
     async runTurn(req): Promise<TurnView> {
@@ -294,24 +301,53 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
     },
 
     async health(): Promise<RuntimeHealth> {
+      const up = scenario !== 'runtime-down';
+      // Both required models (ADR-0009), each with its own tag so a UI that
+      // conflated them shows the seam in a scripted run. The `models-missing`
+      // scenario is first run on a provisioned-but-empty machine: the sidecars
+      // are up and only the weights are absent.
+      const installed = up && (scenario !== 'models-missing' || modelsPulled);
+      const model = (tag: string) => ({
+        tag,
+        available: installed,
+        installCommand: 'CANVAS_AGENT_E2E_API=scripted',
+      });
       return {
-        llm: scenario !== 'runtime-down',
-        ingest: scenario !== 'runtime-down',
-        model: {
-          tag: 'e2e-scripted',
-          available: scenario !== 'runtime-down',
-          installCommand: 'CANVAS_AGENT_E2E_API=scripted',
-        },
-        ingestModel: { available: scenario !== 'runtime-down' },
+        llm: up,
+        ingest: up,
+        model: model('e2e-scripted'),
+        visionModel: model('e2e-scripted-vision'),
+        // First run has no document models either, which is what makes the two
+        // INDEPENDENT downloads drivable together — finishing one calls back
+        // into the health probe while the other is still streaming.
+        ingestModel: { available: up && (scenario !== 'models-missing' || ingestPulled) },
       };
     },
+    /**
+     * A REALISTIC two-model pull: interleaved lines naming each tag in turn,
+     * with the per-model percent restarting at zero for the second — the exact
+     * sequence a bar that failed to aggregate would render as a reset to zero.
+     * A double that emitted one bare `success` could not express that failure at
+     * all, so it could not catch it either.
+     */
     async pullModel(onProgress): Promise<void> {
       failIfDown();
-      onProgress?.({ status: 'success' });
+      if (onProgress) {
+        for (const tag of ['e2e-scripted', 'e2e-scripted-vision']) {
+          onProgress({ status: 'pulling manifest', model: tag });
+          for (const percent of [10, 45, 80, 100]) {
+            await sleep(120);
+            onProgress({ status: 'downloading', model: tag, percent, completed: percent, total: 100 });
+          }
+          onProgress({ status: 'success', model: tag });
+        }
+      }
+      modelsPulled = true;
     },
     async pullIngestModel(onProgress): Promise<void> {
       failIfDown();
       onProgress?.({ status: 'success' });
+      ingestPulled = true;
     },
 
     async createSession(init): Promise<Session> {

@@ -3,15 +3,17 @@
  * client, serializes requests for the single-user app, and exposes the
  * role-based API the orchestrator consumes (PRD §15).
  */
-import type {
-  ChatChunk,
-  ChatOptions,
-  ChatResult,
-  DescribeImageOptions,
-  LLMConfig,
-  PullProgress,
+import {
+  type ChatChunk,
+  type ChatOptions,
+  type ChatResult,
+  type DescribeImageOptions,
+  type LLMConfig,
+  type ModelSetStatus,
+  type PullProgress,
+  type RequiredModelStatus,
 } from './types.js';
-import { loadLLMConfig, type Env } from './config.js';
+import { loadLLMConfig, requiredModels, requiredModelTags, type Env } from './config.js';
 import { OllamaClient, OllamaError, type FetchLike } from './client.js';
 import { OllamaProcess, type SidecarLogger } from './process.js';
 import { Mutex } from './mutex.js';
@@ -81,34 +83,46 @@ export class OllamaSidecar {
     return this.process.isHealthy();
   }
 
-  /** Probe whether the configured text model tag is already present locally. */
-  async modelStatus(): Promise<{ tag: string; available: boolean }> {
-    const tag = this.config.models.text;
-    try {
-      const res = await fetch(this.config.nativeUrl + '/api/tags', {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (!res.ok) return { tag, available: false };
-      const data = (await res.json()) as { models?: Array<{ name?: string; model?: string }> };
-      const available = (data.models ?? []).some((m) => m.name === tag || m.model === tag);
-      return { tag, available };
-    } catch {
-      return { tag, available: false };
-    }
+  /**
+   * Probe which of the REQUIRED models (ADR-0009: text and vision) are already
+   * present locally.
+   *
+   * Reported per required model, not as one aggregate answer, so the UI can say
+   * *which* model is missing. `available` is the conjunction: one model present
+   * and the other absent is NOT ready — a partial install that read as ready is
+   * precisely how alt-text suggestion would fail after setup completes, on a
+   * machine the user believes is fully provisioned.
+   */
+  async modelStatus(): Promise<ModelSetStatus> {
+    // An unreachable daemon means nothing is known to be installed, which reads
+    // as everything missing — never as ready.
+    const installed = await this.client.localModelTags().catch(() => new Set<string>());
+    const models: RequiredModelStatus[] = requiredModels(this.config).map((m) => ({
+      ...m,
+      available: installed.has(m.tag),
+    }));
+    return { available: models.every((m) => m.available), models };
   }
 
   /**
-   * Download the configured text model into the local Ollama, reporting progress.
-   * First-run provisioning: the bundled daemon is brought up if needed, then the
-   * model is pulled via `/api/pull`. Resolves once the pull completes; rejects on
-   * a pull error (e.g. an unknown tag or a network failure). Not serialized
-   * against chat — there is nothing to chat with until this finishes.
+   * Download the required models (ADR-0009) into the local Ollama, reporting
+   * progress. First-run provisioning: the bundled daemon is brought up if
+   * needed, then each required tag is pulled via `/api/pull`, in sequence.
+   *
+   * The tags are deduplicated first, so the current defaults — where `vision`
+   * inherits the text model — are one download and not two. Each progress line
+   * names its model, because `percent` restarts per pull and only the caller can
+   * aggregate across the set. Resolves once every pull completes; rejects on a
+   * pull error (e.g. an unknown tag or a network failure) without attempting the
+   * rest, leaving the status probe to report honestly what is still missing. Not
+   * serialized against chat — there is nothing to chat with until this finishes.
    */
   async pullModel(onProgress?: (p: PullProgress) => void): Promise<void> {
     await this.process.ensureAlive(); // make sure the bundled `ollama serve` is up
-    const tag = this.config.models.text;
-    for await (const raw of this.client.pullModel(tag)) {
-      onProgress?.(normalizePullProgress(raw));
+    for (const tag of requiredModelTags(this.config)) {
+      for await (const raw of this.client.pullModel(tag)) {
+        onProgress?.({ ...normalizePullProgress(raw), model: tag });
+      }
     }
   }
 

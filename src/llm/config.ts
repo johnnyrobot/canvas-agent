@@ -2,7 +2,12 @@
  * Loads the local-LLM config from the environment (PRD Appendix H).
  * Pure and dependency-free so it is trivially unit-testable.
  */
-import type { LLMConfig, ModelRole } from './types.js';
+import {
+  REQUIRED_MODEL_ROLES,
+  type LLMConfig,
+  type ModelRole,
+  type RequiredModelRole,
+} from './types.js';
 
 export type Env = Record<string, string | undefined>;
 
@@ -82,4 +87,27 @@ export function loadLLMConfig(env: Env = process.env): LLMConfig {
 /** Distinct model tags across all roles (for warm-loading). */
 export function uniqueModels(config: LLMConfig): string[] {
   return [...new Set(Object.values(config.models))];
+}
+
+/**
+ * The required roles paired with the tags they resolve to (ADR-0009), in role
+ * order. One entry per required ROLE — `requiredModelTags` is the deduplicated
+ * download list; this is what the status probe reports per model.
+ *
+ * Roles outside the required set never appear here, so `MODEL_DEEP=granite4.1:30b`
+ * can neither be downloaded nor gate readiness for a role nothing calls.
+ */
+export function requiredModels(config: LLMConfig): Array<{ role: RequiredModelRole; tag: string }> {
+  return REQUIRED_MODEL_ROLES.map((role) => ({ role, tag: config.models[role] }));
+}
+
+/**
+ * The tags first-run provisioning must download: the required roles,
+ * deduplicated and in role order.
+ *
+ * Deduplication is the point at today's defaults, where `vision` inherits the
+ * text model — the required set is two roles but ONE download.
+ */
+export function requiredModelTags(config: LLMConfig): string[] {
+  return [...new Set(requiredModels(config).map((m) => m.tag))];
 }

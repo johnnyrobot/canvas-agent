@@ -20,9 +20,25 @@ API** — this is the runtime layer the orchestrator (PRD §13/§15) sits on top
 | `client.ts` | `fetch`-based client for `/api/chat` (stream + non-stream) |
 | `process.ts` | Spawn / attach / warm-load / stop `ollama serve` |
 | `mutex.ts` | Single-user serialization (`OLLAMA_NUM_PARALLEL=1`) |
-| `sidecar.ts` | Facade: `start` / `stop` / `chat` / `chatStream` / `chatJSON` / `describeImage` |
+| `sidecar.ts` | Facade: `start` / `stop` / `chat` / `chatStream` / `chatJSON` / `describeImage`, plus required-set provisioning (`modelStatus` / `pullModel`) |
 | `*.test.ts` | Unit tests for the pure logic (`node:test`) |
 | `example.ts` | Runnable smoke script |
+
+## The required model set (ADR-0009)
+
+Five roles are configurable, but only **`text` and `vision`** are *required*:
+`requiredModelTags()` is what `pullModel()` downloads and what `modelStatus()`
+gates readiness on. `fast`, `deep` and `cheap` inherit the text model and are
+never provisioned — an operator pointing `MODEL_DEEP` at a 17 GB tag no
+production path calls must not turn first run into a 17 GB download.
+
+Two consequences worth keeping:
+
+- The tags are **deduplicated**, so today's defaults (where `vision` inherits
+  the text model) are two required roles and *one* download.
+- `modelStatus()` answers **per required model**, and its aggregate `available`
+  is the conjunction. A partial install must never read as ready — that is the
+  path where alt-text suggestion fails after setup has told the user otherwise.
 
 ## Why the native API (not `/v1/chat/completions`)
 

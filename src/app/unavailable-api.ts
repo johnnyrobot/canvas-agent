@@ -26,6 +26,10 @@ export function createUnavailableApi(reason: string): AppApi {
   };
   return {
     async health(): Promise<RuntimeHealth> {
+      // Every model field stays ABSENT, including `visionModel` (ADR-0009).
+      // A runtime that failed to build knows nothing about what is installed;
+      // absent means "cannot report", and fabricating either an available or a
+      // missing model would be a claim this API exists not to make.
       return { llm: false, ingest: false };
     },
     async pullModel() {

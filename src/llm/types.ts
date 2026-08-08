@@ -12,6 +12,35 @@ export type ModelRole = 'text' | 'vision' | 'fast' | 'deep' | 'cheap';
 
 export const MODEL_ROLES: readonly ModelRole[] = ['text', 'vision', 'fast', 'deep', 'cheap'];
 
+/**
+ * The roles the app actually provisions and gates readiness on (ADR-0009).
+ *
+ * `fast`, `deep` and `cheap` are tiering aliases nothing outside `example.ts`
+ * calls; they are deliberately NOT provisioned, so pointing one of them at a
+ * different tag can never trigger a multi-gigabyte first-run download.
+ */
+export const REQUIRED_MODEL_ROLES = ['text', 'vision'] as const satisfies readonly ModelRole[];
+
+export type RequiredModelRole = (typeof REQUIRED_MODEL_ROLES)[number];
+
+/** Presence of one required model in the local Ollama store. */
+export interface RequiredModelStatus {
+  role: RequiredModelRole;
+  tag: string;
+  available: boolean;
+}
+
+/**
+ * Presence of the whole required set. `available` is true only when EVERY
+ * required model is present — a partial install must never read as ready
+ * (ADR-0009).
+ */
+export interface ModelSetStatus {
+  available: boolean;
+  /** One entry per required role, in `REQUIRED_MODEL_ROLES` order. */
+  models: RequiredModelStatus[];
+}
+
 /** A piece of a multimodal message. */
 export type ContentPart =
   | { type: 'text'; text: string }
@@ -155,4 +184,10 @@ export interface PullProgress {
   completed?: number;
   total?: number;
   percent?: number;
+  /**
+   * The model tag this line belongs to. Provisioning walks the required set in
+   * sequence, so `percent` is per-model; the UI names this one and aggregates
+   * across the set rather than letting the bar reset between models (ADR-0009).
+   */
+  model?: string;
 }

@@ -219,6 +219,187 @@ test('health() reports injected model availability when supplied', async () => {
   assert.match(health.model?.installCommand ?? '', /^ollama pull /);
 });
 
+test('health() reports NOT ready when only part of the required model set is installed', async () => {
+  // A SEAM GUARD carried forward from #30. It used to read the aggregate through
+  // `model.available` — the exact conflation #31 removes, now that `model` means
+  // the TEXT model and nothing more. The invariant it defends is unchanged: a
+  // partial install must never read as ready. It is now read the way the UI must
+  // read it, off BOTH required fields.
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({
+        available: false,
+        models: [
+          { role: 'text' as const, tag: 'text:1b', available: true },
+          { role: 'vision' as const, tag: 'vision:2b', available: false },
+        ],
+      }),
+    },
+  });
+  const health = await view.health();
+  assert.equal(
+    health.model?.available && health.visionModel?.available,
+    false,
+    'one required model present and the other absent is NOT ready',
+  );
+});
+
+test('health() reports the text and vision models independently (#31, ADR-0009)', async () => {
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({
+        available: false,
+        models: [
+          { role: 'text' as const, tag: 'text:1b', available: true },
+          { role: 'vision' as const, tag: 'vision:2b', available: false },
+        ],
+      }),
+    },
+  });
+  const health = await view.health();
+  assert.deepEqual(
+    { tag: health.model?.tag, available: health.model?.available },
+    { tag: 'text:1b', available: true },
+    'the text model reports its own tag and its own availability',
+  );
+  assert.deepEqual(
+    { tag: health.visionModel?.tag, available: health.visionModel?.available },
+    { tag: 'vision:2b', available: false },
+    'the vision model is reported separately, not folded into the text model',
+  );
+});
+
+test('health() names EVERY missing required model in the recovery command (#31)', async () => {
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({
+        available: false,
+        models: [
+          { role: 'text' as const, tag: 'text:1b', available: false },
+          { role: 'vision' as const, tag: 'vision:2b', available: false },
+        ],
+      }),
+    },
+  });
+  const health = await view.health();
+  // Manual recovery runs after the in-app download already failed; a command
+  // that names one of two missing models leaves the user half-provisioned.
+  for (const [field, cmd] of [
+    ['model', health.model?.installCommand],
+    ['visionModel', health.visionModel?.installCommand],
+  ] as const) {
+    assert.ok(cmd?.includes('ollama pull text:1b'), `${field} recovery command must name the text model`);
+    assert.ok(cmd?.includes('ollama pull vision:2b'), `${field} recovery command must name the vision model`);
+  }
+});
+
+test('health() recovery command lists only what is MISSING, and lists a shared tag once', async () => {
+  const runner = new ScriptedRunner([]);
+  const onlyVisionMissing = api(runner, {
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({
+        available: false,
+        models: [
+          { role: 'text' as const, tag: 'text:1b', available: true },
+          { role: 'vision' as const, tag: 'vision:2b', available: false },
+        ],
+      }),
+    },
+  });
+  const partial = await onlyVisionMissing.health();
+  assert.equal(partial.visionModel?.installCommand, 'ollama pull vision:2b');
+  assert.ok(
+    !partial.visionModel?.installCommand.includes('text:1b'),
+    'an already-installed model must not be re-pulled by the recovery command',
+  );
+
+  // At today's defaults `vision` inherits the text tag: two required roles, ONE
+  // download. The recovery command must not tell the user to pull it twice.
+  const sharedTag = api(runner, {
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({
+        available: false,
+        models: [
+          { role: 'text' as const, tag: 'shared:8b', available: false },
+          { role: 'vision' as const, tag: 'shared:8b', available: false },
+        ],
+      }),
+    },
+  });
+  assert.equal((await sharedTag.health()).model?.installCommand, 'ollama pull shared:8b');
+});
+
+test('health() names a required model the probe OMITTED in the recovery command too', async () => {
+  // A probe that answers for text only tells us nothing about vision, so vision
+  // is reported missing. The recovery command has to name it: reporting a model
+  // as missing while omitting it from the one command that installs it is the
+  // half-provisioning this criterion exists to prevent.
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llmEnv: { MODEL_TEXT: 'cfg-text:1b', MODEL_VISION: 'cfg-vision:2b' },
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({
+        available: false,
+        models: [{ role: 'text' as const, tag: 'cfg-text:1b', available: false }],
+      }),
+    },
+  });
+  const health = await view.health();
+  assert.equal(health.visionModel?.available, false, 'an unprobed required model is reported missing');
+  assert.equal(health.visionModel?.tag, 'cfg-vision:2b');
+  for (const cmd of [health.model?.installCommand, health.visionModel?.installCommand]) {
+    assert.ok(cmd?.includes('ollama pull cfg-text:1b'), 'recovery command names the probed missing model');
+    assert.ok(cmd?.includes('ollama pull cfg-vision:2b'), 'recovery command names the UNPROBED missing model');
+  }
+});
+
+test('health() falls back to the configured tags when the probe answers only in aggregate', async () => {
+  // Externally-managed or older sidecar shapes answer `{ available }` with no
+  // per-role breakdown. Both required models still have to be reported — as the
+  // configured tags, carrying the one answer that exists.
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llmEnv: { MODEL_TEXT: 'cfg-text:1b', MODEL_VISION: 'cfg-vision:2b' },
+    llm: {
+      describeImage: async () => text('x'),
+      isHealthy: async () => true,
+      modelStatus: async () => ({ available: false }),
+    },
+  });
+  const health = await view.health();
+  assert.deepEqual(
+    [health.model?.tag, health.visionModel?.tag],
+    ['cfg-text:1b', 'cfg-vision:2b'],
+    'both required roles are reported from config when the probe cannot break them out',
+  );
+  assert.equal(health.visionModel?.available, false);
+});
+
+test('health() reports both required models when the runtime has no model probe at all', async () => {
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llm: { describeImage: async () => text('x'), isHealthy: async () => true },
+  });
+  const health = await view.health();
+  assert.equal(health.model?.available, true);
+  assert.equal(health.visionModel?.available, true, 'vision must not silently disappear from the report');
+});
+
 test('screenshot attachments are summarized before the model sees the turn', async () => {
   const runner = new ScriptedRunner([text('answer')]);
   const seenImages: string[] = [];

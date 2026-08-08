@@ -32,10 +32,28 @@ test('screenshot source and model health are serializable contract shapes', () =
   const health: RuntimeHealth = {
     llm: true,
     ingest: true,
-    model: { tag: 'gemma4:31b', available: false, installCommand: 'ollama pull gemma4:31b' },
+    model: { tag: 'granite4.1:8b', available: false, installCommand: 'ollama pull granite4.1:8b' },
   };
   assert.deepEqual(JSON.parse(JSON.stringify(source)), source);
-  assert.equal(health.model?.installCommand, 'ollama pull gemma4:31b');
+  assert.equal(health.model?.installCommand, 'ollama pull granite4.1:8b');
+});
+
+test('RuntimeHealth carries the two required models as siblings, each its own tag (ADR-0009)', () => {
+  // `visionModel` is a sibling optional field, not an element of a list — the
+  // required set is fixed at two, so a list would only be indexed by role.
+  const recovery = 'ollama pull granite4.1:8b && ollama pull a-vision-model:4b';
+  const health: RuntimeHealth = {
+    llm: true,
+    ingest: true,
+    model: { tag: 'granite4.1:8b', available: false, installCommand: recovery },
+    visionModel: { tag: 'a-vision-model:4b', available: false, installCommand: recovery },
+    ingestModel: { available: true },
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(health)), health, 'the whole payload survives IPC');
+  assert.notEqual(health.model?.tag, health.visionModel?.tag, 'each required model reports its own tag');
+  // The recovery path is manual and taken after automation failed: it names both.
+  assert.ok(health.visionModel?.installCommand.includes('granite4.1:8b'));
+  assert.ok(health.visionModel?.installCommand.includes('a-vision-model:4b'));
 });
 
 test('uploaded document conversion shape is serializable', () => {
