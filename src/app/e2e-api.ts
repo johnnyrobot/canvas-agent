@@ -294,15 +294,16 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
     },
 
     async health(): Promise<RuntimeHealth> {
+      const up = scenario !== 'runtime-down';
+      // Both required models (ADR-0009), each with its own tag so a UI that
+      // conflated them shows the seam in a scripted run.
+      const model = (tag: string) => ({ tag, available: up, installCommand: 'CANVAS_AGENT_E2E_API=scripted' });
       return {
-        llm: scenario !== 'runtime-down',
-        ingest: scenario !== 'runtime-down',
-        model: {
-          tag: 'e2e-scripted',
-          available: scenario !== 'runtime-down',
-          installCommand: 'CANVAS_AGENT_E2E_API=scripted',
-        },
-        ingestModel: { available: scenario !== 'runtime-down' },
+        llm: up,
+        ingest: up,
+        model: model('e2e-scripted'),
+        visionModel: model('e2e-scripted-vision'),
+        ingestModel: { available: up },
       };
     },
     async pullModel(onProgress): Promise<void> {

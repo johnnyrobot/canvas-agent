@@ -469,6 +469,13 @@ export interface TurnView {
 export interface ModelHealth {
   tag: string;
   available: boolean;
+  /**
+   * The MANUAL-RECOVERY command, taken when the in-app download has already
+   * failed. It names EVERY missing required model (ADR-0009), not just this
+   * one — a half-listed command leaves the user half-provisioned at exactly the
+   * moment automation let them down. With nothing missing it falls back to this
+   * model's own pull command.
+   */
   installCommand: string;
 }
 
@@ -477,6 +484,17 @@ export interface RuntimeHealth {
   ingest: boolean;
   /** Local Ollama model tag selected for text turns, plus availability. */
   model?: ModelHealth;
+  /**
+   * The vision model — the second REQUIRED model (ADR-0009), a sibling of
+   * `model` rather than an element of a list, following the `ingestModel`
+   * precedent below. Absent when the runtime can't report it.
+   *
+   * Severity follows `model`, NOT `ingestModel`: a missing vision model marks
+   * the runtime DEGRADED. Alt-text *detection* is deterministic and survives
+   * without it, but WCAG 1.1.1 *suggestion* is the flagship capability, and
+   * "ready" must not mean "ready except for that".
+   */
+  visionModel?: ModelHealth;
   /**
    * Whether the Docling conversion models are present. Office/web docs convert
    * without them; PDFs and scanned images need them, so the UI offers a

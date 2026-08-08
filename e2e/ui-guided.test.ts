@@ -221,7 +221,9 @@ test('M18 saved work restores a persisted remediation into the review panel', { 
 
 test('M19 runtime-down scenario degrades health and never fabricates a badge', { skip, timeout: 60_000 }, async () => {
   await withApp('runtime-down', async (win) => {
-    await waitForText(win.getByTestId('health'), /Model missing|Model not installed|Local runtime/);
+    // Plural admitted: the scripted API reports BOTH required models (ADR-0009),
+    // so a down runtime names two missing models, not one.
+    await waitForText(win.getByTestId('health'), /Models? (missing|not installed)|Local runtime/);
     await win.getByTestId('inst-task-ask').click();
     await win.getByTestId('inst-ask-input').fill('Can I get a fake result?');
     await win.getByTestId('inst-ask-submit').click();

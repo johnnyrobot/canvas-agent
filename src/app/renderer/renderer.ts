@@ -17,6 +17,7 @@ import { appChromeClass, themedScreenRoot, uiThemeRootClass, type UiTheme } from
 import { createRemediationPanel, type RemediationDeps } from './remediation.js';
 import { createRemediateReviewModel, type ReviewAction, type ReviewSource } from './remediate-review.js';
 import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
+import { downloadModelAffordance, missingModelsText, missingRequiredModels } from './model-health.js';
 import {
   createInstHome,
   createInstAsk,
@@ -37,6 +38,7 @@ import type {
   CatalogCourse,
   CatalogCourseSummary,
   DocumentConversionResult,
+  ModelHealth,
   ProductMode,
   ScreenshotAttachment,
   ScreenshotPermissionStatus,
@@ -106,8 +108,11 @@ interface State {
   notice: string | undefined;
   health: 'checking' | 'ready' | 'degraded';
   healthText: string;
-  /** Set when the configured model isn't installed — drives the in-app download affordance. */
-  modelMissingTag: string | undefined;
+  /**
+   * Which REQUIRED models (ADR-0009: text and vision) aren't installed — drives
+   * the in-app download affordance. Empty when the runtime is fully provisioned.
+   */
+  modelsMissing: ModelHealth[];
   /** Set while a first-run model download is in flight. */
   modelPull: { text: string; percent: number | undefined } | undefined;
   /** Set when the Docling conversion models aren't installed (PDF/scanned-doc support). */
@@ -217,7 +222,7 @@ const state: State = {
   notice: undefined,
   health: 'checking',
   healthText: 'Local runtime checking',
-  modelMissingTag: undefined,
+  modelsMissing: [],
   modelPull: undefined,
   ingestModelMissing: false,
   ingestPull: undefined,
@@ -634,13 +639,14 @@ function healthStatus(): El {
       progressWrap(state.modelPull.percent ?? 0, 'Model download progress'),
       el('span', { class: 'status__pull' }, state.modelPull.text),
     );
-  } else if (state.modelMissingTag) {
+  } else if (state.modelsMissing.length > 0) {
+    const affordance = downloadModelAffordance(state.modelsMissing);
     children.push(
       actionButton(
-        'Download model',
+        affordance.text,
         () => void downloadModel(),
         'btn btn--small',
-        `Download model ${state.modelMissingTag}`,
+        affordance.label,
         'download-model',
       ),
     );
@@ -1507,15 +1513,19 @@ async function refreshHealth(): Promise<void> {
     const health = await api().health();
     const ok = health.llm && health.ingest;
     state.health = ok ? 'ready' : 'degraded';
-    if (health.model && !health.model.available) {
+    // EITHER required model missing (text or vision, ADR-0009) marks the runtime
+    // degraded — unlike the Docling models below, which only gate PDF conversion.
+    const missing = missingRequiredModels(health);
+    if (missing.length > 0) {
       state.health = 'degraded';
-      // Don't surface a bare CLI command — the app downloads the model itself via
-      // the bundled Ollama (see downloadModel()); the affordance is rendered next
-      // to the status. Skip while a download is already in flight.
-      if (!state.modelPull) state.modelMissingTag = health.model.tag;
-      state.healthText = `Model not installed (${health.model.tag})`;
+      // Don't surface a bare CLI command — the app downloads the models itself
+      // via the bundled Ollama (see downloadModel(), which pulls the whole
+      // required set); the affordance is rendered next to the status. Skip while
+      // a download is already in flight.
+      if (!state.modelPull) state.modelsMissing = missing;
+      state.healthText = missingModelsText(missing);
     } else {
-      state.modelMissingTag = undefined;
+      state.modelsMissing = [];
       state.healthText = ok
         ? `Local runtime ready${health.model ? ` - ${health.model.tag}` : ''}`
         : `Local runtime: llm ${health.llm ? 'up' : 'down'}, ingest ${health.ingest ? 'up' : 'down'}`;
@@ -1558,7 +1568,7 @@ async function downloadModel(): Promise<void> {
       render();
     });
     state.modelPull = undefined;
-    state.modelMissingTag = undefined;
+    state.modelsMissing = [];
     state.notice = 'Model downloaded.';
     await refreshHealth();
   } catch (err) {
