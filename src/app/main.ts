@@ -97,7 +97,7 @@ app.on('web-contents-created', (_event, contents) => {
  * `copyFileSync` of the seed on first launch, so if the seed isn't staged at
  * the expected path, or the copy fails (disk full, interrupted, permissions),
  * it throws synchronously — and an uncaught throw here would propagate out of
- * `createRuntimeApi()` into `buildApi`'s catch, degrading the ENTIRE app (dead
+ * `createRuntimeHandle()` into `buildApi`'s catch, degrading the ENTIRE app (dead
  * chat/build/remediate), not just the catalog panel. Guard against that: any
  * failure here logs a warning and returns `undefined`, so only catalog
  * enrichment degrades, exactly like every other bundled-resource resolution.

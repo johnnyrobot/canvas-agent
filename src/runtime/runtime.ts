@@ -35,15 +35,22 @@ export interface RuntimeHandle {
 }
 
 /**
- * `database` and `activity` are omitted from the base options because this root
- * OWNS those two lifetimes: it supplies them to `createAppApi` itself, built via
- * `createDatabase` / `createActivity` below. Accepting them directly here as well
- * would silently discard a caller-supplied instance (later object-literal keys
- * win), leaving that instance never opened/closed and never drained — no type
- * error, no runtime error, just a leak. Making them unavailable on this type
- * turns that mistake into a compile error instead of a documentation note.
+ * `database`, `activity`, `llm`, and `ingest` are omitted from the base options
+ * because this root OWNS those four lifetimes: it supplies them to `createAppApi`
+ * itself, built via `createDatabase` / `createActivity` / `createLlm` /
+ * `createIngest` below. Accepting them directly here as well would silently
+ * discard a caller-supplied instance (later object-literal keys win in the
+ * `createAppApi({ ...appOptions, llm, ingest, database, activity })` call),
+ * leaving that instance never opened/closed/stopped and never drained — no type
+ * error, no runtime error, just a leak. For `llm`/`ingest` this is worse than a
+ * leak: the discarded fake falls through to this root's own default, which
+ * spawns a REAL `createOllamaSidecar()` / `createDoclingSidecar()` process, so a
+ * test written as `createRuntime({ llm: fakeLlm })` would silently launch a real
+ * `ollama serve` instead of using the fake. Making all four unavailable on this
+ * type turns that mistake into a compile error instead of a documentation note.
  */
-export interface CreateRuntimeOptions extends Omit<AppApiOptions, 'database' | 'activity'> {
+export interface CreateRuntimeOptions
+  extends Omit<AppApiOptions, 'database' | 'activity' | 'llm' | 'ingest'> {
   /** Test seam: build the owned LLM sidecar. Default: a real `OllamaSidecar`. */
   createLlm?: () => OwnedLlm;
   /** Test seam: build the owned Docling sidecar. Default: a real `DoclingSidecar`. */

@@ -73,7 +73,13 @@ Draining matters because "turn in flight" is exactly the window in which a
 per-turn Chromium exists (ADR-0005). Letting the turn settle is what allows that
 browser to be disposed by its own `finally` instead of orphaned alongside the
 sidecars. The bracket is `withTurnAuditor` (`app-api.ts:486`) — already the
-single path `runTurn` takes, for both the remediate and standard branches.
+single path `runTurn` takes, for both the remediate and standard branches. When
+the drain itself times out, this protection lapses: `dispose()` proceeds straight
+into `stop()`/`close()` and `app.exit(0)` follows, while the turn that never
+settled is still running. Its per-turn Chromium never reaches that `finally` and
+is orphaned exactly like the sidecars would have been without this ADR, and its
+session write is lost outright, since the database is already latched closed by
+the time it would try to persist.
 
 `SIGINT`/`SIGTERM` route to `app.quit()` so the same handler runs. Ctrl-C on
 `npm run app` otherwise kills Electron without firing `before-quit`, leaking in

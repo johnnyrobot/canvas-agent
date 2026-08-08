@@ -2,8 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerShutdown, SHUTDOWN_TIMEOUT_MS, type QuitEvent, type QuitHost } from './shutdown.js';
 
-/** A QuitHost double: captures the listener so the test can fire `before-quit`. */
-function fakeHost() {
+/**
+ * A QuitHost double: captures the listener so the test can fire `before-quit`.
+ *
+ * Accepts an optional shared `order` array; `exit(code)` pushes `exit:${code}`
+ * into it at the moment it is called (in addition to the existing `exits`
+ * list), so a caller who also pushes into `order` from inside `dispose` gets
+ * both events in one array, in real call order — not reconstructed afterward.
+ */
+function fakeHost(order: string[] = []) {
   let listener: ((e: QuitEvent) => void) | undefined;
   const exits: number[] = [];
   const prevented: number[] = [];
@@ -13,6 +20,7 @@ function fakeHost() {
     },
     exit(code) {
       exits.push(code);
+      order.push(`exit:${code}`);
     },
   };
   return {
@@ -38,14 +46,13 @@ test('before-quit is prevented so teardown can run', async () => {
 
 test('dispose is awaited before the process exits', async () => {
   const order: string[] = [];
-  const h = fakeHost();
+  const h = fakeHost(order); // exit() now pushes `exit:0` into `order` when called
   registerShutdown(h.host, async () => {
     await settle(5);
     order.push('disposed');
   });
   h.quit();
   await settle(50);
-  order.push(`exit:${h.exits[0]}`);
   assert.deepEqual(order, ['disposed', 'exit:0']);
 });
 
