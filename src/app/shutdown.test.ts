@@ -1,0 +1,161 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { registerShutdown, SHUTDOWN_TIMEOUT_MS, type QuitEvent, type QuitHost } from './shutdown.js';
+
+/**
+ * A QuitHost double: captures the listener so the test can fire `before-quit`.
+ *
+ * Accepts an optional shared `order` array; `exit(code)` pushes `exit:${code}`
+ * into it at the moment it is called (in addition to the existing `exits`
+ * list), so a caller who also pushes into `order` from inside `dispose` gets
+ * both events in one array, in real call order — not reconstructed afterward.
+ */
+function fakeHost(order: string[] = []) {
+  let listener: ((e: QuitEvent) => void) | undefined;
+  const exits: number[] = [];
+  const prevented: number[] = [];
+  const host: QuitHost = {
+    on(_event, l) {
+      listener = l;
+    },
+    exit(code) {
+      exits.push(code);
+      order.push(`exit:${code}`);
+    },
+  };
+  return {
+    host,
+    exits,
+    prevented,
+    quit() {
+      listener?.({ preventDefault: () => prevented.push(1) });
+    },
+  };
+}
+
+/** Resolve once the pending microtasks/timers have drained. */
+const settle = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+test('before-quit is prevented so teardown can run', async () => {
+  const h = fakeHost();
+  registerShutdown(h.host, async () => {});
+  h.quit();
+  await settle();
+  assert.equal(h.prevented.length, 1);
+});
+
+test('dispose is awaited before the process exits', async () => {
+  const order: string[] = [];
+  const h = fakeHost(order); // exit() now pushes `exit:0` into `order` when called
+  registerShutdown(h.host, async () => {
+    await settle(5);
+    order.push('disposed');
+  });
+  h.quit();
+  await settle(50);
+  assert.deepEqual(order, ['disposed', 'exit:0']);
+});
+
+test('exits 0 on the happy path', async () => {
+  const h = fakeHost();
+  registerShutdown(h.host, async () => {});
+  h.quit();
+  await settle();
+  assert.deepEqual(h.exits, [0]);
+});
+
+test('exits anyway when teardown exceeds the deadline', async () => {
+  const h = fakeHost();
+  registerShutdown(h.host, () => new Promise<void>(() => {}), { timeoutMs: 10, log: () => {} });
+  h.quit();
+  await settle(60);
+  assert.deepEqual(h.exits, [0], 'a leaked sidecar beats an app that will not quit');
+});
+
+test('exits even when dispose rejects', async () => {
+  const h = fakeHost();
+  registerShutdown(h.host, async () => {
+    throw new Error('stop failed');
+  }, { log: () => {} });
+  h.quit();
+  await settle();
+  assert.deepEqual(h.exits, [0]);
+});
+
+test('every before-quit is prevented, but teardown runs only once', async () => {
+  let disposeCalls = 0;
+  const h = fakeHost();
+  registerShutdown(h.host, async () => {
+    disposeCalls += 1;
+    await settle(20);
+  });
+  h.quit();
+  h.quit();
+  h.quit();
+  await settle(80);
+  assert.equal(disposeCalls, 1, 'a second Cmd-Q must not restart teardown');
+  assert.deepEqual(h.exits, [0]);
+  assert.equal(
+    h.prevented.length,
+    3,
+    'Electron re-emits before-quit on every quit attempt; each one must be prevented or the default quit races teardown',
+  );
+});
+
+test('a repeat before-quit is prevented even though teardown already started', async () => {
+  const h = fakeHost();
+  registerShutdown(h.host, async () => {
+    await settle(20);
+  });
+  h.quit();
+  h.quit();
+  assert.deepEqual(h.prevented, [1, 1], 'both quit attempts must be prevented, not just the first');
+  await settle(60);
+});
+
+test('the timeout timer is cleared even when dispose rejects', async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const armed: unknown[] = [];
+  const cleared: unknown[] = [];
+  globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    const handle = (realSetTimeout as unknown as (...a: unknown[]) => unknown)(fn, ms, ...rest);
+    // Only the shutdown deadline matters; settle() uses short waits.
+    if (ms === SHUTDOWN_TIMEOUT_MS) armed.push(handle);
+    return handle;
+  }) as unknown as typeof globalThis.setTimeout;
+  globalThis.clearTimeout = ((handle: unknown) => {
+    cleared.push(handle);
+    return (realClearTimeout as unknown as (h: unknown) => void)(handle);
+  }) as unknown as typeof globalThis.clearTimeout;
+
+  try {
+    const h = fakeHost();
+    registerShutdown(h.host, async () => {
+      throw new Error('stop failed');
+    }, { log: () => {} });
+    h.quit();
+    await settle(30);
+    assert.equal(armed.length, 1, 'the shutdown deadline should be armed exactly once');
+    assert.ok(
+      cleared.includes(armed[0]),
+      'the deadline timer must be cleared even when dispose rejects — otherwise it holds the event loop open',
+    );
+    assert.deepEqual(h.exits, [0]);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
+});
+
+test('the timeout path logs why it gave up', async () => {
+  const logs: string[] = [];
+  const h = fakeHost();
+  registerShutdown(h.host, () => new Promise<void>(() => {}), {
+    timeoutMs: 10,
+    log: (m) => logs.push(m),
+  });
+  h.quit();
+  await settle(60);
+  assert.ok(logs.some((l) => /exceeded 10ms/.test(l)), `expected a timeout log, got ${JSON.stringify(logs)}`);
+});

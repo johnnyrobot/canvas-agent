@@ -1,14 +1,16 @@
 /**
  * Electron main process — the only place that boots a `BrowserWindow`.
  *
- * Kept deliberately thin: all testable logic lives in `ipc.ts` / `stub-api.ts`.
- * This file just creates the window with secure defaults and wires the IPC
- * surface to an `AppApi`. The single integration seam is the argument to
- * `registerIpc`: today it's `createStubApi()`; post-merge the lead swaps in the
- * integration track's `createAppApi()` and nothing else here changes.
+ * Kept deliberately thin: all testable logic lives in the modules it wires —
+ * `ipc.ts` (the IPC boundary), `build-api.ts` (the C3 fallback policy),
+ * `shutdown.ts` (quit sequencing), and `../runtime` (the composition root that
+ * owns the sidecar processes). This file creates the window with secure
+ * defaults, wires the IPC surface to the runtime's `AppApi`, and connects that
+ * runtime's `dispose` to quit.
  *
- * Not unit-tested (Electron can't launch headless under `node:test`); exercised
- * via the manual `npm run app` smoke the lead adds after merge.
+ * Not unit-tested (Electron can't launch headless under `node:test`); its
+ * behaviour is covered by those modules' own suites, the scripted E2E matrix,
+ * and a real-app smoke.
  */
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -16,10 +18,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { buildApi } from './build-api.js';
+import { registerShutdown } from './shutdown.js';
 import { createE2eAppApi } from './e2e-api.js';
 import { isInAppUrl, externalOpenTarget } from './navigation.js';
 import { withScreenshotCapture } from './screenshot.js';
-import { createAppApi } from '../runtime/index.js';
+import { createRuntime } from '../runtime/index.js';
+import type { RuntimeHandle } from '../runtime/index.js';
 import { resolveSidecarCommand } from '../runtime/bundled-resources.js';
 import { ensureCatalogHome } from '../runtime/catalog-home.js';
 import { createCatalogClient } from '../catalog/index.js';
@@ -93,7 +97,7 @@ app.on('web-contents-created', (_event, contents) => {
  * `copyFileSync` of the seed on first launch, so if the seed isn't staged at
  * the expected path, or the copy fails (disk full, interrupted, permissions),
  * it throws synchronously — and an uncaught throw here would propagate out of
- * `createRuntimeApi()` into `buildApi`'s catch, degrading the ENTIRE app (dead
+ * `createRuntimeHandle()` into `buildApi`'s catch, degrading the ENTIRE app (dead
  * chat/build/remediate), not just the catalog panel. Guard against that: any
  * failure here logs a warning and returns `undefined`, so only catalog
  * enrichment degrades, exactly like every other bundled-resource resolution.
@@ -111,9 +115,10 @@ function packagedCatalogClient() {
   }
 }
 
-function createRuntimeApi() {
+function createRuntimeHandle(): RuntimeHandle {
   if (process.env.CANVAS_AGENT_E2E_API === 'scripted') {
-    return createE2eAppApi(process.env.CANVAS_AGENT_E2E_SCENARIO);
+    // The scripted E2E API owns no processes, so it has nothing to tear down.
+    return { api: createE2eAppApi(process.env.CANVAS_AGENT_E2E_SCENARIO), dispose: async () => {} };
   }
   // Packaged app only: point Docling at the per-user model store so the (un-bundled)
   // conversion models download there on first run and are then served fully offline.
@@ -126,13 +131,19 @@ function createRuntimeApi() {
   // omitting the key, so the key is only included when a packaged client exists;
   // omitting it (dev) still falls through to `opts.catalog ?? createCatalogClient()`.
   const catalog = packagedCatalogClient();
-  return withScreenshotCapture(createAppApi(catalog ? { catalog } : {}), {
-    permissionStatus: () =>
-      systemPreferences.getMediaAccessStatus('screen') as ScreenshotPermissionStatus,
-    getSources: (options) => desktopCapturer.getSources(options),
-    now: () => new Date().toISOString(),
-    randomId: () => randomUUID(),
-  });
+  const runtime = createRuntime(catalog ? { catalog } : {});
+  // The screenshot decorator wraps the API surface only; process lifetime is not
+  // its concern, so `dispose` passes through untouched.
+  return {
+    api: withScreenshotCapture(runtime.api, {
+      permissionStatus: () =>
+        systemPreferences.getMediaAccessStatus('screen') as ScreenshotPermissionStatus,
+      getSources: (options) => desktopCapturer.getSources(options),
+      now: () => new Date().toISOString(),
+      randomId: () => randomUUID(),
+    }),
+    dispose: runtime.dispose,
+  };
 }
 
 // Wire the IPC boundary once, before any window exists. Use the real local
@@ -140,7 +151,13 @@ function createRuntimeApi() {
 // are installed) fall back to an HONEST degraded API that reports the runtime as
 // down and refuses to fabricate results — never the demo stub, which would
 // report healthy and emit passing accessibility badges (C3).
-registerIpc(ipcMain, buildApi(createRuntimeApi));
+const runtime = buildApi(createRuntimeHandle);
+registerIpc(ipcMain, runtime.api);
+
+// Stop the sidecars we own when the app quits (#13, ADR-0006). Without this the
+// app orphans `ollama serve` and `docling-serve` on every quit, and repeated
+// launch/quit cycles stack them up holding model weights in memory.
+registerShutdown(app, runtime.dispose);
 
 void app.whenReady().then(() => {
   // This on-device app needs no device permissions (camera/mic/geo/notifications/
@@ -160,3 +177,12 @@ app.on('window-all-closed', () => {
   // Standard non-macOS behaviour; on macOS apps typically stay alive.
   if (process.platform !== 'darwin') app.quit();
 });
+
+// Ctrl-C on `npm run app` kills Electron WITHOUT firing `before-quit`, so the dev
+// inner loop leaks the sidecars exactly as a shipped quit used to. Route both
+// signals through `app.quit()` so they land in the same shutdown handler.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    app.quit();
+  });
+}

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AppApi } from '../contracts/index.js';
+import type { RuntimeHandle } from '../runtime/index.js';
 import { buildApi } from './build-api.js';
 import { createUnavailableApi } from './unavailable-api.js';
 
@@ -26,7 +27,7 @@ test('createUnavailableApi refuses runtime actions rather than faking success (C
 });
 
 test('buildApi falls back to the honest unavailable API when the runtime throws (C3)', async () => {
-  const api = buildApi(() => {
+  const { api } = buildApi(() => {
     throw new Error('no sidecars');
   });
   const health = await api.health();
@@ -35,11 +36,21 @@ test('buildApi falls back to the honest unavailable API when the runtime throws 
   await assert.rejects(() => api.runTurn({ user: 'x' }));
 });
 
-test('buildApi returns the real runtime when construction succeeds', async () => {
-  const real = {
-    async health() {
-      return { llm: true, ingest: true };
-    },
-  } as unknown as AppApi;
+test('buildApi returns the real runtime handle when construction succeeds', async () => {
+  const real: RuntimeHandle = {
+    api: {
+      async health() {
+        return { llm: true, ingest: true };
+      },
+    } as unknown as AppApi,
+    dispose: async () => {},
+  };
   assert.equal(buildApi(() => real), real);
+});
+
+test('the degraded fallback still exposes a dispose, so a dead runtime can still quit', async () => {
+  const { dispose } = buildApi(() => {
+    throw new Error('no sidecars');
+  });
+  await dispose(); // must resolve, not throw and not hang
 });

@@ -23,6 +23,8 @@ import type { CatalogClient } from '../catalog/index.js';
 import { resolveTheme as defaultResolveTheme } from '../theme/index.js';
 import { createOllamaSidecar } from '../llm/index.js';
 import type { ChatMessage, OllamaSidecar } from '../llm/index.js';
+import { noopActivityTracker, type ActivityTracker } from './activity.js';
+import type { LazyDatabase } from './database.js';
 import { createDoclingSidecar } from '../ingest/index.js';
 import type { ConvertedDocument, FileSource } from '../ingest/index.js';
 import {
@@ -154,6 +156,19 @@ export interface AppApiOptions {
    * isn't installed — this is never a hard runtime dependency.
    */
   catalog?: CatalogClient;
+  /**
+   * Owns the on-device SQLite handle's open AND close. Supplied by
+   * `createRuntime` so shutdown can close it (ADR-0006). Omitted elsewhere, in
+   * which case the inline lazy open below applies and nothing closes it --
+   * unchanged from before.
+   */
+  database?: LazyDatabase;
+  /**
+   * Turn-activity bracket, so shutdown can drain an in-flight turn. Default: a
+   * no-op tracker, so a `createAppApi` built without `createRuntime` behaves
+   * exactly as it did.
+   */
+  activity?: ActivityTracker;
 }
 
 /**
@@ -425,6 +440,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   const listPagesFn: PageReader['listPages'] = opts.listPages ?? defaultListPages;
   const secrets: SecretStore = opts.secrets ?? createKeychainSecretStore();
   const catalog: CatalogClient = opts.catalog ?? createCatalogClient();
+  const activity: ActivityTracker = opts.activity ?? noopActivityTracker;
   const configuredModel = sidecar().config.models.text;
 
   // Resolve the saved Canvas token for `baseUrl` from the OS Keychain and build the
@@ -445,6 +461,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   let dbPromise: Promise<Database> | undefined;
   const database = (): Promise<Database> => {
     if (opts.db) return Promise.resolve(opts.db);
+    if (opts.database) return opts.database.open();
     return (dbPromise ??= (async () => {
       const paths = resolveAppPaths();
       await ensureAppDirs(paths); // create the app-data dir before SQLite opens the file
@@ -473,10 +490,11 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
    * A remediate turn audits up to five times — source gate, first repair, then
    * up to three re-audits — and each of those used to launch and close its own
    * browser. One browser now covers the whole turn and is disposed in the
-   * `finally`. It is NOT kept warm between turns: the app has no shutdown path
-   * (`window-all-closed` is guarded by `process.platform !== 'darwin'` and so
-   * never fires here), so a process-wide instance would be a Chromium leak
-   * nobody closes.
+   * `finally`. It is NOT kept warm between turns: ADR-0005 chose per-turn
+   * lifetime on the measured win (five launches to one, all inside one turn).
+   * The app now has a shutdown path (ADR-0006, #13), so that is no longer the
+   * blocker it was — but a warm browser *between* turns was never measured,
+   * and reopening the choice needs its own measurement.
    *
    * An injected `opts.audit` short-circuits the whole thing, so offline tests
    * never construct a runner. Even when one IS constructed it launches lazily —
@@ -484,12 +502,19 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
    * is a no-op.
    */
   const withTurnAuditor = async <T>(fn: (auditor: Auditor) => Promise<T>): Promise<T> => {
-    if (opts.audit) return fn(opts.audit);
-    const runner = createPlaywrightRunner();
+    const endTurn = activity.begin();
     try {
-      return await fn(createAuditor(runner));
+      // `await` is load-bearing: `return fn(...)` would run the outer `finally`
+      // at return time, closing the activity bracket mid-turn.
+      if (opts.audit) return await fn(opts.audit);
+      const runner = createPlaywrightRunner();
+      try {
+        return await fn(createAuditor(runner));
+      } finally {
+        await runner.dispose();
+      }
     } finally {
-      await runner.dispose();
+      endTurn();
     }
   };
 
