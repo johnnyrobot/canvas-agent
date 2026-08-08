@@ -5,9 +5,10 @@
  * and re-entrancy behaviour are unit-testable — `main.ts` imports Electron and
  * cannot run under `node:test`.
  *
- * `app.exit()` bypasses `before-quit`/`will-quit`, so exiting cannot re-enter
- * this handler; the `shuttingDown` flag covers the window *before* `exit` is
- * reached (a second Cmd-Q while teardown is still running).
+ * Electron re-emits `before-quit` on every quit attempt, so every one of them
+ * is prevented, unconditionally — an unprevented one would let Electron's own
+ * quit sequence race the teardown already in flight. The `shuttingDown` flag
+ * only stops teardown itself from being restarted by a repeat Cmd-Q.
  */
 
 /** The only thing this needs from Electron's `before-quit` event. */
@@ -40,18 +41,20 @@ export function registerShutdown(
   let shuttingDown = false;
 
   host.on('before-quit', (event) => {
-    if (shuttingDown) return; // a second Cmd-Q must not restart teardown
-    shuttingDown = true;
+    // Prevent FIRST, unconditionally: Electron re-emits this on every quit
+    // attempt, and an unprevented one would let its own quit sequence race
+    // the teardown we are running.
     event.preventDefault();
+    if (shuttingDown) return; // teardown already running — don't restart it
+    shuttingDown = true;
 
     void (async () => {
+      let timer: NodeJS.Timeout | undefined;
       try {
-        let timer: NodeJS.Timeout | undefined;
         const capped = new Promise<'timeout'>((resolve) => {
           timer = setTimeout(() => resolve('timeout'), timeoutMs);
         });
         const outcome = await Promise.race([dispose().then(() => 'done' as const), capped]);
-        clearTimeout(timer);
         if (outcome === 'timeout') {
           // Deliberate: a leaked sidecar is a better outcome than an app the
           // user cannot quit without Force Quit.
@@ -60,6 +63,7 @@ export function registerShutdown(
       } catch (err) {
         log(`[shutdown] teardown failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
+        clearTimeout(timer);
         host.exit(0);
       }
     })();

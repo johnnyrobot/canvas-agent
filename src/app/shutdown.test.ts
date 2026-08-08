@@ -75,7 +75,7 @@ test('exits even when dispose rejects', async () => {
   assert.deepEqual(h.exits, [0]);
 });
 
-test('a second before-quit during teardown is ignored', async () => {
+test('every before-quit is prevented, but teardown runs only once', async () => {
   let disposeCalls = 0;
   const h = fakeHost();
   registerShutdown(h.host, async () => {
@@ -88,7 +88,37 @@ test('a second before-quit during teardown is ignored', async () => {
   await settle(80);
   assert.equal(disposeCalls, 1, 'a second Cmd-Q must not restart teardown');
   assert.deepEqual(h.exits, [0]);
-  assert.equal(h.prevented.length, 1);
+  assert.equal(
+    h.prevented.length,
+    3,
+    'Electron re-emits before-quit on every quit attempt; each one must be prevented or the default quit races teardown',
+  );
+});
+
+test('a repeat before-quit is prevented even though teardown already started', async () => {
+  const h = fakeHost();
+  registerShutdown(h.host, async () => {
+    await settle(20);
+  });
+  h.quit();
+  h.quit();
+  assert.deepEqual(h.prevented, [1, 1], 'both quit attempts must be prevented, not just the first');
+  await settle(60);
+});
+
+test('exits promptly (no leaked timer) when dispose rejects under the default timeout', async () => {
+  const h = fakeHost();
+  const start = performance.now();
+  registerShutdown(h.host, async () => {
+    throw new Error('stop failed');
+  }, { log: () => {} });
+  h.quit();
+  await settle(30);
+  assert.deepEqual(h.exits, [0]);
+  assert.ok(
+    performance.now() - start < 500,
+    'a rejected dispose must not wait out the default 8s timeout — the timer must be cleared',
+  );
 });
 
 test('the timeout path logs why it gave up', async () => {
