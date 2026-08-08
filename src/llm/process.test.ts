@@ -16,7 +16,7 @@ const enoentSpawn: SpawnLike = () => {
 
 test('ensureRunning rejects (does not crash) when the ollama binary cannot be spawned (C5)', async () => {
   // Unreachable health URL → not already running → the spawn path is taken.
-  const config = { ...loadLLMConfig({}), nativeUrl: 'http://127.0.0.1:1', manageProcess: true };
+  const config = { ...loadLLMConfig({ MODEL_TEXT: 'test-text:1b' }), nativeUrl: 'http://127.0.0.1:1', manageProcess: true };
   const proc = new OllamaProcess(config, undefined, enoentSpawn);
   await assert.rejects(() => proc.ensureRunning(), /ENOENT|spawn|ollama/i);
 });
@@ -40,7 +40,7 @@ test('the spawn spec uses the resolved (bundled) command, not a bare PATH name (
   };
   // Stand in for resolveSidecarCommand returning a bundled abs path (packaged .app).
   const resolveCommand = (name: string) => `/Resources/sidecars/${name}/${name}`;
-  const config = { ...loadLLMConfig({}), manageProcess: true };
+  const config = { ...loadLLMConfig({ MODEL_TEXT: 'test-text:1b' }), manageProcess: true };
   const proc = new ControlledHealthProcess(config, undefined, spawn, resolveCommand);
 
   const running = proc.ensureRunning();
@@ -61,7 +61,7 @@ test('the spawn spec carries the Ollama tuning env', async () => {
     ee.kill = () => true;
     return ee as unknown as ChildProcess;
   };
-  const config = { ...loadLLMConfig({}), manageProcess: true };
+  const config = { ...loadLLMConfig({ MODEL_TEXT: 'test-text:1b' }), manageProcess: true };
   const proc = new ControlledHealthProcess(config, undefined, spawn, (n) => n);
 
   const running = proc.ensureRunning();

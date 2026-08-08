@@ -6,7 +6,22 @@ import type { LLMConfig, ModelRole } from './types.js';
 
 export type Env = Record<string, string | undefined>;
 
-const DEFAULT_MODEL = 'gemma4:12b-mlx';
+// This module deliberately holds NO shipping model default (ADR-0007). Model
+// selection is the runtime's job, steered in through `MODEL_TEXT`; a fallback
+// here would be a second default that silently diverges from the real one, and
+// the tag it used to hold was licence-encumbered. Callers that construct a
+// config directly must say which model they mean.
+
+/** Read a required env var, or throw naming where the value should come from. */
+function required(env: Env, key: string): string {
+  const v = env[key];
+  if (v === undefined || v === '') {
+    throw new Error(
+      `${key} is required — shipping defaults live in the runtime (see runtimeLlmEnv in src/runtime/deps.ts, ADR-0007).`,
+    );
+  }
+  return v;
+}
 
 function str(env: Env, key: string, fallback: string): string {
   const v = env[key];
@@ -37,9 +52,9 @@ export function deriveNativeUrl(baseUrl: string): string {
 export function loadLLMConfig(env: Env = process.env): LLMConfig {
   const baseUrl = str(env, 'LLM_BASE_URL', 'http://localhost:11434/v1');
 
-  // Each role resolves to its own env var, falling back to MODEL_TEXT, then the
-  // global default. In v1 they all point at the one Gemma 4 12B build.
-  const text = str(env, 'MODEL_TEXT', DEFAULT_MODEL);
+  // Each role resolves to its own env var, falling back to MODEL_TEXT. There is
+  // no module-level default below that: MODEL_TEXT is required (see `required`).
+  const text = required(env, 'MODEL_TEXT');
   const models: Record<ModelRole, string> = {
     text,
     vision: str(env, 'MODEL_VISION', text),

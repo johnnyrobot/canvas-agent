@@ -1,7 +1,7 @@
 /**
  * Smoke script: start the sidecar, run a streaming chat, a JSON call, and (if an
  * image path is given) an alt-text describe. Requires a local `ollama` binary
- * with the model pulled (`ollama pull gemma4:12b-mlx`).
+ * with the model pulled (`ollama pull granite4.1:8b`).
  *
  *   npm run llm:smoke -- "Explain accessible tables in Canvas in one sentence."
  *   npm run llm:smoke -- "Describe this image" ./diagram.png
@@ -18,6 +18,13 @@ const consoleLogger = {
 async function main(): Promise<void> {
   const prompt = process.argv[2] ?? 'Say hello to a Canvas course designer in one sentence.';
   const imagePath = process.argv[3];
+
+  // This module carries no shipping default (ADR-0007) — the runtime injects one,
+  // and a standalone script has no runtime. Say which model you mean.
+  if (!process.env.MODEL_TEXT) {
+    console.error('MODEL_TEXT is required, e.g. MODEL_TEXT=granite4.1:8b npm run llm:smoke');
+    process.exit(1);
+  }
 
   const llm = createOllamaSidecar({ logger: consoleLogger });
 

@@ -229,7 +229,7 @@ export function createStubApi(): AppApi {
       return {
         llm: true,
         ingest: true,
-        model: { tag: 'gemma4:e2b', available: true, installCommand: 'ollama pull gemma4:e2b' },
+        model: { tag: 'granite4.1:8b', available: true, installCommand: 'ollama pull granite4.1:8b' },
         ingestModel: { available: true },
       };
     },

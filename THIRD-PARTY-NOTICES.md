@@ -115,10 +115,10 @@ Each model's card (`README.md`) ships alongside its weights in
 The on-device LLM weights are **pulled and run locally** by Ollama at runtime; they
 are **not** bundled in or redistributed with this application:
 
-- **Gemma** (the app's default model, run via Ollama's MLX runner) — Google
-  **Gemma Terms of Use** (<https://ai.google.dev/gemma/terms>) and the Gemma
-  **Prohibited Use Policy** (<https://ai.google.dev/gemma/prohibited_use_policy>).
-  Users obtain the weights directly through Ollama and are bound by these terms.
+- **IBM Granite** `granite4.1:8b` (the app's default text model) — **Apache-2.0**
+  (<https://huggingface.co/ibm-granite>). Users obtain the weights directly through
+  Ollama. Every model the app defaults to must be permissively licensed (ADR-0007),
+  so no third-party acceptable-use policy attaches to the default path.
 
 ---
 

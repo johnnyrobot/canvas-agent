@@ -150,8 +150,8 @@ Licensed under the **Apache License, Version 2.0** — see [`LICENSE`](LICENSE).
 
 Bundled and dependency components retain their own licenses; see
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Note that bundled model
-weights (e.g. Gemma) are governed by their respective model licenses, which are
-**not** Apache-2.0.
+weights are governed by their respective model licenses. Every model the app
+defaults to is permissively licensed by rule (ADR-0007).
 
 ---
 

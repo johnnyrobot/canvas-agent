@@ -107,7 +107,7 @@ The electron-builder `build` block lives in `package.json`:
 - **`extraResources`** reserve space for the two bundled sidecars, copied into
   the packaged app's `Resources/sidecars/`:
   - `resources/sidecars/ollama` → `sidecars/ollama` (the Ollama server + the
-    resident Gemma model, or a first-run fetch).
+    resident model, or a first-run fetch).
   - `resources/sidecars/docling-serve` → `sidecars/docling-serve` (the Python
     `docling-serve` ingestion sidecar, e.g. a PyInstaller bundle).
 

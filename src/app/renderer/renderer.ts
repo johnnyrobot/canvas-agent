@@ -438,7 +438,7 @@ function instAskData(): InstAskData | undefined {
   const tools = toolCount > 0 ? ` · ${toolCount} ${toolCount === 1 ? 'tool' : 'tools'}` : '';
   return {
     question: state.guidanceQuestion.trim() || 'Your question',
-    meta: `Answered on-device · Gemma${tools}`,
+    meta: `Answered on-device${tools}`,
     answer,
   };
 }

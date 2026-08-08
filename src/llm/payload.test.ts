@@ -4,10 +4,11 @@ import { loadLLMConfig } from './config.js';
 import { buildChatRequest, resolveModel, toNativeMessage, toRawBase64 } from './payload.js';
 import type { ChatOptions } from './types.js';
 
-const config = loadLLMConfig({});
+const TEXT = 'test-text:1b';
+const config = loadLLMConfig({ MODEL_TEXT: TEXT });
 
 test('resolveModel maps role → tag and defaults to text', () => {
-  assert.equal(resolveModel('vision', config), 'gemma4:12b-mlx');
+  assert.equal(resolveModel('vision', config), TEXT); // vision inherits text until #33
   assert.equal(resolveModel(undefined, config), config.models.text);
 });
 
@@ -43,7 +44,7 @@ test('buildChatRequest sets model, options, keep_alive and stream flag', () => {
     numCtx: 8192,
   };
   const req = buildChatRequest(opts, config, true);
-  assert.equal(req.model, 'gemma4:12b-mlx');
+  assert.equal(req.model, TEXT);
   assert.equal(req.stream, true);
   assert.equal(req.keep_alive, '24h');
   assert.equal(req.options.temperature, 0.1);
