@@ -9,6 +9,12 @@
  */
 export { createAppApi, DEFAULT_SYSTEM_PROMPT } from './app-api.js';
 export type { AppApiOptions, LlmRuntime, IngestRuntime } from './app-api.js';
+export { createRuntime, DRAIN_TIMEOUT_MS } from './runtime.js';
+export type { RuntimeHandle, CreateRuntimeOptions, OwnedLlm, OwnedIngest } from './runtime.js';
+export { createActivityTracker, noopActivityTracker } from './activity.js';
+export type { ActivityTracker } from './activity.js';
+export { createLazyDatabase } from './database.js';
+export type { LazyDatabase } from './database.js';
 export {
   createEngineDeps,
   runtimeLlmEnv,
