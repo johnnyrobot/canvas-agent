@@ -249,6 +249,9 @@ test('one progress bar spans both models and names the one transferring', () => 
   assert.equal(bars[0]!.attrs['aria-valuenow'], '75', 'aggregate, not the current model’s own percent');
   assert.match(renderedText(status), /vision:2b/, 'the model transferring is named');
   assert.equal(byTestId(status, 'download-model'), undefined, 'no re-download while one runs');
+  // The health text is the condition the pull is fixing, so beside a running bar
+  // it contradicts it. The bar's own status line replaces it.
+  assert.doesNotMatch(renderedText(status), /not installed/, '"not installed" beside a 75% bar');
 });
 
 test('the status region is a pure function of screen state, holding nothing between renders', () => {

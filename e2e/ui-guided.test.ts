@@ -366,3 +366,55 @@ test('M25 first-run two-model pull shows ONE bar that never resets', { skip, tim
     assert.equal(await win.getByTestId('download-model').count(), 0);
   });
 });
+
+test('M26 a health probe landing mid-pull does not contradict the running bar', { skip, timeout: 60_000 }, async () => {
+  await withApp('models-missing', async (win) => {
+    await waitForText(win.getByTestId('health'), /not installed/);
+    // Start the model pull (streams for ~1s), then finish the INDEPENDENT
+    // document-model download, whose completion calls straight back into the
+    // health probe. That probe must not overwrite the bar's status line with
+    // "Models not installed" while the bar is at 60%.
+    await win.getByTestId('download-model').click();
+    await win.getByTestId('download-ingest-model').click();
+
+    const contradictions: string[] = [];
+    let sawProbeLandMidPull = false;
+    let frames = 0;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const frame = await win
+        .locator('#app')
+        .evaluate((app) => {
+          const status = app.querySelector('[data-testid="health"]');
+          return {
+            bars: status ? status.querySelectorAll('[role="progressbar"]').length : 0,
+            ingestOffered: !!app.querySelector('[data-testid="download-ingest-model"]'),
+            text: status?.textContent ?? '',
+          };
+        })
+        .catch(() => null);
+      if (frame === null) {
+        await sleep(25);
+        continue;
+      }
+      if (frame.bars === 0) {
+        if (frames > 0) break;
+        await sleep(25);
+        continue;
+      }
+      frames++;
+      if (frame.text.includes('not installed')) contradictions.push(frame.text);
+      // The document-model download has completed (its affordance is gone) while
+      // the model bar is still running — i.e. its probe really did land mid-pull.
+      if (!frame.ingestOffered) sawProbeLandMidPull = true;
+      await sleep(25);
+    }
+
+    assert.ok(frames >= 5, `expected to observe the pull in flight, saw ${frames} frames`);
+    assert.ok(
+      sawProbeLandMidPull,
+      'the document-model download never completed during the model pull — this test proved nothing',
+    );
+    assert.deepEqual(contradictions, [], 'status said "not installed" beside a running progress bar');
+  });
+});

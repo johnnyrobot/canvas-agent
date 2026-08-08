@@ -266,6 +266,8 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
   const savedCanvasAuth: string[] = [];
   /** Flipped by `pullModel` so a scripted first run can complete and stay complete. */
   let modelsPulled = false;
+  /** The same, for the INDEPENDENT document-model download. */
+  let ingestPulled = false;
 
   return {
     async runTurn(req): Promise<TurnView> {
@@ -315,7 +317,10 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
         ingest: up,
         model: model('e2e-scripted'),
         visionModel: model('e2e-scripted-vision'),
-        ingestModel: { available: up },
+        // First run has no document models either, which is what makes the two
+        // INDEPENDENT downloads drivable together — finishing one calls back
+        // into the health probe while the other is still streaming.
+        ingestModel: { available: up && (scenario !== 'models-missing' || ingestPulled) },
       };
     },
     /**
@@ -342,6 +347,7 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
     async pullIngestModel(onProgress): Promise<void> {
       failIfDown();
       onProgress?.({ status: 'success' });
+      ingestPulled = true;
     },
 
     async createSession(init): Promise<Session> {

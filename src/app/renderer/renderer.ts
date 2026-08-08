@@ -667,7 +667,13 @@ export interface HealthStatusView {
 
 export function healthStatus(view: HealthStatusView): El {
   const cls = view.health === 'ready' ? 'status' : 'status status--warn';
-  const children: Array<El | string> = [el('span', { class: 'status__dot' }), view.healthText];
+  const children: Array<El | string> = [el('span', { class: 'status__dot' })];
+  // A running pull REPLACES the health text rather than sitting beside it. The
+  // text necessarily still reads "Models not installed" — that is the condition
+  // being fixed — and next to a bar at 60% it reads as a failure. It is stale
+  // the moment the download starts, not merely when a later probe rewrites it,
+  // so suppressing it here (not in the probe) is what actually clears it.
+  if (!view.modelPull) children.push(view.healthText);
   if (view.modelPull) {
     // ONE bar for the whole required set: it advances from where the previous
     // model left off, because a reset to zero after a single stated size reads
@@ -1631,7 +1637,9 @@ async function downloadModel(): Promise<void> {
     });
     state.modelPull = undefined;
     state.modelsMissing = [];
-    state.notice = state.modelTags.length > 1 ? 'Models downloaded.' : 'Model downloaded.';
+    // The snapshot, not `state.modelTags`: a probe can refresh the live tags
+    // mid-pull, and the notice must describe the download that just finished.
+    state.notice = pull.expected.length > 1 ? 'Models downloaded.' : 'Model downloaded.';
     await refreshHealth();
   } catch (err) {
     state.modelPull = undefined;
