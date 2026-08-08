@@ -5,15 +5,17 @@
  *   RUN_OLLAMA_INTEGRATION=1   → a real model turn + LLM health
  *   RUN_DOCLING_INTEGRATION=1  → real Docling reachability
  *
- * The model is selected via the llm config override (env): the runtime defaults
- * `MODEL_TEXT` to `granite4.1:8b` (`ollama pull granite4.1:8b`). Override with
- * `MODEL_TEXT=…` to pick another local tag. See `src/runtime/README.md`.
+ * Models are selected via the llm config override (env). The runtime defaults the
+ * two required tags (ADR-0009) — `MODEL_TEXT` to `granite4.1:8b` and
+ * `MODEL_VISION` to `hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M` — so
+ * both must be pulled locally. Override either independently to pick another
+ * local tag. See `src/runtime/README.md`.
  *
  * Run with: RUN_OLLAMA_INTEGRATION=1 npx tsx --test "e2e"
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createOllamaSidecar, loadLLMConfig } from '../src/llm/index.js';
+import { createOllamaSidecar, loadLLMConfig, requiredModels } from '../src/llm/index.js';
 import { createDoclingSidecar, loadIngestConfig } from '../src/ingest/index.js';
 import { createAppApi, runtimeLlmEnv } from '../src/runtime/index.js';
 import type { Auditor } from '../src/contracts/index.js';
@@ -88,4 +90,42 @@ test('LLM live: health() reports the model sidecar reachable', { skip: ollamaSki
 test('Docling live: health() reports the ingest sidecar reachable', { skip: doclingSkip }, async () => {
   const app = createAppApi({ chatRunner: llm, llm, ingest, audit: cleanAudit });
   assert.equal((await app.health()).ingest, true);
+});
+
+test('LLM live: the shipped vision default can actually SEE (#33)', { skip: ollamaSkip }, async () => {
+  // The check that pulling cannot give you. #29 switched the text default to a
+  // tag that pulls perfectly and reports `completion, tools` — no `vision` — and
+  // because the vision role inherited it, alt-text suggestion 400d in the field
+  // while every offline test stayed green. A tag string cannot express "is
+  // multimodal", so the only place to assert it is against a real Ollama.
+  //
+  // Asserted per ROLE, not on a hardcoded tag, so it keeps its meaning when
+  // `scripts/model-eval/` swaps the provisional vision model — and so it fails
+  // just as loudly for an operator whose MODEL_VISION override cannot see.
+  const config = loadLLMConfig(runtimeLlmEnv());
+  const { nativeUrl } = config;
+
+  const capabilities = async (model: string): Promise<string[]> => {
+    const res = await fetch(nativeUrl + '/api/show', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(20000),
+    });
+    assert.ok(res.ok, `/api/show failed for ${model} (${res.status}) — is it pulled?`);
+    const body = (await res.json()) as { capabilities?: string[] };
+    return body.capabilities ?? [];
+  };
+
+  for (const { role, tag } of requiredModels(config)) {
+    const caps = await capabilities(tag);
+    assert.ok(caps.includes('completion'), `${role} model ${tag} reports no completion: ${caps.join(', ')}`);
+    if (role === 'vision') {
+      assert.ok(
+        caps.includes('vision'),
+        `the vision model ${tag} does not report the vision capability (${caps.join(', ')}) — ` +
+          'alt-text suggestion would fail with `/api/chat returned 400`',
+      );
+    }
+  }
 });

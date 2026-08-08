@@ -52,8 +52,9 @@ test('both missing are reported in role order, text first', () => {
 });
 
 test('a tag shared by both roles is listed once', () => {
-  // Today's defaults: `vision` inherits the text model — two required roles, one
-  // download. Naming it twice would read as two downloads to the user.
+  // Two required roles pointed at one tag — one download. Not the shipping
+  // defaults since #33, but naming it twice would still read to the user as two
+  // downloads.
   const health: RuntimeHealth = {
     llm: true,
     ingest: true,
@@ -136,6 +137,21 @@ test('the shipped text default declares its download size', () => {
     downloadModelAffordance([model('granite4.1:8b', false)]).sizeText,
     'About 5.3 GB to download',
   );
+});
+
+test('first run states the whole required set as ONE total, from the shipped table (#33)', () => {
+  // The sentence the instructor decides on, computed the way the screen computes
+  // it — no injected table. Since vision stopped inheriting text there are two
+  // downloads, and stating only the first (5.3 GB) would understate the wait by
+  // more than half, which is the misjudgement this sentence exists to prevent.
+  const shipped = Object.keys(MODEL_DOWNLOAD_SIZES_GB);
+  assert.equal(shipped.length, 2, 'the required set is exactly text and vision (ADR-0009)');
+  const affordance = downloadModelAffordance(shipped.map((tag) => model(tag, false)));
+  assert.equal(affordance.sizeText, 'About 8.6 GB to download');
+  assert.equal(affordance.text, 'Download models', 'plural, because two tags are listed');
+  // "About", never "More than": a floor here would mean a default slipped through
+  // without a declared size.
+  assert.ok(affordance.label.includes('(about 8.6 GB)'), affordance.label);
 });
 
 // ── The required set the download will cover ────────────────────────────────

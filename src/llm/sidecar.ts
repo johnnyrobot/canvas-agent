@@ -109,8 +109,9 @@ export class OllamaSidecar {
    * progress. First-run provisioning: the bundled daemon is brought up if
    * needed, then each required tag is pulled via `/api/pull`, in sequence.
    *
-   * The tags are deduplicated first, so the current defaults — where `vision`
-   * inherits the text model — are one download and not two. Each progress line
+   * The tags are deduplicated first, so a config that points both required roles
+   * at one multimodal tag is one download and not two identical pulls. (The
+   * shipping defaults are two distinct tags since #33.) Each progress line
    * names its model, because `percent` restarts per pull and only the caller can
    * aggregate across the set. Resolves once every pull completes; rejects on a
    * pull error (e.g. an unknown tag or a network failure) without attempting the

@@ -161,7 +161,9 @@ test('pullModel names the model each progress line belongs to', async () => {
 });
 
 test('pullModel requests a shared tag ONCE, not once per role', async () => {
-  // Today's production shape: vision inherits the text model → one download.
+  // Not the shipping defaults since #33 (text and vision are distinct tags), but
+  // still reachable: an operator can point both required roles at one multimodal
+  // tag, and that must stay one download rather than two identical pulls.
   const { sidecar, pulled } = pullingSidecar(baseEnv);
   await sidecar.pullModel();
   assert.deepEqual(pulled, ['test-text:1b']);

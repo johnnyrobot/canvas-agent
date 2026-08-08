@@ -1,10 +1,13 @@
 /**
  * Smoke script: start the sidecar, run a streaming chat, a JSON call, and (if an
  * image path is given) an alt-text describe. Requires a local `ollama` binary
- * with the model pulled (`ollama pull granite4.1:8b`).
+ * with the model pulled (`ollama pull granite4.1:8b`), and — for the describe
+ * path — a vision model in `MODEL_VISION`, which the text model cannot stand in
+ * for.
  *
  *   npm run llm:smoke -- "Explain accessible tables in Canvas in one sentence."
- *   npm run llm:smoke -- "Describe this image" ./diagram.png
+ *   MODEL_VISION=hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M \
+ *     npm run llm:smoke -- "Describe this image" ./diagram.png
  */
 import { readFile } from 'node:fs/promises';
 import { createOllamaSidecar } from './index.js';
@@ -24,6 +27,23 @@ async function main(): Promise<void> {
   if (!process.env.MODEL_TEXT) {
     console.error('MODEL_TEXT is required, e.g. MODEL_TEXT=granite4.1:8b npm run llm:smoke');
     process.exit(1);
+  }
+
+  // The describe path needs a model that can actually SEE. Left unset, `vision`
+  // falls back to MODEL_TEXT (`config.ts`), and if that tag is text-only the call
+  // fails with an opaque `/api/chat returned 400` — so say so up front.
+  //
+  // A WARNING and not a refusal: pointing both roles at one multimodal tag
+  // (`MODEL_TEXT=qwen3-vl:4b`, no MODEL_VISION) is a supported configuration,
+  // and this script cannot tell a multimodal text model from a text-only one
+  // without asking Ollama. Refusing here would reject a valid setup.
+  if (imagePath && !process.env.MODEL_VISION) {
+    console.error(
+      `[warn] MODEL_VISION is unset, so the describe path will use MODEL_TEXT (${process.env.MODEL_TEXT}).\n` +
+        '[warn] That works only if it is multimodal (`ollama show <tag>` must list `vision`);\n' +
+        '[warn] a text-only tag fails with `/api/chat returned 400`. Set MODEL_VISION to be sure, e.g.\n' +
+        '[warn]   MODEL_VISION=hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M',
+    );
   }
 
   const llm = createOllamaSidecar({ logger: consoleLogger });
