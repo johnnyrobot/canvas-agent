@@ -185,6 +185,14 @@ test('a disabled model contributes no gigabytes and no segment to the pull bar',
     ['text:1b'],
     'the bar denominator must match what pullModel will actually fetch',
   );
+
+  // And the sentence the user reads BEFORE committing: one model, its size only.
+  // Quoting 8.6 GB for a set that will fetch 5.3 GB is the same misinformation
+  // as quoting 5.3 GB for a set that will fetch 8.6 — it just errs the other way.
+  const affordance = downloadModelAffordance(missingRequiredModels(health), SIZES);
+  assert.equal(affordance.text, 'Download model');
+  assert.equal(affordance.sizeText, 'About 5.3 GB to download');
+  assert.doesNotMatch(affordance.label, /vision:2b/, 'a disabled model is not part of the download');
 });
 
 // ── What the user is told BEFORE committing to the download (issue #32) ──────
