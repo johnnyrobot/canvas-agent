@@ -156,6 +156,31 @@ export class OllamaClient {
   }
 
   /**
+   * What one model tag can do, as Ollama reports it (`/api/show` →
+   * `capabilities`, e.g. `["completion","tools","vision"]`).
+   *
+   * The question a status probe actually needs answered: presence tells you a
+   * tag was downloaded, not that it can do the job the role needs (ADR-0010).
+   *
+   * Shares `localModelTags`' short fixed timeout for the same reason — this
+   * backs a probe the first-run UI waits on, so an unresponsive daemon must fail
+   * fast rather than stall setup. A failure is a rejection; the caller decides
+   * what an unknown capability means, and deliberately does NOT read it as
+   * incapable.
+   */
+  async modelCapabilities(model: string): Promise<string[]> {
+    const res = await this.fetchImpl(this.config.nativeUrl + '/api/show', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new OllamaError(`Ollama /api/show returned ${res.status}`, res.status);
+    const data = (await res.json()) as { capabilities?: string[] };
+    return (data.capabilities ?? []).filter((c): c is string => typeof c === 'string');
+  }
+
+  /**
    * Pull a model into the local Ollama store, yielding native progress lines.
    *
    * Unlike chat, a pull is a multi-GB, many-minute download — so it deliberately

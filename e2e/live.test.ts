@@ -17,7 +17,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createOllamaSidecar, loadLLMConfig, requiredModels } from '../src/llm/index.js';
 import { createDoclingSidecar, loadIngestConfig } from '../src/ingest/index.js';
-import { createAppApi, runtimeLlmEnv } from '../src/runtime/index.js';
+import { createAppApi, runtimeLlmEnv, RUNTIME_DEFAULT_MODEL } from '../src/runtime/index.js';
 import type { Auditor } from '../src/contracts/index.js';
 
 /** Keep the gate browser-free in live tests — these exercise the sidecars, not Chromium. */
@@ -128,4 +128,48 @@ test('LLM live: the shipped vision default can actually SEE (#33)', { skip: olla
       );
     }
   }
+});
+
+test('LLM live: the SHIPPED defaults read ready under the capability probe (#38)', { skip: ollamaSkip }, async () => {
+  // The other half of the red-proof. A probe that fails everything would pass the
+  // incapable test below and be worthless — this is what says the new check
+  // still lets a correct installation through.
+  const status = await llm.modelStatus();
+  assert.deepEqual(
+    status.models.map((m) => m.status),
+    ['ready', 'ready'],
+    `both shipped defaults must satisfy their roles: ${JSON.stringify(status.models)}`,
+  );
+  assert.equal(status.ready, true);
+});
+
+test('LLM live: an installed but text-only vision override is NOT ready (#38)', { skip: ollamaSkip }, async () => {
+  // THE RED-PROOF for ADR-0010, and the reason it lives here rather than beside
+  // the fakes: a fake reports whatever it was told, so it can demonstrate the
+  // logic and not the contract. This asserts against the capability answer a real
+  // Ollama gives for a real installed tag.
+  //
+  // The configuration is the #29 regression exactly: MODEL_VISION pointed at the
+  // shipped TEXT default, which is installed, pulls fine, and cannot see. Before
+  // the capability probe this read `available: true` on every surface.
+  const env = runtimeLlmEnv({ ...process.env, MODEL_VISION: RUNTIME_DEFAULT_MODEL });
+  const sidecar = createOllamaSidecar({ env });
+  const status = await sidecar.modelStatus();
+  const vision = status.models.find((m) => m.role === 'vision');
+
+  assert.equal(
+    vision?.status,
+    'incapable',
+    `${RUNTIME_DEFAULT_MODEL} is installed and cannot see — it must not read as ready`,
+  );
+  assert.equal(status.ready, false, 'an incapable required model must not let the set read as ready');
+
+  // And the app-level payload must carry it through to advice, not to a pull.
+  const app = createAppApi({ chatRunner: llm, llm: sidecar, ingest, audit: cleanAudit, llmEnv: env });
+  const health = await app.health();
+  assert.equal(health.visionModel?.status, 'incapable');
+  assert.ok(
+    !(health.visionModel?.recovery ?? '').includes('ollama pull'),
+    'the tag is already installed; re-pulling it fixes nothing',
+  );
 });

@@ -23,23 +23,89 @@ export const REQUIRED_MODEL_ROLES = ['text', 'vision'] as const satisfies readon
 
 export type RequiredModelRole = (typeof REQUIRED_MODEL_ROLES)[number];
 
-/** Presence of one required model in the local Ollama store. */
+/**
+ * What a required model can be, from the app's point of view (ADR-0010).
+ *
+ * `available: boolean` used to live here, and it could not express the state
+ * that actually broke the flagship path: a tag that is installed and cannot do
+ * the job its role needs. The four are exhaustive and mutually exclusive.
+ *
+ *   ready     — present, and reports every capability its role requires
+ *   missing   — not in the local store; a download fixes it
+ *   incapable — present, but cannot do this role's job. A download fixes
+ *               NOTHING: the recovery is to point the role at another tag
+ *   disabled  — the operator switched this capability off, so the role left the
+ *               required set. Not an error, and not a reason to degrade
+ */
+export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled';
+
+/** How one required model stands, in the local Ollama store and by capability. */
 export interface RequiredModelStatus {
   role: RequiredModelRole;
   tag: string;
-  available: boolean;
+  status: ModelStatusState;
 }
 
 /**
- * Presence of the whole required set. `available` is true only when EVERY
- * required model is present — a partial install must never read as ready
- * (ADR-0009).
+ * How the whole required set stands. `ready` is true only when EVERY required
+ * model is satisfied — a partial install must never read as ready (ADR-0009),
+ * and neither must an install that is complete but incapable (ADR-0010).
+ *
+ * A `disabled` role satisfies the set: it is not required, so gating on it would
+ * hold the app hostage to a model nothing will call.
  */
 export interface ModelSetStatus {
-  available: boolean;
+  ready: boolean;
   /** One entry per required role, in `REQUIRED_MODEL_ROLES` order. */
   models: RequiredModelStatus[];
 }
+
+/**
+ * Everything the app knows about a required ROLE, in ONE table (ADR-0010).
+ *
+ * Deliberately one record rather than a table per concern. Each field below
+ * started life as its own map in its own module, and that shape meant adding a
+ * third required role took three edits in three files — any of which could be
+ * silently omitted, because a missing entry is only a compile error if something
+ * indexes the table by role. Keeping them together makes `Record<RequiredModelRole, …>`
+ * do the enforcing: a new role fails to compile until every field is answered.
+ *
+ * `capabilities` — what the role demands of whatever tag fills it, named as
+ * Ollama's `/api/show` names them. Declared per role rather than per tag on
+ * purpose: a per-tag allowlist would need editing every time
+ * `scripts/model-eval/` promotes a different vision model, and a forgotten edit
+ * would go unnoticed because the new tag would simply not be checked. Per role
+ * also catches what no allowlist can — an operator override that cannot do the
+ * job. `tools` on the text role is the easy one to miss: the orchestrator is a
+ * tool-calling loop, so a text model without it fails deep inside a turn.
+ *
+ * `envVar` — the knob an operator turns to change this role's tag. It is what
+ * the `incapable` recovery has to name, since re-pulling cannot help.
+ *
+ * `applies` — whether a given configuration requires this role at all. The
+ * required set is derived, not fixed: a capability switched off leaves it.
+ */
+export interface RequiredRoleSpec {
+  readonly capabilities: readonly string[];
+  readonly envVar: string;
+  readonly applies: (config: LLMConfig) => boolean;
+}
+
+export const REQUIRED_ROLES: Readonly<Record<RequiredModelRole, RequiredRoleSpec>> = {
+  text: {
+    capabilities: ['completion', 'tools'],
+    envVar: 'MODEL_TEXT',
+    applies: () => true,
+  },
+  vision: {
+    capabilities: ['completion', 'vision'],
+    envVar: 'MODEL_VISION',
+    // `describeImage` throws before touching a model when vision is disabled, so
+    // provisioning it would download gigabytes to gate readiness on weights
+    // nothing will ever call.
+    applies: (config) => config.visionEnabled,
+  },
+};
 
 /** A piece of a multimodal message. */
 export type ContentPart =

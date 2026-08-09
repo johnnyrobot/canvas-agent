@@ -10,10 +10,13 @@ import {
   type DescribeImageOptions,
   type LLMConfig,
   type ModelSetStatus,
+  type ModelStatusState,
   type PullProgress,
+  type RequiredModelRole,
   type RequiredModelStatus,
+  REQUIRED_ROLES,
 } from './types.js';
-import { loadLLMConfig, requiredModels, requiredModelTags, type Env } from './config.js';
+import { loadLLMConfig, reportedModels, requiredModelTags, type Env } from './config.js';
 import { OllamaClient, OllamaError, type FetchLike } from './client.js';
 import { OllamaProcess, type SidecarLogger } from './process.js';
 import { Mutex } from './mutex.js';
@@ -84,24 +87,51 @@ export class OllamaSidecar {
   }
 
   /**
-   * Probe which of the REQUIRED models (ADR-0009: text and vision) are already
-   * present locally.
+   * Probe how each REQUIRED model stands (ADR-0009: text and vision) — present,
+   * absent, present-but-incapable, or switched off (ADR-0010).
    *
-   * Reported per required model, not as one aggregate answer, so the UI can say
-   * *which* model is missing. `available` is the conjunction: one model present
-   * and the other absent is NOT ready — a partial install that read as ready is
-   * precisely how alt-text suggestion would fail after setup completes, on a
-   * machine the user believes is fully provisioned.
+   * Reported per required ROLE, not as one aggregate answer, so the UI can say
+   * *which* model is unsatisfied and *why* the recoveries differ. `ready` is the
+   * conjunction: one model satisfied and the other not is NOT ready — a partial
+   * install that read as ready is precisely how alt-text suggestion would fail
+   * after setup completes, on a machine the user believes is fully provisioned.
+   *
+   * Every required role is reported whether or not this configuration requires
+   * it. A role dropped from the payload reads to the UI as "nothing missing",
+   * which is the silent hole the `disabled` state exists to close.
    */
   async modelStatus(): Promise<ModelSetStatus> {
     // An unreachable daemon means nothing is known to be installed, which reads
     // as everything missing — never as ready.
     const installed = await this.client.localModelTags().catch(() => new Set<string>());
-    const models: RequiredModelStatus[] = requiredModels(this.config).map((m) => ({
-      ...m,
-      available: installed.has(m.tag),
-    }));
-    return { available: models.every((m) => m.available), models };
+    const models: RequiredModelStatus[] = await Promise.all(
+      reportedModels(this.config).map(async ({ role, tag, required }) => {
+        if (!required) return { role, tag, status: 'disabled' as const };
+        if (!installed.has(tag)) return { role, tag, status: 'missing' as const };
+        return { role, tag, status: await this.capabilityStatus(role, tag) };
+      }),
+    );
+    return { ready: models.every((m) => m.status === 'ready' || m.status === 'disabled'), models };
+  }
+
+  /**
+   * Whether an INSTALLED tag can do `role`'s job.
+   *
+   * A probe that throws falls back to `ready` — the documented asymmetry of
+   * ADR-0010. An unknown capability is not evidence of incapability, and
+   * reporting `incapable` would tell a user with a correct configuration to
+   * change it on the strength of a daemon hiccup, with no retry that clears it
+   * (the recovery for `incapable` is advice, not a command). An empty
+   * capabilities array is a real answer and is not a failure.
+   */
+  private async capabilityStatus(role: RequiredModelRole, tag: string): Promise<ModelStatusState> {
+    let capabilities: string[];
+    try {
+      capabilities = await this.client.modelCapabilities(tag);
+    } catch {
+      return 'ready';
+    }
+    return REQUIRED_ROLES[role].capabilities.every((c) => capabilities.includes(c)) ? 'ready' : 'incapable';
   }
 
   /**

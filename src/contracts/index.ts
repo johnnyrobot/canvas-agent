@@ -465,18 +465,44 @@ export interface TurnView {
   mode?: ProductMode;
 }
 
+/**
+ * How a required model stands (ADR-0010): present and capable, absent,
+ * present-but-unable-to-do-its-role's-job, or switched off by the operator.
+ *
+ * Declared here as well as in `src/llm/types.ts` because this module imports
+ * nothing — it is the boundary, and implementations reach it by dependency
+ * injection.
+ *
+ * Drift is caught in ONE direction only, and it is worth knowing which. The
+ * runtime assigns the `src/llm` union into this one when it builds `ModelHealth`,
+ * so a member added THERE and not here fails to compile at that seam. A member
+ * added HERE and not there stays assignable and compiles clean — it would simply
+ * be a state the sidecar can never produce. Add to `src/llm/types.ts` first.
+ */
+export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled';
+
 /** Health of the local sidecars (for a UI status indicator). */
 export interface ModelHealth {
   tag: string;
-  available: boolean;
   /**
-   * The MANUAL-RECOVERY command, taken when the in-app download has already
-   * failed. It names EVERY missing required model (ADR-0009), not just this
-   * one — a half-listed command leaves the user half-provisioned at exactly the
-   * moment automation let them down. With nothing missing it falls back to this
-   * model's own pull command.
+   * How this required model stands (ADR-0010). `available: boolean` used to live
+   * here and could not express the state that broke the flagship path: a tag
+   * that is installed and cannot do its role's job.
    */
-  installCommand: string;
+  status: ModelStatusState;
+  /**
+   * What the user must do about it, when the in-app download has already failed
+   * or cannot help.
+   *
+   * Not always a command, which is why it is no longer called `installCommand`.
+   * For a MISSING model it is the manual pull, naming EVERY unsatisfied required
+   * model (ADR-0009) rather than just this one — a half-listed command leaves the
+   * user half-provisioned at exactly the moment automation let them down. For an
+   * INCAPABLE model it is advice to point the role elsewhere: the tag is already
+   * installed, so a pull command would send the user round a loop that cannot
+   * terminate. Empty when there is nothing to do.
+   */
+  recovery: string;
 }
 
 export interface RuntimeHealth {

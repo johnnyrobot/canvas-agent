@@ -15,11 +15,19 @@ export {
 } from './sidecar.js';
 export { OllamaClient, OllamaError } from './client.js';
 export { OllamaProcess } from './process.js';
-export { loadLLMConfig, deriveNativeUrl, uniqueModels, requiredModels, requiredModelTags } from './config.js';
+export {
+  loadLLMConfig,
+  deriveNativeUrl,
+  uniqueModels,
+  requiredModels,
+  requiredModelTags,
+  reportedModels,
+} from './config.js';
 export { resolveModel, buildChatRequest, toNativeMessage, toRawBase64 } from './payload.js';
 export { Mutex } from './mutex.js';
 export type {
   ModelRole,
+  ModelStatusState,
   ChatMessage,
   ChatOptions,
   ChatResult,
@@ -34,4 +42,4 @@ export type {
   RequiredModelStatus,
   ModelSetStatus,
 } from './types.js';
-export { MODEL_ROLES, REQUIRED_MODEL_ROLES } from './types.js';
+export { MODEL_ROLES, REQUIRED_MODEL_ROLES, REQUIRED_ROLES } from './types.js';

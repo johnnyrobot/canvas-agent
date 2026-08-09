@@ -4,6 +4,7 @@
  */
 import {
   REQUIRED_MODEL_ROLES,
+  REQUIRED_ROLES,
   type LLMConfig,
   type ModelRole,
   type RequiredModelRole,
@@ -90,15 +91,54 @@ export function uniqueModels(config: LLMConfig): string[] {
 }
 
 /**
- * The required roles paired with the tags they resolve to (ADR-0009), in role
- * order. One entry per required ROLE — `requiredModelTags` is the deduplicated
- * download list; this is what the status probe reports per model.
+ * Whether this configuration requires `role` at all (ADR-0010).
+ *
+ * The required set is derived, not fixed: a capability the operator switched off
+ * leaves it. The predicate lives with the rest of the role's definition in
+ * `REQUIRED_ROLES`, so a new role cannot be added without answering this.
+ */
+export function roleIsRequired(config: LLMConfig, role: RequiredModelRole): boolean {
+  return REQUIRED_ROLES[role].applies(config);
+}
+
+/**
+ * The roles this configuration actually requires, paired with the tags they
+ * resolve to (ADR-0009), in role order.
  *
  * Roles outside the required set never appear here, so `MODEL_DEEP=granite4.1:30b`
- * can neither be downloaded nor gate readiness for a role nothing calls.
+ * can neither be downloaded nor gate readiness for a role nothing calls — and
+ * nor can a role whose capability is switched off (ADR-0010).
+ *
+ * This is the *requirement* question, and it is deliberately not the *reporting*
+ * question: `modelStatus` reports one entry per required role whether or not this
+ * configuration requires it, because a role that vanishes from the payload reads
+ * to the UI as "nothing missing". Conflating the two is what made a disabled
+ * capability cost a multi-gigabyte download.
  */
 export function requiredModels(config: LLMConfig): Array<{ role: RequiredModelRole; tag: string }> {
-  return REQUIRED_MODEL_ROLES.map((role) => ({ role, tag: config.models[role] }));
+  return reportedModels(config)
+    .filter((m) => m.required)
+    .map(({ role, tag }) => ({ role, tag }));
+}
+
+/**
+ * Every required ROLE with its tag and whether this configuration requires it —
+ * the *reporting* list, as against `requiredModels`' *requirement* list.
+ *
+ * Always one entry per role, including roles this configuration does not
+ * require. A role dropped from the report reads to the UI as "nothing missing"
+ * (ADR-0010), and a caller that reconstructs the roll-call from the narrowed set
+ * cannot tell a switched-off role from an absent one — it invents a missing
+ * model with no tag to name.
+ */
+export function reportedModels(
+  config: LLMConfig,
+): Array<{ role: RequiredModelRole; tag: string; required: boolean }> {
+  return REQUIRED_MODEL_ROLES.map((role) => ({
+    role,
+    tag: config.models[role],
+    required: roleIsRequired(config, role),
+  }));
 }
 
 /**

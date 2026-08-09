@@ -243,13 +243,12 @@ export function createStubApi(): AppApi {
       // the real runtime ships since #33 — the demo mirrors what the runtime
       // reports rather than inventing a shape the app does not actually have.
       //
-      // Both are available here, so each carries its OWN pull command: the real
-      // `installCommand` is built from what is MISSING, and falls back to the
-      // model's own tag when nothing is (`requiredModelHealth` in
-      // `src/runtime/app-api.ts`). A stub that handed back a two-pull recovery
-      // string while reporting everything present would be demoing a state the
-      // runtime never produces.
-      const model = (tag: string) => ({ tag, available: true, installCommand: `ollama pull ${tag}` });
+      // Both are ready here, so `recovery` is empty on each: the real runtime
+      // builds it from what is UNSATISFIED and leaves it blank when nothing is
+      // (`requiredModelHealth` in `src/runtime/app-api.ts`). A stub that handed
+      // back a recovery string while reporting everything ready would be demoing
+      // a state the runtime never produces.
+      const model = (tag: string) => ({ tag, status: 'ready' as const, recovery: '' });
       return {
         llm: true,
         ingest: true,

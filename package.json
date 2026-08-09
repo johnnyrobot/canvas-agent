@@ -11,14 +11,14 @@
     "node": ">=20"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.e2e.json",
     "build": "tsc && npm run copy:assets",
     "copy:assets": "mkdir -p dist/knowledge/packs dist/app/renderer && cp src/knowledge/packs/*.json dist/knowledge/packs/ && cp src/app/renderer/index.html dist/app/renderer/index.html",
     "test": "tsx --test 'src/**/*.test.ts' 'e2e/**/*.test.ts'",
     "e2e": "tsx --test 'e2e/**/*.test.ts'",
     "app": "npm run build && electron .",
     "llm:smoke": "tsx src/llm/example.ts",
-    "verify": "tsc --noEmit && npm test",
+    "verify": "tsc --noEmit && tsc -p tsconfig.e2e.json && npm test",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "install:hooks": "git config core.hooksPath githooks",
     "prepare": "git config core.hooksPath githooks || true",

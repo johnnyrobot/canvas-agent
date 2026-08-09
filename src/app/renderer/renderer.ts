@@ -20,8 +20,10 @@ import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
 import {
   advanceModelPull,
   downloadModelAffordance,
-  missingModelsText,
   missingRequiredModels,
+  unsatisfiedRequiredModels,
+  unsatisfiedModelsText,
+  disabledCapabilityText,
   requiredTagsFromHealth,
   startModelPull,
   type ModelPullState,
@@ -1579,22 +1581,35 @@ async function refreshHealth(): Promise<void> {
     state.health = ok ? 'ready' : 'degraded';
     // Every required tag, installed or not: the first-run bar's denominator.
     state.modelTags = requiredTagsFromHealth(health);
-    // EITHER required model missing (text or vision, ADR-0009) marks the runtime
-    // degraded — unlike the Docling models below, which only gate PDF conversion.
+    // EITHER required model unsatisfied (text or vision, ADR-0009) marks the
+    // runtime degraded — unlike the Docling models below, which only gate PDF
+    // conversion. Unsatisfied is wider than missing: a model that is installed
+    // and cannot do its role's job degrades too (ADR-0010).
+    const unsatisfied = unsatisfiedRequiredModels(health);
+    // Only the MISSING ones are downloadable. Offering to fetch an incapable
+    // tag would be a button that cannot fix what it claims to.
     const missing = missingRequiredModels(health);
-    if (missing.length > 0) {
+    // A switched-off capability is stated rather than left silent (ADR-0010),
+    // and it is computed OUT here on purpose: said only when everything else is
+    // well, the notice would vanish on first run — the one moment the user is
+    // deciding what to download, and the moment they most need to know that
+    // alt-text suggestion will not be there when the download finishes.
+    const disabledText = disabledCapabilityText(health);
+    const withDisabled = (line: string): string =>
+      [line, disabledText].filter((s) => s !== '').join(' · ');
+    if (unsatisfied.length > 0) {
       state.health = 'degraded';
       // Don't surface a bare CLI command — the app downloads the models itself
       // via the bundled Ollama (see downloadModel(), which pulls the whole
       // required set); the affordance is rendered next to the status. Skip while
       // a download is already in flight.
       if (!state.modelPull) state.modelsMissing = missing;
-      state.healthText = missingModelsText(missing);
+      state.healthText = withDisabled(unsatisfiedModelsText(unsatisfied));
     } else {
       state.modelsMissing = [];
       state.healthText = ok
-        ? `Local runtime ready${health.model ? ` - ${health.model.tag}` : ''}`
-        : `Local runtime: llm ${health.llm ? 'up' : 'down'}, ingest ${health.ingest ? 'up' : 'down'}`;
+        ? withDisabled(`Local runtime ready${health.model ? ` - ${health.model.tag}` : ''}`)
+        : withDisabled(`Local runtime: llm ${health.llm ? 'up' : 'down'}, ingest ${health.ingest ? 'up' : 'down'}`);
     }
     // Docling document models are independent of the LLM: missing them only
     // blocks PDF/scanned-image conversion (office/web docs still work), so this

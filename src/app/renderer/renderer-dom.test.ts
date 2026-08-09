@@ -106,7 +106,7 @@ const byTestId = (node: FakeEl, id: string): FakeEl | undefined =>
 const progressBars = (node: FakeEl): FakeEl[] =>
   descendants(node).filter((e) => e.attrs.role === 'progressbar');
 
-const missingModel = (tag: string) => ({ tag, available: false, installCommand: `ollama pull ${tag}` });
+const missingModel = (tag: string) => ({ tag, status: 'missing' as const, recovery: `ollama pull ${tag}` });
 
 const healthView = (over: Partial<Parameters<typeof healthStatus>[0]> = {}): Parameters<typeof healthStatus>[0] => ({
   health: 'degraded',

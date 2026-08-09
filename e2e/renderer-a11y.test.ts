@@ -122,7 +122,7 @@ const STUB_SCRIPT = `
       return { courseId, name: 'Stub course', importedAt: new Date().toISOString(), pages: 1, assignments: 0, files: 0, warnings: [] };
     },
     async health() {
-      return { llm: true, ingest: true, model: { tag: 'stub-model', available: true, installCommand: 'noop' }, ingestModel: { available: true } };
+      return { llm: true, ingest: true, model: { tag: 'stub-model', status: 'ready', recovery: '' }, ingestModel: { available: true } };
     },
     async pullModel(onProgress) { onProgress && onProgress({ status: 'success' }); },
     async pullIngestModel(onProgress) { onProgress && onProgress({ status: 'success' }); },
