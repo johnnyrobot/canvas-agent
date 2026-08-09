@@ -14,10 +14,9 @@ import {
   type PullProgress,
   type RequiredModelRole,
   type RequiredModelStatus,
-  REQUIRED_MODEL_ROLES,
-  ROLE_CAPABILITIES,
+  REQUIRED_ROLES,
 } from './types.js';
-import { loadLLMConfig, requiredModelTags, roleIsRequired, type Env } from './config.js';
+import { loadLLMConfig, reportedModels, requiredModelTags, type Env } from './config.js';
 import { OllamaClient, OllamaError, type FetchLike } from './client.js';
 import { OllamaProcess, type SidecarLogger } from './process.js';
 import { Mutex } from './mutex.js';
@@ -106,9 +105,8 @@ export class OllamaSidecar {
     // as everything missing — never as ready.
     const installed = await this.client.localModelTags().catch(() => new Set<string>());
     const models: RequiredModelStatus[] = await Promise.all(
-      REQUIRED_MODEL_ROLES.map(async (role) => {
-        const tag = this.config.models[role];
-        if (!roleIsRequired(this.config, role)) return { role, tag, status: 'disabled' as const };
+      reportedModels(this.config).map(async ({ role, tag, required }) => {
+        if (!required) return { role, tag, status: 'disabled' as const };
         if (!installed.has(tag)) return { role, tag, status: 'missing' as const };
         return { role, tag, status: await this.capabilityStatus(role, tag) };
       }),
@@ -133,7 +131,7 @@ export class OllamaSidecar {
     } catch {
       return 'ready';
     }
-    return ROLE_CAPABILITIES[role].every((c) => capabilities.includes(c)) ? 'ready' : 'incapable';
+    return REQUIRED_ROLES[role].capabilities.every((c) => capabilities.includes(c)) ? 'ready' : 'incapable';
   }
 
   /**

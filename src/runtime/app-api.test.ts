@@ -395,6 +395,26 @@ test('health() keeps an incapable tag out of the OTHER role’s pull command', a
   assert.equal(health.model?.recovery, 'ollama pull text:1b');
 });
 
+test('health() reports a disabled role as DISABLED even when the probe answers only in aggregate', async () => {
+  // The narrowed required set must not read as a MISSING vision model on the
+  // fallback path. An aggregate-only runtime (an injected double, an externally
+  // managed daemon) has no per-role answer, and synthesizing one from the
+  // narrowed set invents `{ tag: 'unknown', status: 'missing' }` — degrading the
+  // runtime and offering a download for a tag of that literal name, which
+  // inverts the decision exactly (ADR-0010).
+  const runner = new ScriptedRunner([]);
+  const view = api(runner, {
+    llmEnv: { MODEL_TEXT: 'text:1b', MODEL_VISION: 'vision:2b', LLM_VISION_ENABLED: 'false' },
+    // No `modelStatus` at all: the coarsest runtime shape.
+    llm: { describeImage: async () => text('x'), isHealthy: async () => true },
+  });
+  const health = await view.health();
+
+  assert.equal(health.visionModel?.status, 'disabled', 'a switched-off role is not a missing one');
+  assert.equal(health.visionModel?.tag, 'vision:2b', 'and it is not a tag named "unknown"');
+  assert.equal(health.model?.status, 'ready');
+});
+
 test('health() reports a DISABLED capability as disabled, with nothing to recover (ADR-0010)', async () => {
   const runner = new ScriptedRunner([]);
   const view = api(runner, {

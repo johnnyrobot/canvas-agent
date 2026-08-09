@@ -4,6 +4,7 @@
  */
 import {
   REQUIRED_MODEL_ROLES,
+  REQUIRED_ROLES,
   type LLMConfig,
   type ModelRole,
   type RequiredModelRole,
@@ -90,24 +91,14 @@ export function uniqueModels(config: LLMConfig): string[] {
 }
 
 /**
- * Whether each required role is required *of this configuration* (ADR-0010).
+ * Whether this configuration requires `role` at all (ADR-0010).
  *
- * The required set is derived, not fixed. A capability the operator switched off
- * leaves it: `describeImage` throws before touching a model when vision is
- * disabled, so provisioning it would download ~3.3 GB to gate readiness on
- * weights nothing will ever call.
- *
- * A predicate per role rather than a special case inside the caller, so a third
- * required role has one obvious place to say when it applies.
+ * The required set is derived, not fixed: a capability the operator switched off
+ * leaves it. The predicate lives with the rest of the role's definition in
+ * `REQUIRED_ROLES`, so a new role cannot be added without answering this.
  */
-const ROLE_APPLIES: Readonly<Record<RequiredModelRole, (config: LLMConfig) => boolean>> = {
-  text: () => true,
-  vision: (config) => config.visionEnabled,
-};
-
-/** Whether this configuration requires `role` at all (ADR-0010). */
 export function roleIsRequired(config: LLMConfig, role: RequiredModelRole): boolean {
-  return ROLE_APPLIES[role](config);
+  return REQUIRED_ROLES[role].applies(config);
 }
 
 /**
@@ -125,9 +116,28 @@ export function roleIsRequired(config: LLMConfig, role: RequiredModelRole): bool
  * capability cost a multi-gigabyte download.
  */
 export function requiredModels(config: LLMConfig): Array<{ role: RequiredModelRole; tag: string }> {
-  return REQUIRED_MODEL_ROLES.filter((role) => roleIsRequired(config, role)).map((role) => ({
+  return reportedModels(config)
+    .filter((m) => m.required)
+    .map(({ role, tag }) => ({ role, tag }));
+}
+
+/**
+ * Every required ROLE with its tag and whether this configuration requires it —
+ * the *reporting* list, as against `requiredModels`' *requirement* list.
+ *
+ * Always one entry per role, including roles this configuration does not
+ * require. A role dropped from the report reads to the UI as "nothing missing"
+ * (ADR-0010), and a caller that reconstructs the roll-call from the narrowed set
+ * cannot tell a switched-off role from an absent one — it invents a missing
+ * model with no tag to name.
+ */
+export function reportedModels(
+  config: LLMConfig,
+): Array<{ role: RequiredModelRole; tag: string; required: boolean }> {
+  return REQUIRED_MODEL_ROLES.map((role) => ({
     role,
     tag: config.models[role],
+    required: roleIsRequired(config, role),
   }));
 }
 

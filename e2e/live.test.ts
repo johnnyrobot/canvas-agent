@@ -130,6 +130,19 @@ test('LLM live: the shipped vision default can actually SEE (#33)', { skip: olla
   }
 });
 
+test('LLM live: the SHIPPED defaults read ready under the capability probe (#38)', { skip: ollamaSkip }, async () => {
+  // The other half of the red-proof. A probe that fails everything would pass the
+  // incapable test below and be worthless — this is what says the new check
+  // still lets a correct installation through.
+  const status = await llm.modelStatus();
+  assert.deepEqual(
+    status.models.map((m) => m.status),
+    ['ready', 'ready'],
+    `both shipped defaults must satisfy their roles: ${JSON.stringify(status.models)}`,
+  );
+  assert.equal(status.ready, true);
+});
+
 test('LLM live: an installed but text-only vision override is NOT ready (#38)', { skip: ollamaSkip }, async () => {
   // THE RED-PROOF for ADR-0010, and the reason it lives here rather than beside
   // the fakes: a fake reports whatever it was told, so it can demonstrate the

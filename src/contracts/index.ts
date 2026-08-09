@@ -471,9 +471,13 @@ export interface TurnView {
  *
  * Declared here as well as in `src/llm/types.ts` because this module imports
  * nothing — it is the boundary, and implementations reach it by dependency
- * injection. The two cannot drift silently: the runtime assigns one to the other
- * when it builds `ModelHealth`, so a member added on one side and not the other
- * is a compile error at that seam.
+ * injection.
+ *
+ * Drift is caught in ONE direction only, and it is worth knowing which. The
+ * runtime assigns the `src/llm` union into this one when it builds `ModelHealth`,
+ * so a member added THERE and not here fails to compile at that seam. A member
+ * added HERE and not there stays assignable and compiles clean — it would simply
+ * be a state the sidecar can never produce. Add to `src/llm/types.ts` first.
  */
 export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled';
 

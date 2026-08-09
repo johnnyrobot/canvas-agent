@@ -61,21 +61,50 @@ export interface ModelSetStatus {
 }
 
 /**
- * What each required ROLE demands of whatever tag fills it, as Ollama's
- * `/api/show` names capabilities (ADR-0010).
+ * Everything the app knows about a required ROLE, in ONE table (ADR-0010).
  *
- * Declared per role rather than per tag on purpose. A per-tag allowlist would
- * need editing every time `scripts/model-eval/` promotes a different vision
- * model — and a forgotten edit would be invisible, because the new tag would
- * simply go unchecked. Per role also catches what no allowlist can: an
- * operator's override pointing at a model that cannot do the job.
+ * Deliberately one record rather than a table per concern. Each field below
+ * started life as its own map in its own module, and that shape meant adding a
+ * third required role took three edits in three files — any of which could be
+ * silently omitted, because a missing entry is only a compile error if something
+ * indexes the table by role. Keeping them together makes `Record<RequiredModelRole, …>`
+ * do the enforcing: a new role fails to compile until every field is answered.
  *
- * `tools` on the text role is the half that is easy to miss: the orchestrator is
- * a tool-calling loop, so a text model without it fails deep inside a turn.
+ * `capabilities` — what the role demands of whatever tag fills it, named as
+ * Ollama's `/api/show` names them. Declared per role rather than per tag on
+ * purpose: a per-tag allowlist would need editing every time
+ * `scripts/model-eval/` promotes a different vision model, and a forgotten edit
+ * would go unnoticed because the new tag would simply not be checked. Per role
+ * also catches what no allowlist can — an operator override that cannot do the
+ * job. `tools` on the text role is the easy one to miss: the orchestrator is a
+ * tool-calling loop, so a text model without it fails deep inside a turn.
+ *
+ * `envVar` — the knob an operator turns to change this role's tag. It is what
+ * the `incapable` recovery has to name, since re-pulling cannot help.
+ *
+ * `applies` — whether a given configuration requires this role at all. The
+ * required set is derived, not fixed: a capability switched off leaves it.
  */
-export const ROLE_CAPABILITIES: Readonly<Record<RequiredModelRole, readonly string[]>> = {
-  text: ['completion', 'tools'],
-  vision: ['completion', 'vision'],
+export interface RequiredRoleSpec {
+  readonly capabilities: readonly string[];
+  readonly envVar: string;
+  readonly applies: (config: LLMConfig) => boolean;
+}
+
+export const REQUIRED_ROLES: Readonly<Record<RequiredModelRole, RequiredRoleSpec>> = {
+  text: {
+    capabilities: ['completion', 'tools'],
+    envVar: 'MODEL_TEXT',
+    applies: () => true,
+  },
+  vision: {
+    capabilities: ['completion', 'vision'],
+    envVar: 'MODEL_VISION',
+    // `describeImage` throws before touching a model when vision is disabled, so
+    // provisioning it would download gigabytes to gate readiness on weights
+    // nothing will ever call.
+    applies: (config) => config.visionEnabled,
+  },
 };
 
 /** A piece of a multimodal message. */

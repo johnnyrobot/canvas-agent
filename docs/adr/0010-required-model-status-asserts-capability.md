@@ -41,6 +41,15 @@ every implementer of the capability contract, which is the growth law of
 `AppApi` working in our favour rather than against us. The change stays additive
 to `RuntimeHealth` itself, so no channel and no bridge handler move.
 
+That argument had a hole when it was written, and closing it is part of this
+decision. The compiler walked every implementer **it was pointed at** — and
+`tsconfig.json` included only `src/**/*.ts`, while `npm test` runs the suites in
+`e2e/` too. Those suites carry their own `AppApi` doubles, so one was left on the
+old shape, feeding the renderer a payload with no `status` that read as ready by
+accident. A `tsconfig.e2e.json` now type-checks that tree with the same
+strictness, wired into `npm run verify`. A coercion argument is only as good as
+the set of files the coercion actually reaches.
+
 `installCommand` is renamed to `recovery` in the same step. For an incapable
 model the string is not an install command and must not be one — the tag is
 already installed, and telling the user to pull it again sends them round a loop

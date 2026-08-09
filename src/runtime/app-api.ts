@@ -21,7 +21,7 @@ import type { PageReader } from '../canvas/index.js';
 import { createCatalogClient } from '../catalog/index.js';
 import type { CatalogClient } from '../catalog/index.js';
 import { resolveTheme as defaultResolveTheme } from '../theme/index.js';
-import { createOllamaSidecar, requiredModels } from '../llm/index.js';
+import { createOllamaSidecar, reportedModels } from '../llm/index.js';
 import type {
   ChatMessage,
   ModelStatusState,
@@ -29,7 +29,7 @@ import type {
   RequiredModelRole,
   RequiredModelStatus,
 } from '../llm/index.js';
-import { ROLE_CAPABILITIES } from '../llm/index.js';
+import { REQUIRED_ROLES } from '../llm/index.js';
 import { noopActivityTracker, type ActivityTracker } from './activity.js';
 import type { LazyDatabase } from './database.js';
 import { createDoclingSidecar } from '../ingest/index.js';
@@ -459,7 +459,7 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
   // The required roles + the tags they resolve to (ADR-0009), used when the LLM
   // runtime can't break its answer out per role. The required set is defined in
   // `src/llm/config.ts`; this must not grow a second definition of it.
-  const configuredRequiredModels = requiredModels(sidecar().config);
+  const configuredRequiredModels = reportedModels(sidecar().config);
 
   // Resolve the saved Canvas token for `baseUrl` from the OS Keychain and build the
   // full config the read-only canvas readers expect. The token never reaches (or
@@ -884,7 +884,10 @@ async function requiredModelHealth(
     probed.find((m) => m.role === role) ??
     // A probe that omitted a required role tells us nothing about it; report the
     // configured tag as missing rather than dropping it or assuming it is there.
-    { role, tag: configured.find((m) => m.role === role)?.tag ?? 'unknown', status: 'missing' };
+    (() => {
+      const cfg = configured.find((m) => m.role === role);
+      return { role, tag: cfg?.tag ?? 'unknown', status: cfg?.required === false ? 'disabled' : 'missing' };
+    })();
   const resolved = { text: byRole('text'), vision: byRole('vision') };
 
   // The manual-recovery path: one command covering EVERY missing required model,
@@ -905,7 +908,6 @@ async function requiredModelHealth(
         .map((m) => m.tag),
     ),
   ];
-  const pulls = (tags: string[]): string => tags.map((t) => `ollama pull ${t}`).join(' && ');
   const health = ({ role, tag, status }: RequiredModelStatus): ModelHealth => ({
     tag,
     status,
@@ -937,8 +939,8 @@ function recoveryFor(
     case 'incapable':
       return (
         `${tag} is installed but cannot do the ${role} role's job ` +
-        `(needs: ${ROLE_CAPABILITIES[role].join(', ')}). ` +
-        `Set ${ROLE_ENV_VAR[role]} to a model that can — downloading ${tag} again will not help.`
+        `(needs: ${REQUIRED_ROLES[role].capabilities.join(', ')}). ` +
+        `Set ${REQUIRED_ROLES[role].envVar} to a model that can — downloading ${tag} again will not help.`
       );
     case 'ready':
     case 'disabled':
@@ -946,18 +948,13 @@ function recoveryFor(
   }
 }
 
-/** The env var an operator sets to change each required role's tag. */
-const ROLE_ENV_VAR: Readonly<Record<RequiredModelRole, string>> = {
-  text: 'MODEL_TEXT',
-  vision: 'MODEL_VISION',
-};
 
 /**
  * The required roles paired with their configured tags — what `requiredModels()`
  * returns. Named off `RequiredModelRole` rather than spelled out, so adding a
  * third required role in `src/llm/config.ts` surfaces here instead of compiling.
  */
-type ConfiguredRequiredModels = ReadonlyArray<{ role: RequiredModelRole; tag: string }>;
+type ConfiguredRequiredModels = ReadonlyArray<{ role: RequiredModelRole; tag: string; required: boolean }>;
 
 /** Per-role presence of the required models, however coarsely the runtime can answer. */
 async function probeRequiredModels(
@@ -966,8 +963,14 @@ async function probeRequiredModels(
 ): Promise<RequiredModelStatus[]> {
   // A runtime that can only answer in aggregate knows nothing about capability,
   // so its coarse answer maps to the two states presence alone can justify.
+  // A role this configuration does not require is `disabled` whatever the daemon
+  // says — reachability cannot make a switched-off capability missing.
   const spread = (ok: boolean) =>
-    configured.map((m) => ({ ...m, status: (ok ? 'ready' : 'missing') as ModelStatusState }));
+    configured.map(({ role, tag, required }) => ({
+      role,
+      tag,
+      status: (!required ? 'disabled' : ok ? 'ready' : 'missing') as ModelStatusState,
+    }));
   if (typeof llm.modelStatus !== 'function') {
     return spread(await reachable(() => llm.isHealthy()));
   }

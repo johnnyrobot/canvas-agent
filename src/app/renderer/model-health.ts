@@ -95,8 +95,13 @@ export function unsatisfiedModelsText(unsatisfied: readonly ModelHealth[]): stri
   const incapable = unsatisfied.filter((m) => m.status === 'incapable');
   const parts: string[] = [];
   if (missing.length > 0) parts.push(missingModelsText(missing));
-  if (incapable.length > 0) {
-    parts.push(`${plural(incapable, 'Model')} cannot do the job (${tagList(incapable)})`);
+  // The incapable entries carry their own `recovery`, and this line is the ONLY
+  // place it can reach a person: a missing model gets the download affordance,
+  // an incapable one has no affordance at all, because no button can fix it.
+  // Dropping the recovery here would leave the user told that something is
+  // broken and given no way to act on it.
+  for (const m of incapable) {
+    parts.push(m.recovery !== '' ? m.recovery : `${m.tag} cannot do the job`);
   }
   return parts.join('; ');
 }

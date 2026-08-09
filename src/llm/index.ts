@@ -21,7 +21,7 @@ export {
   uniqueModels,
   requiredModels,
   requiredModelTags,
-  roleIsRequired,
+  reportedModels,
 } from './config.js';
 export { resolveModel, buildChatRequest, toNativeMessage, toRawBase64 } from './payload.js';
 export { Mutex } from './mutex.js';
@@ -42,4 +42,4 @@ export type {
   RequiredModelStatus,
   ModelSetStatus,
 } from './types.js';
-export { MODEL_ROLES, REQUIRED_MODEL_ROLES, ROLE_CAPABILITIES } from './types.js';
+export { MODEL_ROLES, REQUIRED_MODEL_ROLES, REQUIRED_ROLES } from './types.js';

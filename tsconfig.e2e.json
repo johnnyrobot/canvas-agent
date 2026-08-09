@@ -1,0 +1,21 @@
+{
+  // Type-checks the end-to-end suites under `e2e/` with the same strictness as
+  // `src/`, WITHOUT emitting — the sibling of `tsconfig.scripts.json`, and for
+  // the same reason: `e2e/` is outside the default `include`, so nothing was
+  // checking it.
+  //
+  // The gap this closes is not hypothetical. The `AppApi` doubles in these
+  // suites implement the same contract as the five in `src/`, but only those
+  // five were ever compiled — so #38 could replace `ModelHealth.available` with
+  // a status union, watch `tsc` march it through every implementer it could
+  // see, and leave a double here on the old shape. It fed the renderer a payload
+  // with no `status`, which read as ready by accident.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "allowImportingTsExtensions": true
+  },
+  "include": ["e2e/**/*.ts", "src/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

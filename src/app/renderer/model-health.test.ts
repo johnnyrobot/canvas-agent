@@ -16,8 +16,21 @@ import {
 
 const model = (tag: string, available: boolean) =>
   ({ tag, status: available ? ('ready' as const) : ('missing' as const), recovery: `ollama pull ${tag}` });
-/** Installed, and unable to do its role's job — a download fixes nothing (ADR-0010). */
-const incapable = (tag: string) => ({ tag, status: 'incapable' as const, recovery: `Set MODEL_VISION to a model that can see` });
+/**
+ * Installed, and unable to do its role's job — a download fixes nothing (ADR-0010).
+ *
+ * `recovery` mirrors the SHAPE the runtime actually builds (`recoveryFor` in
+ * `src/runtime/app-api.ts`): it names the tag, the capability, and the env var.
+ * A shorter stand-in would let this suite pass while the real status line lost
+ * the tag it is supposed to identify.
+ */
+const incapable = (tag: string) => ({
+  tag,
+  status: 'incapable' as const,
+  recovery:
+    `${tag} is installed but cannot do the vision role's job (needs: completion, vision). ` +
+    `Set MODEL_VISION to a model that can — downloading ${tag} again will not help.`,
+});
 /** Switched off by the operator, so the role left the required set (ADR-0010). */
 const disabled = (tag: string) => ({ tag, status: 'disabled' as const, recovery: '' });
 
@@ -131,6 +144,19 @@ test('the status line for an incapable model says what is wrong, not that it is 
   const text = unsatisfiedModelsText(unsatisfiedRequiredModels(health));
   assert.match(text, /text-only:8b/);
   assert.doesNotMatch(text, /not installed/i, 'it IS installed — saying otherwise sends the user to re-download it');
+});
+
+test('the incapable status line carries the RECOVERY, because nothing else will', () => {
+  // A missing model gets a download button. An incapable one has no affordance at
+  // all, so if its recovery never reaches the status line the user is told the
+  // app is broken and given no way to act — the contract would be satisfied and
+  // the person still stuck.
+  const health: RuntimeHealth = { llm: true, ingest: true, visionModel: incapable('text-only:8b') };
+  assert.match(
+    unsatisfiedModelsText(unsatisfiedRequiredModels(health)),
+    /MODEL_VISION/,
+    'the one knob that fixes this must appear somewhere a user can read it',
+  );
 });
 
 test('missing and incapable are both unsatisfied, and the download offers only the missing one', () => {
