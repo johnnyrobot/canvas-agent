@@ -69,6 +69,40 @@ export type RuntimeEnv = Record<string, string | undefined>;
  */
 export const RUNTIME_DEFAULT_MODEL = 'granite4.1:8b';
 
+/**
+ * The on-device VISION model the runtime selects by default — the second half of
+ * the required set (ADR-0009), and the reason alt-text *suggestion* works at all.
+ *
+ * This role used to inherit `MODEL_TEXT`, which was harmless only while the text
+ * default happened to be multimodal. `granite4.1:8b` is not: `ollama show`
+ * reports `completion, tools` and no `vision`, so a real `describeImage` call
+ * against it fails outright with `Ollama /api/chat returned 400`. Pointing the
+ * role at a model that cannot see is not a degradation to tolerate — it is a
+ * broken flagship path, and giving vision its own default is what closes it.
+ *
+ * The tag is PROVISIONAL and deliberately nothing but a constant: which vision
+ * model ships is decided by `scripts/model-eval/` against its alt-text gate, and
+ * that decision blocks the release rather than this line. Changing it here is the
+ * whole change — no logic reads its value.
+ *
+ * Three things were verified before declaring it, and all three must be redone
+ * for any replacement:
+ *   1. It RESOLVES and pulls. The obvious-looking bare library tag
+ *      `granite-vision-4.1-4b` 404s on registry.ollama.ai and cannot be pulled at
+ *      all — shipping it would fail first-run provisioning and print an
+ *      un-runnable `ollama pull` recovery command. The `hf.co/…` form below is
+ *      the one that resolves.
+ *   2. It reports `vision` in `ollama show` capabilities. Pulling successfully is
+ *      not the bar — the text default pulls fine and still cannot see. This check
+ *      is what would have caught the regression above.
+ *   3. Its licence is permissive, read from the model card, not from a summary:
+ *      `license: apache-2.0`, ungated (<https://huggingface.co/ibm-granite/granite-vision-4.1-4b-GGUF>).
+ *
+ * ~3.3 GB, so the required set totals ~8.6 GB — the figure first run states
+ * before the user commits (`MODEL_DOWNLOAD_SIZES_GB`).
+ */
+export const RUNTIME_DEFAULT_VISION_MODEL = 'hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M';
+
 /** The only licences a shipped default may carry (ADR-0007). */
 export const PERMISSIVE_LICENCES = ['Apache-2.0', 'MIT'] as const;
 export type PermissiveLicence = (typeof PERMISSIVE_LICENCES)[number];
@@ -87,12 +121,31 @@ export type PermissiveLicence = (typeof PERMISSIVE_LICENCES)[number];
  */
 export const SHIPPED_MODEL_LICENCES: Readonly<Record<string, PermissiveLicence>> = {
   'granite4.1:8b': 'Apache-2.0',
+  [RUNTIME_DEFAULT_VISION_MODEL]: 'Apache-2.0',
 };
 
-/** Build an env that points the LLM sidecar at an installed model (override-safe). */
+/**
+ * Build an env that points the LLM sidecar at the shipping defaults
+ * (override-safe): one entry per role that has a default of its own.
+ *
+ * Both required roles are set here rather than left to `src/llm/config.ts`'s
+ * inheritance, per ADR-0007 — shipping defaults live in the runtime, in one
+ * place the guard tests can assert against. Setting `MODEL_VISION` explicitly is
+ * also what severs the inheritance: with only `MODEL_TEXT` set, an operator
+ * overriding the text model would silently move the vision role onto a tag that
+ * may not be multimodal at all.
+ *
+ * An explicit override always wins, for each role independently; empty means
+ * unset, matching how `src/llm/config.ts` reads env.
+ */
 export function runtimeLlmEnv(base: RuntimeEnv = process.env): RuntimeEnv {
-  const text = base.MODEL_TEXT && base.MODEL_TEXT !== '' ? base.MODEL_TEXT : RUNTIME_DEFAULT_MODEL;
-  return { ...base, MODEL_TEXT: text };
+  const pick = (value: string | undefined, fallback: string): string =>
+    value !== undefined && value !== '' ? value : fallback;
+  return {
+    ...base,
+    MODEL_TEXT: pick(base.MODEL_TEXT, RUNTIME_DEFAULT_MODEL),
+    MODEL_VISION: pick(base.MODEL_VISION, RUNTIME_DEFAULT_VISION_MODEL),
+  };
 }
 
 export interface EngineDepsOptions {

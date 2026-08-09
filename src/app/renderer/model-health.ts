@@ -25,21 +25,26 @@ type RequiredModelHealth = Pick<RuntimeHealth, 'model' | 'visionModel'>;
  * table fails the guard in `src/runtime/deps.test.ts` — the pair of that table's
  * licence guard, and for the same reason: a model tag is only a string.
  *
- * Sizes are the Ollama library's published download sizes, not the on-disk
- * footprint after unpacking. `RUNTIME_DEFAULT_MODEL` in `src/runtime/deps.ts`
- * argues the same figure in prose (it is the sizing case for 16 GB Macs) — the
- * two move together, and the guard test is what forces a new default through here.
+ * Sizes are the published download sizes, not the on-disk footprint after
+ * unpacking. `RUNTIME_DEFAULT_MODEL` in `src/runtime/deps.ts` argues the same
+ * figures in prose (they are the sizing case for 16 GB Macs) — the two move
+ * together, and the guard test is what forces a new default through here.
+ *
+ * The two entries are the required set of ADR-0009, text then vision: ~8.6 GB
+ * total, which is the number first run states.
  */
 export const MODEL_DOWNLOAD_SIZES_GB: Readonly<Record<string, number>> = {
   'granite4.1:8b': 5.3,
+  'hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M': 3.3,
 };
 
 /**
  * The required models the runtime reports as missing — in role order (text
  * first), deduplicated by tag.
  *
- * Deduplication is the point at today's defaults, where `vision` inherits the
- * text tag: two required roles, but ONE download to offer and one tag to name.
+ * Deduplication is for the configuration that collapses the two roles onto one
+ * multimodal tag — not the shipping shape since #33, but there it is two
+ * required roles with ONE download to offer and one tag to name.
  * A required model the runtime does not report at all is NOT counted as missing;
  * absent means "cannot report", which the caller already sees as an unreachable
  * sidecar.
@@ -91,9 +96,9 @@ export function requiredTagsFromHealth(health: RequiredModelHealth): string[] {
  * The size is stated up front because the wait is the thing users misjudge: on a
  * slow connection it is the difference between deciding to wait and force-quitting.
  *
- * `sizes` is a parameter only so the two-model total is testable today: the
- * second required tag is not chosen until #33, and the shipped table has one
- * entry until then. Callers pass nothing.
+ * `sizes` is a parameter so the arithmetic can be tested against a fixed table
+ * — including the partial and empty cases, which the shipped table (where every
+ * default declares a size, by guard test) cannot express. Callers pass nothing.
  */
 export function downloadModelAffordance(
   missing: readonly ModelHealth[],

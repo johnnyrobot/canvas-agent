@@ -1,8 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import type { AllowlistResult, ContrastResult, IssueSet, KbResult, TemplateResult, ThemeResult } from '../contracts/index.js';
 import type { Auditor } from '../contracts/index.js';
-import { createEngineDeps, runtimeLlmEnv, SHIPPED_MODEL_LICENCES, PERMISSIVE_LICENCES } from './deps.js';
+import {
+  createEngineDeps,
+  runtimeLlmEnv,
+  RUNTIME_DEFAULT_VISION_MODEL,
+  SHIPPED_MODEL_LICENCES,
+  PERMISSIVE_LICENCES,
+} from './deps.js';
 import { loadLLMConfig, requiredModelTags } from '../llm/config.js';
 // The renderer's DOM-free first-run module; imported here only so the shipped
 // defaults and their declared download sizes are guarded in one place.
@@ -134,14 +141,50 @@ test('runtimeLlmEnv injects the shipping text default, and an explicit override 
   assert.equal(runtimeLlmEnv({ MODEL_TEXT: '' }).MODEL_TEXT, 'granite4.1:8b', 'empty means unset');
 });
 
-test('the shipping defaults still provision ONE download (vision inherits text)', () => {
-  // The required-set machinery (#30) lands before anything depends on it, so
-  // production behaviour must be unchanged: two required roles, one distinct
-  // tag, one pull. This is a deliberate tripwire — when #33 gives vision its
-  // own default, this assertion becomes the two shipped tags, and having to
-  // change it here is the point at which someone confirms the second download
-  // is intended.
-  assert.deepEqual(requiredModelTags(loadLLMConfig(runtimeLlmEnv({}))), ['granite4.1:8b']);
+test('runtimeLlmEnv injects the shipping vision default, and an explicit override wins (#33)', () => {
+  assert.equal(
+    runtimeLlmEnv({}).MODEL_VISION,
+    RUNTIME_DEFAULT_VISION_MODEL,
+    'the vision role ships its own default',
+  );
+  assert.equal(
+    runtimeLlmEnv({ MODEL_VISION: 'my-own-vision:tag' }).MODEL_VISION,
+    'my-own-vision:tag',
+    'an operator override is never overridden',
+  );
+  assert.equal(
+    runtimeLlmEnv({ MODEL_VISION: '' }).MODEL_VISION,
+    RUNTIME_DEFAULT_VISION_MODEL,
+    'empty means unset',
+  );
+  // The override must not be undone by MODEL_TEXT's inheritance path: setting
+  // only MODEL_TEXT used to change the vision tag too, which is the coupling
+  // this ticket removes.
+  assert.equal(
+    runtimeLlmEnv({ MODEL_TEXT: 'my-own:tag' }).MODEL_VISION,
+    RUNTIME_DEFAULT_VISION_MODEL,
+    'a text override does not drag the vision role with it',
+  );
+});
+
+test('the vision role no longer inherits the text model (#33, ADR-0009)', () => {
+  // The regression this ticket closes: `granite4.1:8b` reports `completion,
+  // tools` and NO vision, so while vision inherited it a real describeImage
+  // call 400d. Asserting on the resolved CONFIG, not on the constants, is what
+  // makes this about behaviour rather than about two strings being unequal.
+  const models = loadLLMConfig(runtimeLlmEnv({})).models;
+  assert.equal(models.vision, RUNTIME_DEFAULT_VISION_MODEL);
+  assert.notEqual(models.vision, models.text, 'vision must resolve to a multimodal tag of its own');
+});
+
+test('the shipping defaults now provision TWO downloads (#33)', () => {
+  // The tripwire left by #30, now tripped on purpose: the required set is two
+  // roles and — since vision stopped inheriting text — two distinct tags, so
+  // first run pulls twice. Order is role order, text first.
+  assert.deepEqual(requiredModelTags(loadLLMConfig(runtimeLlmEnv({}))), [
+    'granite4.1:8b',
+    RUNTIME_DEFAULT_VISION_MODEL,
+  ]);
 });
 
 test('every shipped model default is declared and permissively licensed (ADR-0007)', () => {
@@ -165,6 +208,35 @@ test('every shipped model default is declared and permissively licensed (ADR-000
       (PERMISSIVE_LICENCES as readonly string[]).includes(licence),
       `${tag} is licensed ${licence}, which is not permissive — see ADR-0007`,
     );
+  }
+});
+
+test('the runtime-pulled notices name every shipped default, with its licence and source (#33)', async () => {
+  // Third in the family of guards above, and undeclarable in the same way. These
+  // weights are pulled by Ollama at runtime and never redistributed, so the
+  // notices are the only place a district reviewing the app can see WHAT it
+  // downloads and under what terms — and nothing in the code fails when a new
+  // default is added and that section is not. Each entry is checked against the
+  // licence THIS repo declares, so a copy-paste that keeps the previous vendor's
+  // licence beside a new tag fails rather than reads plausibly.
+  const notices = await readFile(new URL('../../THIRD-PARTY-NOTICES.md', import.meta.url), 'utf8');
+  const heading = '## Model weights used at runtime (NOT redistributed)';
+  const start = notices.indexOf(heading);
+  assert.ok(start >= 0, 'the runtime-pulled section must exist in THIRD-PARTY-NOTICES.md');
+  const rest = notices.slice(start + heading.length);
+  const end = rest.indexOf('\n## ');
+  const section = end < 0 ? rest : rest.slice(0, end);
+
+  for (const [tag, licence] of Object.entries(SHIPPED_MODEL_LICENCES)) {
+    // Per-entry, not per-section: both defaults are Apache-2.0 today, so a
+    // section-wide search for the licence string would pass on one entry.
+    const entry = section.split(/\n- /).find((e) => e.includes(`\`${tag}\``));
+    assert.ok(entry, `${tag} ships as a default but is not named in the runtime-pulled notices`);
+    assert.ok(
+      entry.includes(licence),
+      `the notices entry for ${tag} does not state its declared licence (${licence})`,
+    );
+    assert.ok(/https?:\/\//.test(entry), `the notices entry for ${tag} states no source URL`);
   }
 });
 

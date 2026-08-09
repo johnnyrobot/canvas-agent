@@ -52,7 +52,8 @@ test('requiredModelTags returns one tag per distinct required role', () => {
 });
 
 test('requiredModelTags dedups a tag shared by both required roles', () => {
-  // Today's defaults: vision inherits the text model, so this is ONE download.
+  // With MODEL_VISION unset the role inherits text — not the shipping shape
+  // since #33, but what any caller that omits it gets, and ONE download.
   const c = loadLLMConfig({ MODEL_TEXT: TEXT });
   assert.deepEqual(requiredModelTags(c), [TEXT]);
 });

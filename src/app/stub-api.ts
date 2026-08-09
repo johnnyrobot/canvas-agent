@@ -37,6 +37,19 @@ import type {
   TurnView,
 } from '../contracts/index.js';
 
+/**
+ * The two required model tags (ADR-0009) as the real runtime reports them, text
+ * first. Copied rather than imported: per the note above, the app-shell track
+ * depends only on the frozen contract types, never on runtime code — so these
+ * mirror `RUNTIME_DEFAULT_MODEL` / `RUNTIME_DEFAULT_VISION_MODEL` in
+ * `src/runtime/deps.ts` and are demo data, not a second source of truth. Nothing
+ * is provisioned from here; drift costs the stub its realism and nothing else.
+ */
+const STUB_REQUIRED_TAGS = [
+  'granite4.1:8b',
+  'hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M',
+] as const;
+
 function passingGate(html: string, needsHumanReview: AuditIssue[] = []): GateResult {
   return {
     html,
@@ -226,23 +239,33 @@ export function createStubApi(): AppApi {
     },
 
     async health(): Promise<RuntimeHealth> {
-      // Both required models (ADR-0009) are reported. They share a tag here
-      // because at today's shipping defaults `vision` inherits the text model —
-      // the demo should mirror what the real runtime reports, not invent a
-      // second tag the app does not actually pull.
-      const model = { tag: 'granite4.1:8b', available: true, installCommand: 'ollama pull granite4.1:8b' };
+      // Both required models (ADR-0009) are reported, with the two DISTINCT tags
+      // the real runtime ships since #33 — the demo mirrors what the runtime
+      // reports rather than inventing a shape the app does not actually have.
+      //
+      // Both are available here, so each carries its OWN pull command: the real
+      // `installCommand` is built from what is MISSING, and falls back to the
+      // model's own tag when nothing is (`requiredModelHealth` in
+      // `src/runtime/app-api.ts`). A stub that handed back a two-pull recovery
+      // string while reporting everything present would be demoing a state the
+      // runtime never produces.
+      const model = (tag: string) => ({ tag, available: true, installCommand: `ollama pull ${tag}` });
       return {
         llm: true,
         ingest: true,
-        model,
-        visionModel: { ...model },
+        model: model(STUB_REQUIRED_TAGS[0]!),
+        visionModel: model(STUB_REQUIRED_TAGS[1]!),
         ingestModel: { available: true },
       };
     },
     async pullModel(onProgress): Promise<void> {
-      // The stub model is always "available"; demo a quick progress sweep anyway.
-      onProgress?.({ status: 'downloading', total: 100, completed: 100, percent: 100 });
-      onProgress?.({ status: 'success' });
+      // The stub models are always "available"; demo a quick progress sweep
+      // anyway — once per required tag, each line naming its model, because that
+      // is what the aggregate first-run bar folds together.
+      for (const tag of STUB_REQUIRED_TAGS) {
+        onProgress?.({ status: 'downloading', model: tag, total: 100, completed: 100, percent: 100 });
+        onProgress?.({ status: 'success', model: tag });
+      }
     },
     async pullIngestModel(onProgress): Promise<void> {
       onProgress?.({ status: 'downloading', model: 'granite_docling', total: 6, completed: 6, percent: 100 });

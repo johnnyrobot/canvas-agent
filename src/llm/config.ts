@@ -105,8 +105,11 @@ export function requiredModels(config: LLMConfig): Array<{ role: RequiredModelRo
  * The tags first-run provisioning must download: the required roles,
  * deduplicated and in role order.
  *
- * Deduplication is the point at today's defaults, where `vision` inherits the
- * text model — the required set is two roles but ONE download.
+ * At the shipping defaults this is two tags and two downloads (#33). The
+ * deduplication is for the configuration that still collapses them — both
+ * required roles pointed at one multimodal tag, which is what any caller that
+ * omits `MODEL_VISION` gets — where pulling the same gigabytes twice would be
+ * absurd.
  */
 export function requiredModelTags(config: LLMConfig): string[] {
   return [...new Set(requiredModels(config).map((m) => m.tag))];

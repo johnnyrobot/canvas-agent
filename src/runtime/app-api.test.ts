@@ -324,8 +324,9 @@ test('health() recovery command lists only what is MISSING, and lists a shared t
     'an already-installed model must not be re-pulled by the recovery command',
   );
 
-  // At today's defaults `vision` inherits the text tag: two required roles, ONE
-  // download. The recovery command must not tell the user to pull it twice.
+  // Both required roles pointed at one multimodal tag: two roles, ONE download.
+  // Not the shipping defaults since #33, but the recovery command must still not
+  // tell the user to pull the same tag twice.
   const sharedTag = api(runner, {
     llm: {
       describeImage: async () => text('x'),

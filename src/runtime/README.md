@@ -179,18 +179,36 @@ Docling `convertPath`).
 
 ## Model selection (no cloud; local Ollama)
 
-The product runs a single on-device model. **`src/llm` carries no default at
-all** — `MODEL_TEXT` is required there and `loadLLMConfig` throws without it
-(ADR-0007). Shipping defaults live in exactly one place, this module: the runtime
-never edits `src/llm`, it steers selection through the existing env-override
-mechanism (`src/llm/config.ts`): `runtimeLlmEnv()` sets `MODEL_TEXT` (which every
-role falls back to) to `RUNTIME_DEFAULT_MODEL` unless it is already set.
+The product runs **two** on-device models — the required set of ADR-0009, text
+and vision — and nothing else. **`src/llm` carries no default at all** —
+`MODEL_TEXT` is required there and `loadLLMConfig` throws without it (ADR-0007).
+Shipping defaults live in exactly one place, this module: the runtime never edits
+`src/llm`, it steers selection through the existing env-override mechanism
+(`src/llm/config.ts`): `runtimeLlmEnv()` sets `MODEL_TEXT` and `MODEL_VISION`,
+each falling back to its default only when unset.
 
-`RUNTIME_DEFAULT_MODEL` is **`granite4.1:8b`** (~5.3 GB): permissively licensed
-by rule (ADR-0007 — no default may oblige a user to accept a third-party
-acceptable-use policy), and sized for the machines the app ships to rather than
-the dev box. `SHIPPED_MODEL_LICENCES` declares each shipped tag's licence, and a
-guard test in `deps.test.ts` fails if a default is undeclared or non-permissive.
+| Role | `RUNTIME_DEFAULT_…` | Tag | Size |
+|---|---|---|---|
+| text | `_MODEL` | `granite4.1:8b` | ~5.3 GB |
+| vision | `_VISION_MODEL` | `hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M` | ~3.3 GB |
+
+Both are Apache-2.0: permissively licensed by rule (ADR-0007 — no default may
+oblige a user to accept a third-party acceptable-use policy), and sized for the
+machines the app ships to rather than the dev box (~8.6 GB total at first run).
+`SHIPPED_MODEL_LICENCES` declares each shipped tag's licence, and guard tests in
+`deps.test.ts` fail if a default is undeclared, non-permissive, missing a declared
+download size, or absent from the runtime-pulled section of
+`THIRD-PARTY-NOTICES.md`.
+
+**`vision` is a separate role because it has to be.** It used to inherit
+`MODEL_TEXT`, which was survivable only while the text default happened to be
+multimodal; `granite4.1:8b` is not (`ollama show` → `completion, tools`), so
+alt-text suggestion failed outright with `/api/chat returned 400`. Any
+replacement vision tag must be verified to (1) resolve and pull — the bare
+library tag `granite-vision-4.1-4b` 404s and cannot be pulled at all — (2) report
+`vision` in `ollama show` capabilities, and (3) carry a permissive licence read
+from its model card. The tag itself is provisional; `scripts/model-eval/` decides
+which vision model ships, against its alt-text gate.
 
 The quality trade is deliberate and bounded, and it is a property of
 general-purpose models rather than of any one tag: they are **pass-biased** on
@@ -205,6 +223,7 @@ suggestion — are the ones being measured by `scripts/model-eval/`.
 
 ```bash
 MODEL_TEXT=granite4.1:30b   # opt in to the heavy model (needs ~20 GB free RAM)
+MODEL_VISION=qwen3-vl:4b    # swap the vision model independently of the text one
 ```
 
 ## Testing

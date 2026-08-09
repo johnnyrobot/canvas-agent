@@ -8,7 +8,9 @@ const TEXT = 'test-text:1b';
 const config = loadLLMConfig({ MODEL_TEXT: TEXT });
 
 test('resolveModel maps role → tag and defaults to text', () => {
-  assert.equal(resolveModel('vision', config), TEXT); // vision inherits text until #33
+  // Role inheritance is this module's FALLBACK, not the shipping shape: the
+  // runtime always sets MODEL_VISION (#33), and this config deliberately does not.
+  assert.equal(resolveModel('vision', config), TEXT);
   assert.equal(resolveModel(undefined, config), config.models.text);
 });
 

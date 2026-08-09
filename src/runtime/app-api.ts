@@ -881,8 +881,8 @@ async function requiredModelHealth(
   const resolved = { text: byRole('text'), vision: byRole('vision') };
 
   // The manual-recovery path: one command covering EVERY missing required model,
-  // deduplicated (at today's defaults `vision` inherits the text tag, so a naive
-  // list would tell the user to pull the same 5 GB twice).
+  // deduplicated (both roles can be pointed at one multimodal tag, where a naive
+  // list would tell the user to pull the same gigabytes twice).
   //
   // Derived from the RESOLVED roles, not from the raw probe: a role the probe
   // omitted is reported missing above, and a command that then failed to name it
