@@ -69,7 +69,7 @@ test('health reports both sidecars up', async () => {
   const health = await api.health();
   assert.equal(health.llm, true);
   assert.equal(health.ingest, true);
-  assert.equal(health.model?.available, true);
+  assert.equal(health.model?.status, 'ready');
 });
 
 test('screenshot stub returns a local screenshot attachment', async () => {

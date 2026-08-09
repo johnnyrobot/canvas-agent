@@ -9,9 +9,17 @@ import {
   missingModelsText,
   requiredTagsFromHealth,
   startModelPull,
+  unsatisfiedRequiredModels,
+  unsatisfiedModelsText,
+  disabledCapabilityText,
 } from './model-health.js';
 
-const model = (tag: string, available: boolean) => ({ tag, available, installCommand: `ollama pull ${tag}` });
+const model = (tag: string, available: boolean) =>
+  ({ tag, status: available ? ('ready' as const) : ('missing' as const), recovery: `ollama pull ${tag}` });
+/** Installed, and unable to do its role's job — a download fixes nothing (ADR-0010). */
+const incapable = (tag: string) => ({ tag, status: 'incapable' as const, recovery: `Set MODEL_VISION to a model that can see` });
+/** Switched off by the operator, so the role left the required set (ADR-0010). */
+const disabled = (tag: string) => ({ tag, status: 'disabled' as const, recovery: '' });
 
 test('a missing VISION model is reported as missing even when the text model is present', () => {
   // The bug this prevents: first run pulls the text model, the screen dismisses,
@@ -95,6 +103,88 @@ test('a model the runtime cannot report is not invented as missing', () => {
   // `unavailable-api` omits both fields: absent means "cannot report", and the
   // runtime is already degraded on `llm`/`ingest` in that case.
   assert.deepEqual(missingRequiredModels({}), []);
+});
+
+// ── Incapable is unsatisfied, but it is NOT downloadable (ADR-0010) ──────────
+
+test('an INCAPABLE model is never offered for download — the download is what cannot fix it', () => {
+  const health: RuntimeHealth = {
+    llm: true,
+    ingest: true,
+    model: model('text:1b', true),
+    visionModel: incapable('text-only:8b'),
+  };
+  assert.deepEqual(
+    missingRequiredModels(health),
+    [],
+    'it is already installed; a pull would be a loop that cannot terminate',
+  );
+  assert.deepEqual(
+    unsatisfiedRequiredModels(health).map((m) => m.tag),
+    ['text-only:8b'],
+    'but it is still unsatisfied, so the runtime must read degraded',
+  );
+});
+
+test('the status line for an incapable model says what is wrong, not that it is absent', () => {
+  const health: RuntimeHealth = { llm: true, ingest: true, visionModel: incapable('text-only:8b') };
+  const text = unsatisfiedModelsText(unsatisfiedRequiredModels(health));
+  assert.match(text, /text-only:8b/);
+  assert.doesNotMatch(text, /not installed/i, 'it IS installed — saying otherwise sends the user to re-download it');
+});
+
+test('missing and incapable are both unsatisfied, and the download offers only the missing one', () => {
+  const health: RuntimeHealth = {
+    llm: true,
+    ingest: true,
+    model: model('text:1b', false),
+    visionModel: incapable('text-only:8b'),
+  };
+  assert.deepEqual(
+    unsatisfiedRequiredModels(health).map((m) => m.tag),
+    ['text:1b', 'text-only:8b'],
+  );
+  assert.deepEqual(
+    missingRequiredModels(health).map((m) => m.tag),
+    ['text:1b'],
+  );
+});
+
+// ── Disabled is a choice, not a fault (ADR-0010) ─────────────────────────────
+
+test('a DISABLED model is neither missing nor unsatisfied', () => {
+  const health: RuntimeHealth = {
+    llm: true,
+    ingest: true,
+    model: model('text:1b', true),
+    visionModel: disabled('vision:2b'),
+  };
+  assert.deepEqual(missingRequiredModels(health), []);
+  assert.deepEqual(unsatisfiedRequiredModels(health), [], 'the operator chose this; degrading on it trains people to ignore the indicator');
+});
+
+test('a disabled capability is stated rather than left silent', () => {
+  const health: RuntimeHealth = { llm: true, ingest: true, visionModel: disabled('vision:2b') };
+  assert.match(disabledCapabilityText(health), /alt.text/i);
+  assert.equal(
+    disabledCapabilityText({ visionModel: model('vision:2b', true) }),
+    '',
+    'nothing to say when the capability is on',
+  );
+});
+
+test('a disabled model contributes no gigabytes and no segment to the pull bar', () => {
+  const health: RuntimeHealth = {
+    llm: true,
+    ingest: true,
+    model: model('text:1b', false),
+    visionModel: disabled('vision:2b'),
+  };
+  assert.deepEqual(
+    requiredTagsFromHealth(health),
+    ['text:1b'],
+    'the bar denominator must match what pullModel will actually fetch',
+  );
 });
 
 // ── What the user is told BEFORE committing to the download (issue #32) ──────

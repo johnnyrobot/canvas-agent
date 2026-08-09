@@ -23,23 +23,60 @@ export const REQUIRED_MODEL_ROLES = ['text', 'vision'] as const satisfies readon
 
 export type RequiredModelRole = (typeof REQUIRED_MODEL_ROLES)[number];
 
-/** Presence of one required model in the local Ollama store. */
+/**
+ * What a required model can be, from the app's point of view (ADR-0010).
+ *
+ * `available: boolean` used to live here, and it could not express the state
+ * that actually broke the flagship path: a tag that is installed and cannot do
+ * the job its role needs. The four are exhaustive and mutually exclusive.
+ *
+ *   ready     — present, and reports every capability its role requires
+ *   missing   — not in the local store; a download fixes it
+ *   incapable — present, but cannot do this role's job. A download fixes
+ *               NOTHING: the recovery is to point the role at another tag
+ *   disabled  — the operator switched this capability off, so the role left the
+ *               required set. Not an error, and not a reason to degrade
+ */
+export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled';
+
+/** How one required model stands, in the local Ollama store and by capability. */
 export interface RequiredModelStatus {
   role: RequiredModelRole;
   tag: string;
-  available: boolean;
+  status: ModelStatusState;
 }
 
 /**
- * Presence of the whole required set. `available` is true only when EVERY
- * required model is present — a partial install must never read as ready
- * (ADR-0009).
+ * How the whole required set stands. `ready` is true only when EVERY required
+ * model is satisfied — a partial install must never read as ready (ADR-0009),
+ * and neither must an install that is complete but incapable (ADR-0010).
+ *
+ * A `disabled` role satisfies the set: it is not required, so gating on it would
+ * hold the app hostage to a model nothing will call.
  */
 export interface ModelSetStatus {
-  available: boolean;
+  ready: boolean;
   /** One entry per required role, in `REQUIRED_MODEL_ROLES` order. */
   models: RequiredModelStatus[];
 }
+
+/**
+ * What each required ROLE demands of whatever tag fills it, as Ollama's
+ * `/api/show` names capabilities (ADR-0010).
+ *
+ * Declared per role rather than per tag on purpose. A per-tag allowlist would
+ * need editing every time `scripts/model-eval/` promotes a different vision
+ * model — and a forgotten edit would be invisible, because the new tag would
+ * simply go unchecked. Per role also catches what no allowlist can: an
+ * operator's override pointing at a model that cannot do the job.
+ *
+ * `tools` on the text role is the half that is easy to miss: the orchestrator is
+ * a tool-calling loop, so a text model without it fails deep inside a turn.
+ */
+export const ROLE_CAPABILITIES: Readonly<Record<RequiredModelRole, readonly string[]>> = {
+  text: ['completion', 'tools'],
+  vision: ['completion', 'vision'],
+};
 
 /** A piece of a multimodal message. */
 export type ContentPart =

@@ -108,12 +108,28 @@ function recordingPullFetch() {
   return { fetch, pulled };
 }
 
-/** A fake `/api/tags` reporting exactly `present` as installed locally. */
-function tagsFetch(present: string[]) {
-  const fetch: FetchLike = async (url) => {
+/**
+ * A fake `/api/tags` reporting exactly `present` as installed locally, plus the
+ * `/api/show` capability answer for each tag.
+ *
+ * Capabilities default to a fully-capable model, so a test that says nothing
+ * about them is testing presence against a tag that CAN do the job — which is
+ * what every pre-#38 test meant by "installed". Pass `caps` to describe a tag
+ * that is installed and cannot: the case where presence and usability come
+ * apart (ADR-0010).
+ */
+function tagsFetch(present: string[], caps: Record<string, string[]> = {}) {
+  const fetch: FetchLike = async (url, init) => {
     const path = String(url);
     if (path.endsWith('/api/tags')) {
       return new Response(JSON.stringify({ models: present.map((name) => ({ name, model: name })) }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (path.endsWith('/api/show')) {
+      const tag = (JSON.parse(String(init?.body ?? '{}')) as { model?: string }).model ?? '';
+      return new Response(JSON.stringify({ capabilities: caps[tag] ?? ['completion', 'tools', 'vision'] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -187,21 +203,21 @@ test('modelStatus reports each required model separately', async () => {
   const sidecar = createOllamaSidecar({ env, fetch: tagsFetch(['test-text:1b']) });
   const status = await sidecar.modelStatus();
   assert.deepEqual(status.models, [
-    { role: 'text', tag: 'test-text:1b', available: true },
-    { role: 'vision', tag: 'test-vision:2b', available: false },
+    { role: 'text', tag: 'test-text:1b', status: 'ready' },
+    { role: 'vision', tag: 'test-vision:2b', status: 'missing' },
   ]);
 });
 
-test('modelStatus is NOT available when one required model is present and the other is missing', async () => {
+test('modelStatus is NOT ready when one required model is present and the other is missing', async () => {
   const env = { ...baseEnv, MODEL_VISION: 'test-vision:2b' };
   const textOnly = createOllamaSidecar({ env, fetch: tagsFetch(['test-text:1b']) });
-  assert.equal((await textOnly.modelStatus()).available, false, 'a partial install must never read as ready');
+  assert.equal((await textOnly.modelStatus()).ready, false, 'a partial install must never read as ready');
 
   const visionOnly = createOllamaSidecar({ env, fetch: tagsFetch(['test-vision:2b']) });
-  assert.equal((await visionOnly.modelStatus()).available, false);
+  assert.equal((await visionOnly.modelStatus()).ready, false);
 
   const both = createOllamaSidecar({ env, fetch: tagsFetch(['test-text:1b', 'test-vision:2b']) });
-  assert.equal((await both.modelStatus()).available, true, 'ready only when every required model is present');
+  assert.equal((await both.modelStatus()).ready, true, 'ready only when every required model is satisfied');
 });
 
 test('modelStatus reports everything missing when the daemon is unreachable', async () => {
@@ -210,9 +226,90 @@ test('modelStatus reports everything missing when the daemon is unreachable', as
     throw new Error('ECONNREFUSED');
   };
   const status = await createOllamaSidecar({ env, fetch: down }).modelStatus();
-  assert.equal(status.available, false);
+  assert.equal(status.ready, false);
   assert.deepEqual(
-    status.models.map((m) => m.available),
-    [false, false],
+    status.models.map((m) => m.status),
+    ['missing', 'missing'],
   );
+});
+
+// ── Capability, not presence (ADR-0010) ─────────────────────────────────────
+
+test('an installed model that cannot do its role’s job reads as INCAPABLE, never ready', async () => {
+  // The #29 regression, reduced: the vision role pointed at a text-only tag that
+  // IS installed. Presence was the whole test, so every surface read green and
+  // describeImage failed with `/api/chat returned 400` at runtime.
+  const env = { ...baseEnv, MODEL_VISION: 'text-only:8b' };
+  const fetch = tagsFetch(['test-text:1b', 'text-only:8b'], { 'text-only:8b': ['completion', 'tools'] });
+  const status = await createOllamaSidecar({ env, fetch }).modelStatus();
+
+  assert.equal(status.ready, false, 'an incapable required model must not read as ready');
+  assert.deepEqual(status.models, [
+    { role: 'text', tag: 'test-text:1b', status: 'ready' },
+    { role: 'vision', tag: 'text-only:8b', status: 'incapable' },
+  ]);
+});
+
+test('the TEXT role requires tool-calling, not merely completion', async () => {
+  // The same bug one layer in: the orchestrator is a tool-calling loop, so a text
+  // override without `tools` fails deep inside a turn rather than at startup.
+  const fetch = tagsFetch(['test-text:1b'], { 'test-text:1b': ['completion'] });
+  const status = await createOllamaSidecar({ env: baseEnv, fetch }).modelStatus();
+  assert.equal(status.models[0]?.status, 'incapable');
+});
+
+test('an EMPTY capability list is a real answer, not a probe failure', async () => {
+  const fetch = tagsFetch(['test-text:1b'], { 'test-text:1b': [] });
+  const status = await createOllamaSidecar({ env: baseEnv, fetch }).modelStatus();
+  assert.equal(status.models[0]?.status, 'incapable');
+});
+
+test('a FAILED capability probe falls back to presence rather than accusing the tag', async () => {
+  // The documented asymmetry of ADR-0010. Reporting `incapable` here would tell a
+  // user with a correct configuration to change it, on the strength of a daemon
+  // hiccup — and `incapable` recovery is advice, so no retry clears it.
+  const flaky: FetchLike = async (url) => {
+    const path = String(url);
+    if (path.endsWith('/api/tags')) {
+      return new Response(JSON.stringify({ models: [{ name: 'test-text:1b', model: 'test-text:1b' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    throw new Error('ECONNRESET');
+  };
+  const status = await createOllamaSidecar({ env: baseEnv, fetch: flaky }).modelStatus();
+  assert.equal(status.models[0]?.status, 'ready', 'an unknown capability is not evidence of incapability');
+});
+
+// ── A disabled capability leaves the required set (ADR-0010) ─────────────────
+
+test('vision disabled: the role reports DISABLED and the set is still ready', async () => {
+  const env = { ...baseEnv, MODEL_VISION: 'test-vision:2b', LLM_VISION_ENABLED: 'false' };
+  const status = await createOllamaSidecar({ env, fetch: tagsFetch(['test-text:1b']) }).modelStatus();
+
+  assert.equal(status.ready, true, 'readiness must not gate on a model nothing will call');
+  assert.deepEqual(status.models, [
+    { role: 'text', tag: 'test-text:1b', status: 'ready' },
+    { role: 'vision', tag: 'test-vision:2b', status: 'disabled' },
+  ]);
+});
+
+test('vision disabled: the role is still REPORTED, never dropped from the payload', async () => {
+  // Dropping it would read to the UI as "nothing missing" — the silent-hole
+  // failure restated, which is the whole reason the state is named.
+  const env = { ...baseEnv, MODEL_VISION: 'test-vision:2b', LLM_VISION_ENABLED: 'false' };
+  const status = await createOllamaSidecar({ env, fetch: tagsFetch(['test-text:1b']) }).modelStatus();
+  assert.equal(status.models.length, 2);
+  assert.ok(status.models.some((m) => m.role === 'vision'));
+});
+
+test('vision disabled: provisioning does not download the vision model', async () => {
+  const { sidecar, pulled } = pullingSidecar({
+    ...baseEnv,
+    MODEL_VISION: 'test-vision:2b',
+    LLM_VISION_ENABLED: 'false',
+  });
+  await sidecar.pullModel();
+  assert.deepEqual(pulled, ['test-text:1b'], 'a disabled capability must not cost a multi-gigabyte pull');
 });

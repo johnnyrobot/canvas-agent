@@ -309,8 +309,8 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
       const installed = up && (scenario !== 'models-missing' || modelsPulled);
       const model = (tag: string) => ({
         tag,
-        available: installed,
-        installCommand: 'CANVAS_AGENT_E2E_API=scripted',
+        status: installed ? ('ready' as const) : ('missing' as const),
+        recovery: installed ? '' : 'CANVAS_AGENT_E2E_API=scripted',
       });
       return {
         llm: up,

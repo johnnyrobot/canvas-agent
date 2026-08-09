@@ -90,15 +90,45 @@ export function uniqueModels(config: LLMConfig): string[] {
 }
 
 /**
- * The required roles paired with the tags they resolve to (ADR-0009), in role
- * order. One entry per required ROLE — `requiredModelTags` is the deduplicated
- * download list; this is what the status probe reports per model.
+ * Whether each required role is required *of this configuration* (ADR-0010).
+ *
+ * The required set is derived, not fixed. A capability the operator switched off
+ * leaves it: `describeImage` throws before touching a model when vision is
+ * disabled, so provisioning it would download ~3.3 GB to gate readiness on
+ * weights nothing will ever call.
+ *
+ * A predicate per role rather than a special case inside the caller, so a third
+ * required role has one obvious place to say when it applies.
+ */
+const ROLE_APPLIES: Readonly<Record<RequiredModelRole, (config: LLMConfig) => boolean>> = {
+  text: () => true,
+  vision: (config) => config.visionEnabled,
+};
+
+/** Whether this configuration requires `role` at all (ADR-0010). */
+export function roleIsRequired(config: LLMConfig, role: RequiredModelRole): boolean {
+  return ROLE_APPLIES[role](config);
+}
+
+/**
+ * The roles this configuration actually requires, paired with the tags they
+ * resolve to (ADR-0009), in role order.
  *
  * Roles outside the required set never appear here, so `MODEL_DEEP=granite4.1:30b`
- * can neither be downloaded nor gate readiness for a role nothing calls.
+ * can neither be downloaded nor gate readiness for a role nothing calls — and
+ * nor can a role whose capability is switched off (ADR-0010).
+ *
+ * This is the *requirement* question, and it is deliberately not the *reporting*
+ * question: `modelStatus` reports one entry per required role whether or not this
+ * configuration requires it, because a role that vanishes from the payload reads
+ * to the UI as "nothing missing". Conflating the two is what made a disabled
+ * capability cost a multi-gigabyte download.
  */
 export function requiredModels(config: LLMConfig): Array<{ role: RequiredModelRole; tag: string }> {
-  return REQUIRED_MODEL_ROLES.map((role) => ({ role, tag: config.models[role] }));
+  return REQUIRED_MODEL_ROLES.filter((role) => roleIsRequired(config, role)).map((role) => ({
+    role,
+    tag: config.models[role],
+  }));
 }
 
 /**

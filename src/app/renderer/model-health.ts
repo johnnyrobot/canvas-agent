@@ -50,20 +50,68 @@ export const MODEL_DOWNLOAD_SIZES_GB: Readonly<Record<string, number>> = {
  * sidecar.
  */
 export function missingRequiredModels(health: RequiredModelHealth): ModelHealth[] {
+  return dedupedByTag(health, (m) => m.status === 'missing');
+}
+
+/**
+ * The required models this runtime cannot use — missing OR installed-but-
+ * incapable (ADR-0010). This is the set that must mark the runtime degraded.
+ *
+ * Deliberately a wider set than `missingRequiredModels`, and the split is the
+ * point: everything here is a reason to degrade, but only the *missing* ones are
+ * a reason to offer a download. Offering to fetch a tag that is already present
+ * is a button that cannot work.
+ */
+export function unsatisfiedRequiredModels(health: RequiredModelHealth): ModelHealth[] {
+  return dedupedByTag(health, (m) => m.status === 'missing' || m.status === 'incapable');
+}
+
+/** The reported required models matching `predicate`, in role order, deduplicated by tag. */
+function dedupedByTag(health: RequiredModelHealth, predicate: (m: ModelHealth) => boolean): ModelHealth[] {
   const seen = new Set<string>();
-  const missing: ModelHealth[] = [];
+  const picked: ModelHealth[] = [];
   for (const model of [health.model, health.visionModel]) {
-    if (model === undefined || model.available || seen.has(model.tag)) continue;
+    if (model === undefined || !predicate(model) || seen.has(model.tag)) continue;
     seen.add(model.tag);
-    missing.push(model);
+    picked.push(model);
   }
-  return missing;
+  return picked;
 }
 
 /** Status-line text naming which required models are missing (empty when none). */
 export function missingModelsText(missing: readonly ModelHealth[]): string {
   if (missing.length === 0) return '';
   return `${plural(missing, 'Model')} not installed (${tagList(missing)})`;
+}
+
+/**
+ * Status-line text for everything unsatisfied, which must NOT say "not installed"
+ * about a tag that is (ADR-0010) — that phrasing is what sends a user off to
+ * re-download the model they already have instead of changing it.
+ */
+export function unsatisfiedModelsText(unsatisfied: readonly ModelHealth[]): string {
+  if (unsatisfied.length === 0) return '';
+  const missing = unsatisfied.filter((m) => m.status === 'missing');
+  const incapable = unsatisfied.filter((m) => m.status === 'incapable');
+  const parts: string[] = [];
+  if (missing.length > 0) parts.push(missingModelsText(missing));
+  if (incapable.length > 0) {
+    parts.push(`${plural(incapable, 'Model')} cannot do the job (${tagList(incapable)})`);
+  }
+  return parts.join('; ');
+}
+
+/**
+ * What to say when a capability was switched off rather than broken (ADR-0010).
+ *
+ * Said out loud, because the alternative is an app that reads fully ready while
+ * silently missing its flagship capability — the failure that argued against
+ * narrowing the required set at all. Not a degradation: the operator chose it.
+ */
+export function disabledCapabilityText(health: RequiredModelHealth): string {
+  return health.visionModel?.status === 'disabled'
+    ? 'Alt-text suggestion is off (vision disabled) — detection still runs'
+    : '';
 }
 
 /**
@@ -82,7 +130,10 @@ export function missingModelsText(missing: readonly ModelHealth[]): string {
 export function requiredTagsFromHealth(health: RequiredModelHealth): string[] {
   const tags: string[] = [];
   for (const model of [health.model, health.visionModel]) {
-    if (model !== undefined && !tags.includes(model.tag)) tags.push(model.tag);
+    // A DISABLED role is not in the required set, so `pullModel` will not fetch
+    // it (ADR-0010). Counting it here would widen the denominator by a model
+    // that never reports, leaving the bar permanently short of 100%.
+    if (model !== undefined && model.status !== 'disabled' && !tags.includes(model.tag)) tags.push(model.tag);
   }
   return tags;
 }

@@ -32,13 +32,21 @@ gates readiness on. `fast`, `deep` and `cheap` inherit the text model and are
 never provisioned — an operator pointing `MODEL_DEEP` at a 17 GB tag no
 production path calls must not turn first run into a 17 GB download.
 
-Two consequences worth keeping:
+Three consequences worth keeping:
 
-- The tags are **deduplicated**, so today's defaults (where `vision` inherits
-  the text model) are two required roles and *one* download.
-- `modelStatus()` answers **per required model**, and its aggregate `available`
-  is the conjunction. A partial install must never read as ready — that is the
-  path where alt-text suggestion fails after setup has told the user otherwise.
+- The tags are **deduplicated**, so a configuration pointing both required roles
+  at one multimodal tag is two required roles and *one* download. (Not the
+  shipping shape since #33 — the two defaults are distinct tags.)
+- `modelStatus()` answers **per required role**, and its aggregate `ready` is the
+  conjunction. A partial install must never read as ready — that is the path
+  where alt-text suggestion fails after setup has told the user otherwise.
+- Status is a capability answer, not a presence answer (ADR-0010). Each role
+  declares what it needs of its tag in `ROLE_CAPABILITIES` — `tools` for text,
+  `vision` for vision — and an installed tag that lacks it reads `incapable`,
+  never ready. A role the operator switched off reads `disabled` and leaves the
+  required set, so it is neither downloaded nor gated on, but it is still
+  *reported*: a role missing from the payload reads to the UI as "nothing
+  missing".
 
 ## Why the native API (not `/v1/chat/completions`)
 
