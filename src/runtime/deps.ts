@@ -80,28 +80,53 @@ export const RUNTIME_DEFAULT_MODEL = 'granite4.1:8b';
  * role at a model that cannot see is not a degradation to tolerate — it is a
  * broken flagship path, and giving vision its own default is what closes it.
  *
- * The tag is PROVISIONAL and deliberately nothing but a constant: which vision
- * model ships is decided by `scripts/model-eval/` against its alt-text gate, and
- * that decision blocks the release rather than this line. Changing it here is the
- * whole change — no logic reads its value.
+ * This tag is no longer provisional. It was chosen by running
+ * `scripts/alt-gate/` — the reduced alt-SUGGESTION gate — against the
+ * previously-declared candidate, and the previous candidate LOST:
  *
- * Three things were verified before declaring it, and all three must be redone
- * for any replacement:
- *   1. It RESOLVES and pulls. The obvious-looking bare library tag
- *      `granite-vision-4.1-4b` 404s on registry.ollama.ai and cannot be pulled at
- *      all — shipping it would fail first-run provisioning and print an
- *      un-runnable `ollama pull` recovery command. The `hf.co/…` form below is
- *      the one that resolves.
- *   2. It reports `vision` in `ollama show` capabilities. Pulling successfully is
- *      not the bar — the text default pulls fine and still cannot see. This check
- *      is what would have caught the regression above.
- *   3. Its licence is permissive, read from the model card, not from a summary:
- *      `license: apache-2.0`, ungated (<https://huggingface.co/ibm-granite/granite-vision-4.1-4b-GGUF>).
+ *   qwen3-vl:4b                              floor PASS, 3 runs of 3
+ *   hf.co/…/granite-vision-4.1-4b-GGUF:Q4_K_M  floor FAIL, 0 runs of 2
+ *   granite4.1:8b (text-only control)        floor FAIL, 10/10 fixtures, every run
  *
- * ~3.3 GB, so the required set totals ~8.6 GB — the figure first run states
- * before the user commits (`MODEL_DOWNLOAD_SIZES_GB`).
+ * The incumbent failed two ways that matter to an instructor. It narrated a
+ * DECORATIVE divider instead of returning empty alt, every run. And it
+ * intermittently echoed the surrounding page text back as the alt text rather
+ * than reading the image — on one run it returned the supplied page context
+ * verbatim for a screenshot and never read the word rendered in the pixels.
+ * Alt text that repeats what the screen-reader user just heard is not a text
+ * alternative.
+ *
+ * Four things were verified before declaring it, and ALL FOUR must be redone for
+ * any replacement:
+ *   1. It RESOLVES and pulls. Note this is a plain library tag, which the
+ *      previous default was not: the obvious-looking `granite-vision-4.1-4b`
+ *      404s on registry.ollama.ai, which forced an `hf.co/…` form whose upstream
+ *      repo can be renamed out from under a shipped `ollama pull` recovery
+ *      command. A library tag removes that exposure and is the documented
+ *      tiebreak.
+ *   2. It reports `vision` in `ollama show` capabilities. Pulling is not the bar
+ *      — the text default pulls fine and cannot see. Now also asserted at
+ *      runtime per ROLE (ADR-0010), not just here.
+ *   3. Its licence is permissive, read from the model's own bundled licence text
+ *      rather than a summary: Apache License 2.0 (`ollama show --license`).
+ *   4. It clears the alt-suggestion floor (`npx tsx scripts/alt-gate/run.ts`),
+ *      with the text-only control arm failing in the same run. A gate that
+ *      cannot show it detects an incapable model proves nothing when it passes.
+ *
+ * WHAT THE GATE DID NOT ESTABLISH, so nobody quotes it as more than it is: ten
+ * RENDERED images cannot tell reliable from lucky, and a real phone photo of a
+ * syllabus is a harder read than crisp vector text. Two known quality gaps
+ * survive it — this model answers an equation fixture in LaTeX (passes the
+ * floor, unusable read aloud), and it advertises a `thinking` capability, the
+ * class of model that can spend its whole token budget reasoning and return
+ * empty. Neither appeared across 30 live calls through the app's own
+ * `describeImage`. Both belong to the full gate (#42/#43).
+ *
+ * ~3.3 GB — the same as the tag it replaces, so the required set still totals
+ * ~8.6 GB, the figure first run states before the user commits
+ * (`MODEL_DOWNLOAD_SIZES_GB`).
  */
-export const RUNTIME_DEFAULT_VISION_MODEL = 'hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M';
+export const RUNTIME_DEFAULT_VISION_MODEL = 'qwen3-vl:4b';
 
 /** The only licences a shipped default may carry (ADR-0007). */
 export const PERMISSIVE_LICENCES = ['Apache-2.0', 'MIT'] as const;

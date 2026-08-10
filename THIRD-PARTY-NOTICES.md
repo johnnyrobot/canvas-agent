@@ -115,13 +115,13 @@ Each model's card (`README.md`) ships alongside its weights in
 The on-device LLM weights are **pulled and run locally** by Ollama at runtime; they
 are **not** bundled in or redistributed with this application.
 
-The app requires exactly two models (ADR-0009), and both are IBM Granite:
+The app requires exactly two models (ADR-0009), from two different vendors:
 
 - **IBM Granite** `granite4.1:8b` (the app's default text model) — **Apache-2.0**
   (<https://huggingface.co/ibm-granite/granite-4.1-8b>).
-- **IBM Granite Vision** `hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M` (the
-  app's default vision model, used for alt-text suggestion) — **Apache-2.0**
-  (<https://huggingface.co/ibm-granite/granite-vision-4.1-4b-GGUF>).
+- **Alibaba Cloud Qwen** `qwen3-vl:4b` (the app's default vision model, used for
+  alt-text suggestion) — **Apache-2.0**
+  (<https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct>).
 
 Users obtain both sets of weights directly through Ollama. Every model the app
 defaults to must be permissively licensed (ADR-0007), so no third-party

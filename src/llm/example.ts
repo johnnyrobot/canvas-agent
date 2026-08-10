@@ -6,7 +6,7 @@
  * for.
  *
  *   npm run llm:smoke -- "Explain accessible tables in Canvas in one sentence."
- *   MODEL_VISION=hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M \
+ *   MODEL_VISION=qwen3-vl:4b \
  *     npm run llm:smoke -- "Describe this image" ./diagram.png
  */
 import { readFile } from 'node:fs/promises';
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
       `[warn] MODEL_VISION is unset, so the describe path will use MODEL_TEXT (${process.env.MODEL_TEXT}).\n` +
         '[warn] That works only if it is multimodal (`ollama show <tag>` must list `vision`);\n' +
         '[warn] a text-only tag fails with `/api/chat returned 400`. Set MODEL_VISION to be sure, e.g.\n' +
-        '[warn]   MODEL_VISION=hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M',
+        '[warn]   MODEL_VISION=qwen3-vl:4b',
     );
   }
 

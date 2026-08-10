@@ -7,7 +7,7 @@
  *
  * Models are selected via the llm config override (env). The runtime defaults the
  * two required tags (ADR-0009) — `MODEL_TEXT` to `granite4.1:8b` and
- * `MODEL_VISION` to `hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M` — so
+ * `MODEL_VISION` to `qwen3-vl:4b` — so
  * both must be pulled locally. Override either independently to pick another
  * local tag. See `src/runtime/README.md`.
  *

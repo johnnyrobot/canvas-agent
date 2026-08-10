@@ -99,7 +99,7 @@ npm test              # unit tests for the pure logic (no Ollama needed)
 npm run llm:smoke -- "Explain accessible headings in one sentence."
 
 # The describe path needs a model that can SEE — the text model cannot stand in:
-MODEL_VISION=hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M \
+MODEL_VISION=qwen3-vl:4b \
   npm run llm:smoke -- "Describe this image" ./some-image.png
 ```
 

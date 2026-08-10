@@ -190,9 +190,9 @@ each falling back to its default only when unset.
 | Role | `RUNTIME_DEFAULT_…` | Tag | Size |
 |---|---|---|---|
 | text | `_MODEL` | `granite4.1:8b` | ~5.3 GB |
-| vision | `_VISION_MODEL` | `hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M` | ~3.3 GB |
+| vision | `_VISION_MODEL` | `qwen3-vl:4b` | ~3.3 GB |
 
-Both are Apache-2.0: permissively licensed by rule (ADR-0007 — no default may
+Both are Apache-2.0 (from different vendors — IBM and Alibaba Cloud): permissively licensed by rule (ADR-0007 — no default may
 oblige a user to accept a third-party acceptable-use policy), and sized for the
 machines the app ships to rather than the dev box (~8.6 GB total at first run).
 `SHIPPED_MODEL_LICENCES` declares each shipped tag's licence, and guard tests in
@@ -204,11 +204,22 @@ download size, or absent from the runtime-pulled section of
 `MODEL_TEXT`, which was survivable only while the text default happened to be
 multimodal; `granite4.1:8b` is not (`ollama show` → `completion, tools`), so
 alt-text suggestion failed outright with `/api/chat returned 400`. Any
-replacement vision tag must be verified to (1) resolve and pull — the bare
-library tag `granite-vision-4.1-4b` 404s and cannot be pulled at all — (2) report
-`vision` in `ollama show` capabilities, and (3) carry a permissive licence read
-from its model card. The tag itself is provisional; `scripts/model-eval/` decides
-which vision model ships, against its alt-text gate.
+replacement vision tag must be verified FOUR ways: (1) it resolves and pulls —
+prefer a plain library tag, because the `hf.co/…` form this default replaced
+depends on an upstream repo that can be renamed out from under a shipped `ollama
+pull` recovery command, and the bare `granite-vision-4.1-4b` 404s entirely;
+(2) it reports `vision` in `ollama show` capabilities — now also asserted per
+ROLE at runtime (ADR-0010); (3) it carries a permissive licence read from the
+model's own licence text; and (4) it clears the alt-suggestion floor
+(`npx tsx scripts/alt-gate/run.ts`) with the text-only control arm failing in the
+same run.
+
+The tag is no longer provisional. `qwen3-vl:4b` was chosen by that gate over the
+previous default, which narrated decorative images and intermittently echoed the
+surrounding page text back instead of reading the image. That gate is the REDUCED
+one, though — ten rendered images, deterministic floor only. The full adjudicated
+gate over real scans is #42/#43, and it is what would let anyone claim this model
+writes *good* alt text rather than not-harmful alt text.
 
 The quality trade is deliberate and bounded, and it is a property of
 general-purpose models rather than of any one tag: they are **pass-biased** on

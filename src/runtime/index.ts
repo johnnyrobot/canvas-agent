@@ -21,6 +21,7 @@ export {
   SHIPPED_MODEL_LICENCES,
   PERMISSIVE_LICENCES,
   RUNTIME_DEFAULT_MODEL,
+  RUNTIME_DEFAULT_VISION_MODEL,
 } from './deps.js';
 export type {
   EngineDepsOptions,

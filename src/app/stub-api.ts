@@ -47,7 +47,7 @@ import type {
  */
 const STUB_REQUIRED_TAGS = [
   'granite4.1:8b',
-  'hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M',
+  'qwen3-vl:4b',
 ] as const;
 
 function passingGate(html: string, needsHumanReview: AuditIssue[] = []): GateResult {
