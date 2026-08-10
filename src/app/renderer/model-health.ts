@@ -35,7 +35,7 @@ type RequiredModelHealth = Pick<RuntimeHealth, 'model' | 'visionModel'>;
  */
 export const MODEL_DOWNLOAD_SIZES_GB: Readonly<Record<string, number>> = {
   'granite4.1:8b': 5.3,
-  'hf.co/ibm-granite/granite-vision-4.1-4b-GGUF:Q4_K_M': 3.3,
+  'qwen3-vl:4b': 3.3,
 };
 
 /**
