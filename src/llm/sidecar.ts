@@ -249,7 +249,7 @@ export class OllamaSidecar {
    * vision model. The app never fetches images (PRD §16.3); `image` must be data
    * the user provided.
    */
-  describeImage(opts: DescribeImageOptions): Promise<ChatResult> {
+  async describeImage(opts: DescribeImageOptions): Promise<ChatResult> {
     if (!this.config.visionEnabled) {
       throw new OllamaError('Vision is disabled (LLM_VISION_ENABLED=false).');
     }
@@ -263,20 +263,69 @@ export class OllamaSidecar {
           `limit ${Math.round(MAX_DESCRIBE_IMAGE_BYTES / 1024 / 1024)} MB). Resize or compress it first.`,
       );
     }
-    return this.chat({
-      role: opts.role ?? 'vision',
-      ...(opts.signal ? { signal: opts.signal } : {}),
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: opts.prompt },
-            { type: 'image_url', image_url: { url: opts.image } },
-          ],
-        },
-      ],
-    });
+    const role = opts.role ?? 'vision';
+    try {
+      return await this.chat({
+        role,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: opts.prompt },
+              { type: 'image_url', image_url: { url: opts.image } },
+            ],
+          },
+        ],
+      });
+    } catch (err) {
+      // The in-turn guard of ADR-0012. The pull is offered BEFORE a turn starts,
+      // but a pre-turn check only covers the paths someone thought of — and what
+      // an instructor sees on a path nobody thought of must not be
+      // `Ollama /api/chat returned 404`. Narrow on purpose: only an
+      // absent-model answer is rewritten, so an unrelated failure is never
+      // disguised as a download that would fix nothing.
+      const tag = this.config.models[role];
+      if (isModelAbsent(err, tag)) throw new ModelNotFetchedError(tag);
+      throw err;
+    }
   }
+}
+
+/**
+ * A required model that has not been fetched yet — the `deferred` state, hit
+ * from inside a turn instead of from the affordance that should have caught it.
+ *
+ * Its own type, not a message: the caller has to be able to tell this from every
+ * other failure, because this is the one it can offer to FIX. `tag` is the model
+ * to download.
+ */
+export class ModelNotFetchedError extends OllamaError {
+  constructor(readonly tag: string) {
+    super(
+      `${tag} has not been downloaded yet. Alt-text suggestion downloads it the first time you use it — ` +
+        `start the download and try again. Alt-text detection does not need it.`,
+      404,
+    );
+    this.name = 'ModelNotFetchedError';
+  }
+}
+
+/**
+ * Whether `err` is Ollama saying it does not have this model.
+ *
+ * Matched on the status AND the phrasing rather than status alone: a 404 from a
+ * misconfigured base URL is a different problem with a different fix, and
+ * offering a model download for it would send someone off to wait on gigabytes
+ * that change nothing.
+ */
+function isModelAbsent(err: unknown, tag: string): boolean {
+  if (!(err instanceof OllamaError) || err.status !== 404) return false;
+  // The transport puts the status in `message` and the daemon's own words in
+  // `body` (`post()` in client.ts) — so the phrasing to match on is in `body`,
+  // and reading only `message` would leave this guard permanently unreachable.
+  const said = `${err.message} ${err.body ?? ''}`.toLowerCase();
+  return said.includes('not found') || said.includes('try pulling') || said.includes(tag.toLowerCase());
 }
 
 /** Normalize a native `/api/pull` progress line into the layer-agnostic `PullProgress`. */

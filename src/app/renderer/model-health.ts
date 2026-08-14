@@ -157,6 +157,33 @@ export function deferredCapabilityText(
 }
 
 /**
+ * The download to take before a turn that needs vision — or `undefined` when
+ * there is nothing to take (ADR-0012).
+ *
+ * `turnNeedsVision` is the caller's, because only the caller knows what the turn
+ * carries. Offering 3.3 GB on a turn that will never touch the model is exactly
+ * the surprise deferring the pull exists to remove, so the offer is gated on the
+ * one thing the renderer can know for certain before the turn starts: an image
+ * came with it. Turns that only MIGHT reach the model — the tool loop deciding
+ * to suggest alt text — are covered by the in-turn guard instead, which fails
+ * with a diagnosis rather than a 404.
+ *
+ * Only `deferred` is offered. `ready` needs nothing, `disabled` was the
+ * operator's decision and must never be re-litigated by a dialog, and
+ * `incapable` is the one state where downloading is precisely what cannot help.
+ */
+export function visionDownloadOffer(
+  health: RequiredModelHealth,
+  turnNeedsVision: boolean,
+  sizes: Readonly<Record<string, number>> = MODEL_DOWNLOAD_SIZES_GB,
+): { tag: string; text: string; label: string; sizeText: string } | undefined {
+  const vision = health.visionModel;
+  if (!turnNeedsVision || vision?.status !== 'deferred') return undefined;
+  const affordance = downloadModelAffordance([vision], sizes);
+  return { tag: vision.tag, ...affordance };
+}
+
+/**
  * The tags the first-run pull will cover, as the runtime's health payload
  * reports them: the required models, deduplicated in role order — whether or not
  * they are installed. Named for its input because `src/llm/config.ts` has a

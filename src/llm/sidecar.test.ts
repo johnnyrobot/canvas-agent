@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createOllamaSidecar, decodedBase64Bytes, MAX_DESCRIBE_IMAGE_BYTES } from './sidecar.js';
+import {
+  createOllamaSidecar,
+  decodedBase64Bytes,
+  MAX_DESCRIBE_IMAGE_BYTES,
+  ModelNotFetchedError,
+} from './sidecar.js';
 import { OllamaProcess } from './process.js';
 import { loadLLMConfig } from './config.js';
 import type { FetchLike } from './client.js';
@@ -402,6 +407,44 @@ test('pullVisionModel streams its own progress, naming the tag', async () => {
   assert.deepEqual(
     seen.map((p) => p.status),
     ['pulling manifest', 'downloading', 'success'],
+  );
+});
+
+test('describeImage on a not-yet-fetched model fails with the deferred diagnosis, not a raw 404', async () => {
+  // The in-turn guard of ADR-0012. A pre-turn check can be bypassed by a path
+  // nobody anticipated, and what the user sees then must not be
+  // `Ollama /api/chat returned 404` — the error that names nothing they can act
+  // on, and the exact shape of the failure this whole lane exists to end.
+  const notFound: FetchLike = async () =>
+    new Response(JSON.stringify({ error: `model "test-vision:2b" not found, try pulling it first` }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    });
+  const sidecar = createOllamaSidecar({ env: deferredEnv, fetch: notFound });
+
+  await assert.rejects(
+    async () => sidecar.describeImage({ image: 'QUJD', prompt: 'alt?' }),
+    (err: Error) => {
+      assert.ok(err instanceof ModelNotFetchedError, 'the caller must be able to tell this from any other failure');
+      assert.equal(err.tag, 'test-vision:2b', 'and know which model to offer');
+      assert.match(err.message, /alt-text|download/i, 'the text a person reads says what to do');
+      return true;
+    },
+  );
+});
+
+test('describeImage does not disguise an unrelated failure as a deferred model', async () => {
+  // Rewriting every error into "just download it" would send a user to a
+  // download that fixes nothing — the same loop the incapable state refuses.
+  const boom: FetchLike = async () =>
+    new Response(JSON.stringify({ error: 'out of memory' }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  const sidecar = createOllamaSidecar({ env: deferredEnv, fetch: boom });
+  await assert.rejects(
+    async () => sidecar.describeImage({ image: 'QUJD', prompt: 'alt?' }),
+    (err: Error) => !(err instanceof ModelNotFetchedError),
   );
 });
 

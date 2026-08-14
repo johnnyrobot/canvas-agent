@@ -13,6 +13,7 @@ import {
   unsatisfiedModelsText,
   disabledCapabilityText,
   deferredCapabilityText,
+  visionDownloadOffer,
 } from './model-health.js';
 
 const model = (tag: string, available: boolean) =>
@@ -273,6 +274,39 @@ test('a deferred capability is stated, with what it will later cost', () => {
   assert.match(text, /3\.3 GB/, 'and what it will cost when it is taken');
   assert.equal(deferredCapabilityText({ visionModel: model('vision:2b', true) }, SIZES), '', 'silent once fetched');
   assert.equal(deferredCapabilityText({ visionModel: disabled('vision:2b') }, SIZES), '', 'disabled has its own line');
+});
+
+test('the deferred download is offered only when a turn actually needs vision', () => {
+  const deferredHealth: RuntimeHealth = { llm: true, ingest: true, visionModel: deferred('vision:2b') };
+
+  // No image in the turn: nothing is offered. Prompting for 3.3 GB on a turn
+  // that will never touch the model is the surprise this whole lane removes.
+  assert.equal(visionDownloadOffer(deferredHealth, false, SIZES), undefined);
+
+  const offer = visionDownloadOffer(deferredHealth, true, SIZES);
+  assert.ok(offer, 'a turn carrying an image needs the model before it starts');
+  assert.equal(offer.tag, 'vision:2b');
+  assert.match(offer.sizeText, /3\.3 GB/, 'the size is stated before they commit');
+  assert.match(offer.label, /vision:2b/, 'the accessible name says what is being fetched');
+});
+
+test('no offer when the model is already there, switched off, or unreportable', () => {
+  assert.equal(
+    visionDownloadOffer({ visionModel: model('vision:2b', true) }, true, SIZES),
+    undefined,
+    'already fetched',
+  );
+  assert.equal(
+    visionDownloadOffer({ visionModel: disabled('vision:2b') }, true, SIZES),
+    undefined,
+    'an operator who said no is never asked again',
+  );
+  assert.equal(
+    visionDownloadOffer({ visionModel: incapable('text-only:8b') }, true, SIZES),
+    undefined,
+    'downloading is exactly what cannot fix an incapable tag',
+  );
+  assert.equal(visionDownloadOffer({}, true, SIZES), undefined, 'a runtime that cannot report is not guessed at');
 });
 
 // ── What the user is told BEFORE committing to the download (issue #32) ──────
