@@ -115,6 +115,7 @@ const healthView = (over: Partial<Parameters<typeof healthStatus>[0]> = {}): Par
   modelPull: undefined,
   ingestModelMissing: false,
   ingestPull: undefined,
+  visionPull: undefined,
   onDownloadModel: () => {},
   onDownloadIngestModel: () => {},
   ...over,
@@ -287,6 +288,49 @@ test('an instructor who already has both models is offered no download', () => {
   assert.equal(byTestId(status, 'download-model'), undefined, 'no re-download of several gigabytes');
   assert.equal(byTestId(status, 'download-size'), undefined, 'and no size to warn about');
   assert.equal(progressBars(status).length, 0);
+});
+
+test('the deferred vision download gets its own bar, and offers no button', () => {
+  // It starts because a turn needed it, not because anyone pressed anything, so
+  // an affordance beside it would be a button for a download already running.
+  const status = healthStatus(
+    healthView({
+      health: 'ready',
+      healthText: 'Local runtime ready - granite4.1:8b',
+      modelsMissing: [],
+      visionPull: advanceModelPull(startModelPull(['vision:2b']), { status: 'downloading', model: 'vision:2b', percent: 40 }),
+    }),
+  ) as unknown as FakeEl;
+
+  const bars = progressBars(status);
+  assert.equal(bars.length, 1);
+  assert.equal(bars[0]!.attrs['aria-valuenow'], '40');
+  assert.match(renderedText(byTestId(status, 'vision-pull')!), /vision:2b/, 'names what is being fetched');
+  assert.equal(byTestId(status, 'download-model'), undefined);
+});
+
+test('a finished first-run download and a running vision download never share a bar', () => {
+  // Folding the deferred pull into the first-run bar would show a bar that
+  // already reached 100% coming undone, days later, on a machine where nothing
+  // is wrong.
+  const firstRun = advanceModelPull(startModelPull(['granite4.1:8b']), {
+    status: 'downloading',
+    model: 'granite4.1:8b',
+    percent: 80,
+  });
+  const status = healthStatus(
+    healthView({
+      modelPull: firstRun,
+      visionPull: advanceModelPull(startModelPull(['vision:2b']), {
+        status: 'downloading',
+        model: 'vision:2b',
+        percent: 10,
+      }),
+    }),
+  ) as unknown as FakeEl;
+
+  const values = progressBars(status).map((b) => b.attrs['aria-valuenow']);
+  assert.deepEqual(values, ['80', '10'], 'two downloads, two bars, neither overwriting the other');
 });
 
 test('the document-model download stays a separate, independently-offered affordance', () => {

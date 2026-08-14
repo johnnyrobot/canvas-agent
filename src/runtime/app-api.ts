@@ -107,6 +107,12 @@ export interface LlmRuntime extends LlmDescriber {
   modelStatus?(): Promise<{ ready: boolean; models?: RequiredModelStatus[] }>;
   /** Download the configured model, reporting progress. First-run provisioning. */
   pullModel?(onProgress?: (p: ModelPullProgress) => void): Promise<void>;
+  /**
+   * Download the model deferred to first use — the vision model (ADR-0012).
+   * Optional for the same reason `pullModel` is: an injected double or an
+   * externally-managed daemon may not be able to install anything.
+   */
+  pullVisionModel?(onProgress?: (p: ModelPullProgress) => void): Promise<void>;
 }
 
 /** Docling capability the runtime needs: conversion + a health probe. */
@@ -805,6 +811,17 @@ export function createAppApi(opts: AppApiOptions = {}): AppApi {
       await ingest.pullModel(onProgress);
     },
 
+    async pullVisionModel(onProgress?: OnModelPullProgress): Promise<void> {
+      // The deferred download (ADR-0012), taken when the instructor first asks
+      // for something that needs vision. A no-op when the role is not required
+      // or its tag already arrived at first run — the sidecar decides that from
+      // the same role declaration everything else reads, so no caller has to.
+      if (typeof llm.pullVisionModel !== 'function') {
+        throw new Error('In-app model download is not available in this runtime.');
+      }
+      await llm.pullVisionModel(onProgress);
+    },
+
     // ── Sessions (storage-backed; the runtime persists each turn) ──
     async createSession(init) {
       return (await sessions()).createSession(init);
@@ -941,6 +958,15 @@ function recoveryFor(
         `${tag} is installed but cannot do the ${role} role's job ` +
         `(needs: ${REQUIRED_ROLES[role].capabilities.join(', ')}). ` +
         `Set ${REQUIRED_ROLES[role].envVar} to a model that can — downloading ${tag} again will not help.`
+      );
+    case 'deferred':
+      // Not a command, and deliberately not a manual pull: the app fetches this
+      // itself the moment the capability is asked for (ADR-0012). Printing
+      // `ollama pull` here would send an instructor to a terminal for something
+      // a button already does — and would quote a download they may never need.
+      return (
+        `${tag} downloads the first time you use alt-text suggestion. ` +
+        `Everything else works now; alt-text detection does not need it.`
       );
     case 'ready':
     case 'disabled':

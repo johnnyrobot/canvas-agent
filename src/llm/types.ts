@@ -36,8 +36,33 @@ export type RequiredModelRole = (typeof REQUIRED_MODEL_ROLES)[number];
  *               NOTHING: the recovery is to point the role at another tag
  *   disabled  — the operator switched this capability off, so the role left the
  *               required set. Not an error, and not a reason to degrade
+ *   deferred  — not in the local store, and that is expected: this role's weights
+ *               are fetched the first time the capability is used (ADR-0012).
+ *               Also not an error — the download is offered, sized, at the moment
+ *               it is needed, so nothing is silently absent
+ *
+ * `deferred` is deliberately distinct from `missing` even though both mean "not
+ * installed". Missing is a broken install to be repaired; deferred is a download
+ * that has not been asked for yet. Collapsing them would put the vision model
+ * back in the first-run affordance, which is the 3.3 GB this exists to defer.
  */
-export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled';
+export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled' | 'deferred';
+
+/**
+ * The states in which nothing is wrong — the required set is satisfied.
+ *
+ * One predicate rather than a condition rewritten at each reader. `disabled` and
+ * `deferred` arrived one ADR apart for unrelated reasons (an operator said no; a
+ * download has not been asked for yet) and land in exactly the same three
+ * places: readiness, the degraded lane, and the download affordance. Two
+ * hand-written `!== 'disabled' && !== 'deferred'` walks would be free to
+ * disagree, and the disagreement reads as a bug in whichever surface lost.
+ */
+export const SATISFYING_MODEL_STATES: ReadonlySet<ModelStatusState> = new Set<ModelStatusState>([
+  'ready',
+  'disabled',
+  'deferred',
+]);
 
 /** How one required model stands, in the local Ollama store and by capability. */
 export interface RequiredModelStatus {
@@ -84,18 +109,31 @@ export interface ModelSetStatus {
  *
  * `applies` — whether a given configuration requires this role at all. The
  * required set is derived, not fixed: a capability switched off leaves it.
+ *
+ * `provisioning` — WHEN the weights are fetched (ADR-0012). `'first-run'` is the
+ * original behaviour: pulled during setup, and absence is a broken install.
+ * `'first-use'` defers the pull to the moment the capability is first exercised,
+ * and absence is the `deferred` state rather than `missing`. Declared per role
+ * beside the rest of the role's definition so the two questions — is this role
+ * required, and when is it fetched — cannot drift apart in separate tables.
  */
 export interface RequiredRoleSpec {
   readonly capabilities: readonly string[];
   readonly envVar: string;
   readonly applies: (config: LLMConfig) => boolean;
+  readonly provisioning: ModelProvisioning;
 }
+
+/** When a required role's weights are downloaded (ADR-0012). */
+export type ModelProvisioning = 'first-run' | 'first-use';
 
 export const REQUIRED_ROLES: Readonly<Record<RequiredModelRole, RequiredRoleSpec>> = {
   text: {
     capabilities: ['completion', 'tools'],
     envVar: 'MODEL_TEXT',
     applies: () => true,
+    // Nothing works without it — the orchestrator's every turn is this model.
+    provisioning: 'first-run',
   },
   vision: {
     capabilities: ['completion', 'vision'],
@@ -104,6 +142,10 @@ export const REQUIRED_ROLES: Readonly<Record<RequiredModelRole, RequiredRoleSpec
     // provisioning it would download gigabytes to gate readiness on weights
     // nothing will ever call.
     applies: (config) => config.visionEnabled,
+    // 3.3 GB an instructor waits through before the app does anything, for a
+    // capability many sessions never reach. Fetched when it is first asked for
+    // instead (ADR-0012): first run drops from ~8.6 GB to 5.3 GB.
+    provisioning: 'first-use',
   },
 };
 

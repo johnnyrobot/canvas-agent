@@ -16,6 +16,7 @@ export const IMPORT_CANVAS = 'canvasAgent:importCanvas';
 export const HEALTH = 'canvasAgent:health';
 export const PULL_MODEL = 'canvasAgent:pullModel';
 export const PULL_INGEST_MODEL = 'canvasAgent:pullIngestModel';
+export const PULL_VISION_MODEL = 'canvasAgent:pullVisionModel';
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 export const CREATE_SESSION = 'canvasAgent:createSession';
@@ -69,6 +70,16 @@ export const PULL_PROGRESS = 'canvasAgent:pullProgress';
 export const INGEST_PULL_PROGRESS = 'canvasAgent:ingestPullProgress';
 
 /**
+ * One-way event channel carrying streamed `pullVisionModel` progress (the
+ * deferred vision download, ADR-0012) from main → renderer. A `send`, not a
+ * `handle`, so it is excluded from `CHANNELS` and routed in `bridge.ts` by the
+ * minted `pullId` — its own channel rather than a share of `PULL_PROGRESS`,
+ * because the two pulls can be narrated by different screens at different
+ * moments and a shared channel would cross their bars.
+ */
+export const VISION_PULL_PROGRESS = 'canvasAgent:visionPullProgress';
+
+/**
  * All request/response IPC channels, keyed by the `AppApi` method they back.
  *
  * The `satisfies Record<keyof AppApi, string>` constraint is what makes this
@@ -85,6 +96,7 @@ export const CHANNELS = {
   health: HEALTH,
   pullModel: PULL_MODEL,
   pullIngestModel: PULL_INGEST_MODEL,
+  pullVisionModel: PULL_VISION_MODEL,
   createSession: CREATE_SESSION,
   listSessions: LIST_SESSIONS,
   loadSession: LOAD_SESSION,

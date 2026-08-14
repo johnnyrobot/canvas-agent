@@ -124,7 +124,17 @@ export function openUrl(url: string): void {
 
 /** Normalize any thrown value to a display string. */
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  const raw = err instanceof Error ? err.message : String(err);
+  // Strip the `SomeError: ` kind-prefix the bridge folds in (see `unwrap` in
+  // bridge.ts). It exists so the UI can branch on the kind; showing it to an
+  // instructor would be leaking a class name into a sentence about their course.
+  return raw.replace(/^[A-Z][A-Za-z0-9]*Error: /, '');
+}
+
+/** Whether `err` is the named kind, however it crossed the preload boundary. */
+export function isErrorKind(err: unknown, name: string): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.name === name || err.message.startsWith(`${name}: `);
 }
 
 /** Run `fn` after `ms` (thin wrapper so modules don't touch globals directly). */

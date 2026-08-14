@@ -15,6 +15,18 @@ import type { ModelHealth, ModelPullProgress, RuntimeHealth } from '../../contra
 type RequiredModelHealth = Pick<RuntimeHealth, 'model' | 'visionModel'>;
 
 /**
+ * States whose weights the first-run pull does not fetch — so they are neither
+ * offered by its affordance nor counted in its bar.
+ *
+ * Two states, two unrelated reasons (the operator said no; the download waits
+ * until it is needed), one consequence. Named once because the renderer asks
+ * this question in three places, and three hand-written exclusion lists would
+ * eventually disagree — the disagreement showing up as a bar that never reaches
+ * 100%.
+ */
+const NOT_PULLED_AT_FIRST_RUN: ReadonlySet<ModelHealth['status']> = new Set(['disabled', 'deferred']);
+
+/**
  * Approximate download size, in GB, of each model tag the app ships as a default
  * — what first run tells the instructor BEFORE the download starts, so they can
  * decide whether now is the moment (ADR-0009).
@@ -30,8 +42,10 @@ type RequiredModelHealth = Pick<RuntimeHealth, 'model' | 'visionModel'>;
  * figures in prose (they are the sizing case for 16 GB Macs) — the two move
  * together, and the guard test is what forces a new default through here.
  *
- * The two entries are the required set of ADR-0009, text then vision: ~8.6 GB
- * total, which is the number first run states.
+ * The two entries are the required set of ADR-0009, text then vision. First run
+ * no longer states their sum: the vision model is fetched on first use
+ * (ADR-0012), so the download sentence quotes 5.3 GB and a second sentence names
+ * the 3.3 GB that follows when alt-text suggestion is first asked for.
  */
 export const MODEL_DOWNLOAD_SIZES_GB: Readonly<Record<string, number>> = {
   'granite4.1:8b': 5.3,
@@ -120,6 +134,58 @@ export function disabledCapabilityText(health: RequiredModelHealth): string {
 }
 
 /**
+ * What to say about a capability whose weights are fetched on first use
+ * (ADR-0012) — and what taking it will cost.
+ *
+ * Said out loud for the same reason `disabled` is, and with one addition: the
+ * first-run figure just dropped by this model's size. A number that shrinks
+ * without explanation is a promise the app breaks later, at the worst possible
+ * moment — mid-task, when the instructor wanted alt text and got a download.
+ *
+ * The size is stated when it is declared and omitted when it is not, rather than
+ * guessed: understating a download is the failure the whole sentence exists to
+ * prevent. Names the capability, not the tag, because at this point the user has
+ * chosen nothing about models and a tag means nothing to them.
+ */
+export function deferredCapabilityText(
+  health: RequiredModelHealth,
+  sizes: Readonly<Record<string, number>> = MODEL_DOWNLOAD_SIZES_GB,
+): string {
+  const vision = health.visionModel;
+  if (vision?.status !== 'deferred') return '';
+  const gb = sizes[vision.tag];
+  const size = typeof gb === 'number' && gb > 0 ? ` (about ${gb.toFixed(1)} GB)` : '';
+  return `Alt-text suggestion downloads its model${size} the first time you use it — detection works now`;
+}
+
+/**
+ * The download to take before a turn that needs vision — or `undefined` when
+ * there is nothing to take (ADR-0012).
+ *
+ * `turnNeedsVision` is the caller's, because only the caller knows what the turn
+ * carries. Offering 3.3 GB on a turn that will never touch the model is exactly
+ * the surprise deferring the pull exists to remove, so the offer is gated on the
+ * one thing the renderer can know for certain before the turn starts: an image
+ * came with it. Turns that only MIGHT reach the model — the tool loop deciding
+ * to suggest alt text — are covered by the in-turn guard instead, which fails
+ * with a diagnosis rather than a 404.
+ *
+ * Only `deferred` is offered. `ready` needs nothing, `disabled` was the
+ * operator's decision and must never be re-litigated by a dialog, and
+ * `incapable` is the one state where downloading is precisely what cannot help.
+ */
+export function visionDownloadOffer(
+  health: RequiredModelHealth,
+  turnNeedsVision: boolean,
+  sizes: Readonly<Record<string, number>> = MODEL_DOWNLOAD_SIZES_GB,
+): { tag: string; text: string; label: string; sizeText: string } | undefined {
+  const vision = health.visionModel;
+  if (!turnNeedsVision || vision?.status !== 'deferred') return undefined;
+  const affordance = downloadModelAffordance([vision], sizes);
+  return { tag: vision.tag, ...affordance };
+}
+
+/**
  * The tags the first-run pull will cover, as the runtime's health payload
  * reports them: the required models, deduplicated in role order — whether or not
  * they are installed. Named for its input because `src/llm/config.ts` has a
@@ -135,10 +201,13 @@ export function disabledCapabilityText(health: RequiredModelHealth): string {
 export function requiredTagsFromHealth(health: RequiredModelHealth): string[] {
   const tags: string[] = [];
   for (const model of [health.model, health.visionModel]) {
-    // A DISABLED role is not in the required set, so `pullModel` will not fetch
-    // it (ADR-0010). Counting it here would widen the denominator by a model
-    // that never reports, leaving the bar permanently short of 100%.
-    if (model !== undefined && model.status !== 'disabled' && !tags.includes(model.tag)) tags.push(model.tag);
+    // A DISABLED role is not in the required set, and a DEFERRED one is not in
+    // the FIRST-RUN set (ADR-0010, ADR-0012) — `pullModel` fetches neither.
+    // Counting either here would widen the denominator by a model that never
+    // reports, leaving the bar permanently short of 100%: a download that sits
+    // at 50% reads as hung, not as finished.
+    if (model === undefined || NOT_PULLED_AT_FIRST_RUN.has(model.status)) continue;
+    if (!tags.includes(model.tag)) tags.push(model.tag);
   }
   return tags;
 }

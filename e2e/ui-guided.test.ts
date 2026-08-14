@@ -307,13 +307,24 @@ test('M20 review-panel before/after HTML is inert escaped text, never live marku
   });
 });
 
-test('M25 first-run two-model pull shows ONE bar that never resets', { skip, timeout: 60_000 }, async () => {
+test('M25 the first-run pull shows ONE bar that never resets, and does not fetch the deferred model', { skip, timeout: 60_000 }, async () => {
   await withApp('models-missing', async (win) => {
     // Both required models absent, sidecars up: the first-run case (ADR-0009).
+    // Since ADR-0012 only the TEXT model is fetched here — the vision model is
+    // deferred to first use, which is what takes first run from 8.6 GB to 5.3.
     const health = win.getByTestId('health');
     await waitForText(health, /not installed/);
     const affordance = win.getByTestId('download-model');
-    assert.match((await affordance.getAttribute('aria-label')) ?? '', /e2e-scripted.*e2e-scripted-vision/);
+    const label = (await affordance.getAttribute('aria-label')) ?? '';
+    assert.match(label, /e2e-scripted/);
+    assert.doesNotMatch(
+      label,
+      /e2e-scripted-vision/,
+      'the deferred model must not be in the first-run download — offering it here is the 3.3 GB this removes',
+    );
+    // And the screen says what is deferred, rather than letting the smaller
+    // number pass without explanation.
+    await waitForText(health, /Alt-text suggestion downloads its model/);
 
     await affordance.click();
 
@@ -352,6 +363,7 @@ test('M25 first-run two-model pull shows ONE bar that never resets', { skip, tim
       for (const tag of ['e2e-scripted', 'e2e-scripted-vision']) {
         if (frame.text.includes(tag)) named.add(tag);
       }
+      assert.ok(!named.has('e2e-scripted-vision'), 'the deferred model is not part of this download');
       await sleep(25);
     }
 
@@ -360,10 +372,47 @@ test('M25 first-run two-model pull shows ONE bar that never resets', { skip, tim
       assert.ok(samples[i]! >= samples[i - 1]!, `bar reset mid-download: ${samples.join(' → ')}`);
     }
     assert.ok(Math.max(...samples) > Math.min(...samples), `bar never advanced: ${samples.join(' → ')}`);
-    assert.ok(named.has('e2e-scripted-vision'), 'the model currently transferring is named');
-    // Both models installed afterwards: no second offer to download gigabytes.
+    assert.ok(named.has('e2e-scripted'), 'the model currently transferring is named');
+    // Installed afterwards: no second offer to download gigabytes.
     await waitForText(health, /Local runtime ready/);
     assert.equal(await win.getByTestId('download-model').count(), 0);
+  });
+});
+
+test('M27 a turn carrying an image fetches the deferred model FIRST, then runs', { skip, timeout: 60_000 }, async () => {
+  await withApp('models-missing', async (win) => {
+    // The sequencing ADR-0012 turns on. The scripted runtime REFUSES a turn
+    // carrying an image while the vision model is unfetched — the same failure
+    // the real sidecar raises — so this passes only if the UI fetches the model
+    // before running the turn. Delete the gate in `runTurn` and this goes red.
+    await waitForText(win.getByTestId('health'), /not installed/);
+    await win.getByTestId('inst-task-ask').click();
+    // Attach before typing: render() rebuilds the whole subtree (no diffing).
+    await win.getByTestId('inst-ask-attach').click();
+    await win.getByTestId('inst-ask-source-screen:e2e:0').waitFor({ timeout: 10_000 });
+    await win.getByTestId('inst-ask-source-screen:e2e:0').click();
+    await win.getByTestId('inst-ask-shot-remove').waitFor({ timeout: 10_000 });
+    await win.getByTestId('inst-ask-input').fill('What alt text should this image have?');
+    await win.getByTestId('inst-ask-submit').click();
+
+    // The turn answers, which it cannot do until the model has been fetched.
+    // (The answer screen carries no health indicator, so the answer itself is
+    // the assertion — the scripted runtime would have refused this turn.)
+    await waitForText(win.locator('#app'), /Use real table headers/);
+  });
+});
+
+test('M28 a turn that asks for alt text with no image recovers: fetch, then answer', { skip, timeout: 60_000 }, async () => {
+  await withApp('models-missing', async (win) => {
+    // The half no pre-turn check can predict (ADR-0012): the tool loop decides
+    // to suggest alt text on a turn carrying no image. The scripted runtime
+    // refuses it exactly as the sidecar does, and the UI must fetch the model
+    // and run the turn rather than leaving the instructor at a dead end.
+    await waitForText(win.getByTestId('health'), /not installed/);
+    await win.getByTestId('inst-task-ask').click();
+    await win.getByTestId('inst-ask-input').fill('Write alt text for the diagram on my syllabus page.');
+    await win.getByTestId('inst-ask-submit').click();
+    await waitForText(win.locator('#app'), /Use real table headers/);
   });
 });
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveNativeUrl, loadLLMConfig, requiredModelTags, uniqueModels } from './config.js';
+import { deriveNativeUrl, loadLLMConfig, modelTagsToPull, requiredModelTags, uniqueModels } from './config.js';
 import { REQUIRED_MODEL_ROLES } from './types.js';
 
 // This module holds no shipping default (ADR-0007), so every config here names
@@ -68,6 +68,35 @@ test('requiredModelTags ignores roles outside the required set (ADR-0009)', () =
     MODEL_CHEAP: 'test-cheap:0.5b',
   });
   assert.deepEqual(requiredModelTags(c), [TEXT]);
+});
+
+// ── What is fetched when (ADR-0012) ──────────────────────────────────────────
+
+test('the first-run set is the text model; vision is fetched on first use', () => {
+  const c = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_VISION: 'test-vision:2b' });
+  assert.deepEqual(modelTagsToPull(c, 'first-run'), [TEXT]);
+  assert.deepEqual(modelTagsToPull(c, 'first-use'), ['test-vision:2b']);
+  // Both halves together are still the whole required set — deferring changes
+  // WHEN a tag is fetched, never WHETHER it is required.
+  assert.deepEqual(
+    [...modelTagsToPull(c, 'first-run'), ...modelTagsToPull(c, 'first-use')].sort(),
+    [...requiredModelTags(c)].sort(),
+  );
+});
+
+test('a tag shared by both roles is fetched at first run, and never again on demand', () => {
+  // The collapsed configuration: one multimodal tag for both required roles. It
+  // arrives with the first-run pull, so the deferred set is empty — re-pulling
+  // gigabytes already on disk is exactly the surprise this split avoids.
+  const c = loadLLMConfig({ MODEL_TEXT: TEXT });
+  assert.deepEqual(modelTagsToPull(c, 'first-run'), [TEXT]);
+  assert.deepEqual(modelTagsToPull(c, 'first-use'), []);
+});
+
+test('a disabled capability is fetched at neither moment', () => {
+  const c = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_VISION: 'test-vision:2b', LLM_VISION_ENABLED: 'false' });
+  assert.deepEqual(modelTagsToPull(c, 'first-run'), [TEXT]);
+  assert.deepEqual(modelTagsToPull(c, 'first-use'), []);
 });
 
 test('invalid numeric env throws', () => {

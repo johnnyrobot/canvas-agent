@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { errorMessage, isErrorKind } from './renderer/ui.js';
 import type {
   AppApi,
   BrandKit,
@@ -246,7 +247,12 @@ test('each new method invokes its channel with the right args and unwraps the va
   }
 });
 
-test('an {ok:false} envelope rejects with an Error carrying message + name', async () => {
+test('an {ok:false} envelope rejects with an Error carrying message + KIND', async () => {
+  // The kind travels in the MESSAGE, not only in `name`. This code runs in the
+  // preload, and contextBridge re-creates the rejection in the renderer's world
+  // as a bare `Error` — dropping `name` and with it any UI branch that trusted
+  // it (ADR-0012's fetch-and-retry was silently dead until this was found).
+  // `errorMessage()` strips the prefix again, so nobody reads a class name.
   const { invoke } = fakeInvoke({
     [HEALTH]: { ok: false, error: { name: 'TypeError', message: 'sidecar down' } },
   });
@@ -254,8 +260,18 @@ test('an {ok:false} envelope rejects with an Error carrying message + name', asy
 
   await assert.rejects(() => bridge.health(), (err: unknown) => {
     assert.ok(err instanceof Error);
-    assert.equal(err.message, 'sidecar down');
-    assert.equal(err.name, 'TypeError');
+    assert.equal(err.name, 'TypeError', 'still set, for a caller in this process');
+    assert.ok(isErrorKind(err, 'TypeError'), 'and recoverable from the message alone');
+    assert.equal(errorMessage(err), 'sidecar down', 'but never displayed');
     return true;
   });
 });
+
+test('an unnamed error keeps its message unprefixed', async () => {
+  const { invoke } = fakeInvoke({ [HEALTH]: { ok: false, error: { name: 'Error', message: 'boom' } } });
+  await assert.rejects(
+    () => createBridge(invoke, noSub).health(),
+    (err: Error) => err.message === 'boom',
+  );
+});
+

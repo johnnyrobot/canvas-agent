@@ -270,6 +270,13 @@ export function createStubApi(): AppApi {
       onProgress?.({ status: 'downloading', model: 'granite_docling', total: 6, completed: 6, percent: 100 });
       onProgress?.({ status: 'success' });
     },
+    async pullVisionModel(onProgress): Promise<void> {
+      // The deferred download (ADR-0012), demoed as one model's sweep — the
+      // stub's vision tag is the second of STUB_REQUIRED_TAGS.
+      const tag = STUB_REQUIRED_TAGS[STUB_REQUIRED_TAGS.length - 1] ?? '';
+      onProgress?.({ status: 'downloading', model: tag, total: 100, completed: 100, percent: 100 });
+      onProgress?.({ status: 'success', model: tag });
+    },
 
     // ── Sessions ───────────────────────────────────────────────────────────────
     async createSession(init): Promise<Session> {

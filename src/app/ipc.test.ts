@@ -161,6 +161,10 @@ function fakeApi(overrides: Partial<AppApi> = {}) {
       calls.push({ method: 'runTurn', args: [req] });
       return TURN_VIEW;
     },
+    async pullVisionModel(onProgress) {
+      calls.push({ method: 'pullVisionModel', args: [] });
+      onProgress?.({ status: 'success' });
+    },
     async saveCanvasAuth(auth) {
       calls.push({ method: 'saveCanvasAuth', args: [auth] });
     },

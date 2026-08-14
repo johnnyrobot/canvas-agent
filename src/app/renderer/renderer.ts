@@ -11,7 +11,19 @@
  */
 import { composeAlignmentPrompt } from './alignment.js';
 import { previewFrame, previewSrcdoc } from './preview.js';
-import { api, byId, copyText, el, errorMessage, later, onReady, readStorage, writeStorage, type El } from './ui.js';
+import {
+  api,
+  byId,
+  copyText,
+  el,
+  errorMessage,
+  isErrorKind,
+  later,
+  onReady,
+  readStorage,
+  writeStorage,
+  type El,
+} from './ui.js';
 import { turnViewToVm, type FragmentVm } from '../view.js';
 import { appChromeClass, themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
 import { createRemediationPanel, type RemediationDeps } from './remediation.js';
@@ -23,8 +35,10 @@ import {
   missingRequiredModels,
   unsatisfiedRequiredModels,
   unsatisfiedModelsText,
+  deferredCapabilityText,
   disabledCapabilityText,
   requiredTagsFromHealth,
+  visionDownloadOffer,
   startModelPull,
   type ModelPullState,
 } from './model-health.js';
@@ -42,6 +56,7 @@ import {
   type InstIngestDeps,
   type InstRole,
 } from './institutional-screens.js';
+import { MODEL_NOT_FETCHED } from '../../contracts/index.js';
 import type {
   BrandKit,
   CanvasPage,
@@ -50,6 +65,7 @@ import type {
   DocumentConversionResult,
   ModelHealth,
   ProductMode,
+  RuntimeHealth,
   ScreenshotAttachment,
   ScreenshotPermissionStatus,
   ScreenshotSource,
@@ -134,6 +150,19 @@ interface State {
    * progress line re-renders, and render() replaces the whole subtree.
    */
   modelPull: ModelPullState | undefined;
+  /**
+   * Set while the DEFERRED vision download is in flight (ADR-0012) — its own
+   * field beside `modelPull`, not a share of it: the two are narrated at
+   * different moments by different screens, and one bar driven by two pulls
+   * would jump backwards when the second started.
+   */
+  visionPull: ModelPullState | undefined;
+  /**
+   * The last health payload, kept because `state.health` is a two-word summary
+   * and the deferred-download decision needs the per-role status behind it
+   * (ADR-0012). Undefined until the first probe answers.
+   */
+  healthPayload: RuntimeHealth | undefined;
   /** Set when the Docling conversion models aren't installed (PDF/scanned-doc support). */
   ingestModelMissing: boolean;
   /** Set while a first-run Docling model download is in flight. */
@@ -244,6 +273,8 @@ const state: State = {
   modelsMissing: [],
   modelTags: [],
   modelPull: undefined,
+  visionPull: undefined,
+  healthPayload: undefined,
   ingestModelMissing: false,
   ingestPull: undefined,
   activeSessionId: undefined,
@@ -663,6 +694,8 @@ export interface HealthStatusView {
   modelPull: ModelPullState | undefined;
   ingestModelMissing: boolean;
   ingestPull: { text: string; percent: number | undefined } | undefined;
+  /** In flight while the deferred vision model is being fetched (ADR-0012). */
+  visionPull: ModelPullState | undefined;
   onDownloadModel: () => void;
   onDownloadIngestModel: () => void;
 }
@@ -702,6 +735,18 @@ export function healthStatus(view: HealthStatusView): El {
       ),
     );
   }
+  // The deferred vision download (ADR-0012). Its own bar, never joined to the
+  // first-run one: this starts minutes or days later, at the moment an
+  // instructor asked for something that needs it, and folding it into a bar that
+  // already reached 100% would read as a finished download coming undone. There
+  // is no button beside it — nothing here is user-initiated, because the turn
+  // they just started IS the initiation.
+  if (view.visionPull) {
+    children.push(
+      progressWrap(view.visionPull.percent, 'Alt-text model download progress'),
+      el('span', { class: 'status__pull', 'data-testid': 'vision-pull' }, view.visionPull.text),
+    );
+  }
   // Docling document models (independent of the LLM, and NOT part of the required
   // set): offer a first-run download for PDF/scanned-doc support. Office/web
   // documents convert without them, so this never joins the bar above.
@@ -733,6 +778,7 @@ function currentHealthStatus(): El {
     modelPull: state.modelPull,
     ingestModelMissing: state.ingestModelMissing,
     ingestPull: state.ingestPull,
+    visionPull: state.visionPull,
     onDownloadModel: () => void downloadModel(),
     onDownloadIngestModel: () => void downloadIngestModel(),
   });
@@ -1579,6 +1625,7 @@ async function refreshHealth(): Promise<void> {
     const health = await api().health();
     const ok = health.llm && health.ingest;
     state.health = ok ? 'ready' : 'degraded';
+    state.healthPayload = health;
     // Every required tag, installed or not: the first-run bar's denominator.
     state.modelTags = requiredTagsFromHealth(health);
     // EITHER required model unsatisfied (text or vision, ADR-0009) marks the
@@ -1594,9 +1641,15 @@ async function refreshHealth(): Promise<void> {
     // well, the notice would vanish on first run — the one moment the user is
     // deciding what to download, and the moment they most need to know that
     // alt-text suggestion will not be there when the download finishes.
-    const disabledText = disabledCapabilityText(health);
+    // A capability whose weights arrive on first use is stated in the same
+    // breath and for the same reason (ADR-0012): first run just quoted a figure
+    // 3.3 GB smaller, and an instructor who is not told why will meet the
+    // difference mid-task instead.
+    const capabilityText = [disabledCapabilityText(health), deferredCapabilityText(health)]
+      .filter((s) => s !== '')
+      .join(' · ');
     const withDisabled = (line: string): string =>
-      [line, disabledText].filter((s) => s !== '').join(' · ');
+      [line, capabilityText].filter((s) => s !== '').join(' · ');
     if (unsatisfied.length > 0) {
       state.health = 'degraded';
       // Don't surface a bare CLI command — the app downloads the models itself
@@ -1620,6 +1673,7 @@ async function refreshHealth(): Promise<void> {
     }
   } catch {
     state.health = 'degraded';
+    state.healthPayload = undefined;
     state.healthText = 'Local runtime unavailable';
   } finally {
     render();
@@ -1660,6 +1714,52 @@ async function downloadModel(): Promise<void> {
     state.modelPull = undefined;
     state.error = `Model download failed: ${(err as Error).message}`;
     render();
+  }
+}
+
+/**
+ * Fetch the vision model if this turn needs it and it has not been fetched yet
+ * (ADR-0012) — BEFORE the turn starts.
+ *
+ * The pull cannot happen inside the turn: a turn is a streaming interaction the
+ * user is watching, and stopping one for the minutes 3.3 GB takes reads as a
+ * hang. So the download is taken here, narrated by its own bar, and the turn
+ * runs afterwards.
+ *
+ * Returns false only when the download was attempted and failed, which is the
+ * signal to abandon the turn — running it anyway would reach `describeImage`
+ * and fail again, one layer deeper and less legibly. Returns true when there
+ * was nothing to fetch, so callers need not decide that themselves.
+ */
+async function ensureVisionModel(turnNeedsVision: boolean): Promise<boolean> {
+  const offer = visionDownloadOffer(state.healthPayload ?? {}, turnNeedsVision);
+  if (!offer) return true;
+  // Already fetching means NOT ready — the two are only the same to a caller
+  // that would then run the turn against a model still arriving.
+  if (state.visionPull) return false;
+  state.error = undefined;
+  state.notice = `${offer.sizeText} — alt-text suggestion needs ${offer.tag}.`;
+  // The same aggregate the first-run bar folds, over a one-model set: the status
+  // text is worth having identical, and a second formatter would drift from it.
+  let pull = startModelPull([offer.tag]);
+  state.visionPull = pull;
+  render();
+  try {
+    await api().pullVisionModel((p) => {
+      pull = advanceModelPull(pull, p);
+      state.visionPull = pull;
+      render();
+    });
+    state.visionPull = undefined;
+    state.notice = 'Alt-text model downloaded.';
+    await refreshHealth();
+    return true;
+  } catch (err) {
+    state.visionPull = undefined;
+    state.notice = undefined;
+    state.error = `Alt-text model download failed: ${(err as Error).message}`;
+    render();
+    return false;
   }
 }
 
@@ -2074,12 +2174,30 @@ function removeScreenshot(id: string): void {
 
 async function runTurn(req: TurnRequest): Promise<TurnView | undefined> {
   if (state.busy) return undefined;
+  // `busy` covers the DOWNLOAD as well as the turn. It has to: the pull takes
+  // minutes, and with the flag set afterwards a second ask would sail past this
+  // guard and run against a model still being fetched — the very thing the gate
+  // exists to prevent.
   state.busy = true;
   state.error = undefined;
   render();
   if (state.activeSessionId) req.sessionId = state.activeSessionId;
   try {
-    return await api().runTurn(req);
+    // A turn carrying an image is the one case the renderer can know needs
+    // vision BEFORE it starts (ADR-0012).
+    if (!(await ensureVisionModel((req.attachments ?? []).length > 0))) return undefined;
+    try {
+      return await api().runTurn(req);
+    } catch (err) {
+      // The other case, which no pre-turn check can predict: the tool loop chose
+      // to suggest alt text on a turn that carried no image. The sidecar names
+      // that failure, and `MODEL_NOT_FETCHED` survives IPC as the error's
+      // `name` — so rather than hand the instructor a dead end, fetch what was
+      // missing and run the turn they asked for. Once: a second failure is real.
+      if (!isModelNotFetched(err)) throw err;
+      if (!(await ensureVisionModel(true))) return undefined;
+      return await api().runTurn(req);
+    }
   } catch (err) {
     state.error = errorMessage(err);
     return undefined;
@@ -2087,6 +2205,11 @@ async function runTurn(req: TurnRequest): Promise<TurnView | undefined> {
     state.busy = false;
     render();
   }
+}
+
+/** Whether a turn failed only because a deferred model had not been fetched (ADR-0012). */
+function isModelNotFetched(err: unknown): boolean {
+  return isErrorKind(err, MODEL_NOT_FETCHED);
 }
 
 async function copyFragment(fragment: FragmentVm | undefined): Promise<void> {
