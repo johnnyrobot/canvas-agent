@@ -14,7 +14,10 @@
  *     payload, each bundled sidecar launcher sits at the leaf path the runtime
  *     resolver spawns (`sidecars/<name>/<name>`), AND — when notarization is on —
  *     the Apple notary credentials are present in the env (electron-builder skips
- *     notarization SILENTLY without them, so this is the real fail-closed guard).
+ *     notarization SILENTLY without them, so this is the real fail-closed guard),
+ *     AND every shipped model default still resolves on the registry and reports
+ *     the capability its role needs (#40 — the one check here that leaves the
+ *     machine, so the one that must fail closed when it cannot).
  *     A fresh checkout passes the structure tier; an actual build must pass the
  *     staged tier too (run the `stage:*` scripts first, export credentials).
  *
@@ -160,6 +163,36 @@ if (build.mac?.notarize === true) {
     haveCreds
       ? `present (${credA ? 'API key' : credB ? 'Apple ID' : 'keychain profile'})`
       : 'MISSING — export ONE of: Option A (APPLE_API_KEY/_ID/_ISSUER), Option B (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID), or Option C (APPLE_KEYCHAIN_PROFILE alone — do NOT also set APPLE_KEYCHAIN); else electron-builder skips notarization silently');
+}
+
+// 6. Shipped model defaults: each one still RESOLVES on the registry, and reports
+//    the capability its role requires (#40). Same `staged` tier as the checks
+//    above — enforced under --strict, advisory otherwise — because it is only
+//    meaningful for a real release build, and because it needs a network and a
+//    local Ollama that a fresh checkout has neither of.
+//
+//    Both halves have already shipped broken once. A tag whose registry entry is
+//    renamed after release strands every user behind an `ollama pull` recovery
+//    that resolves to nothing; and a tag that pulls perfectly can still be unable
+//    to see, which is exactly how alt-text suggestion broke while every screen
+//    read ready. The decision logic is pure and unit-tested offline
+//    (`src/runtime/release-model-gate.ts`); this supplies the real probe.
+//
+//    Read from `dist/` on purpose: the shipped defaults live in `src/runtime`, so
+//    the gate follows a default swap automatically instead of restating tags a
+//    build script could not keep in sync. `npm run package` builds first; a
+//    stand-alone strict run must too, and says so when it has not.
+try {
+  const [{ checkShippedModelTags }, { probeShippedTag }] = await Promise.all([
+    import('../dist/runtime/release-model-gate.js'),
+    import('./model-tag-probe.mjs'),
+  ]);
+  for (const c of await checkShippedModelTags(probeShippedTag)) {
+    check(c.ok, 'staged', c.label, c.detail);
+  }
+} catch (err) {
+  check(false, 'staged', 'shipped model defaults checked against the registry',
+    `UNCHECKABLE (${err instanceof Error ? err.message : String(err)}) — run \`npm run build\` first; this gate reads the shipped defaults out of dist/`);
 }
 
 // Report.
