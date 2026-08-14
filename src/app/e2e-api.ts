@@ -347,7 +347,12 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
       // The vision model is DEFERRED, not missing, until something asks for it
       // (ADR-0012): on first run it is absent by design, so a UI that offered it
       // in the first-run download would show the seam here.
-      const visionStatus = installed && (scenario !== 'models-missing' || visionPulled);
+      // Independent of `installed`: the vision model is fetched by its OWN pull
+      // (ADR-0012), so tying it to the text model's would let this double report
+      // `deferred` right after a successful `pullVisionModel` — a state the real
+      // runtime cannot produce, and the kind of contradiction a double must not
+      // be able to express.
+      const visionStatus = up && (scenario !== 'models-missing' || visionPulled);
       return {
         llm: up,
         ingest: up,
