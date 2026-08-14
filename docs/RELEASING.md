@@ -70,8 +70,11 @@ npm run pre-release -- --strict                          # asserts paths exist, 
 > defaults pulled** (#40). It re-checks every default model tag the app ships:
 > that the registry still serves it — the `ollama pull <tag>` recovery the app
 > prints to a stranded user has to keep resolving after we ship — and that the tag
-> reports the capability its role requires, read from `/api/show`, because a tag
-> that pulls perfectly can still be unable to see. It fails **closed**: offline,
+> reports the capability its role requires, because a tag that pulls perfectly can
+> still be unable to see. Capabilities can only be read from a local copy, so the
+> gate first checks that copy's manifest digest against the one the registry
+> serves now: a stale pull is reported as such rather than vouched for. It fails
+> **closed**: offline,
 > Ollama down, or the tag not pulled locally all read as UNCHECKABLE and block the
 > build, since "we could not tell" must never package like "it is fine". Run
 > `npm run build` first — the gate reads the shipped defaults out of `dist/` so it

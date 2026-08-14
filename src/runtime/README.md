@@ -51,6 +51,7 @@ Canvas page access** — all on top of the same unconditional gate.
 | `runtime.ts` | `createRuntime(opts): RuntimeHandle` — the composition root: builds the real Ollama + Docling sidecars, calls `createAppApi` over them, and returns `{ api, dispose }` so the owner can stop what it started |
 | `activity.ts` | `createActivityTracker` / `noopActivityTracker` — idle-lifetime seam `createRuntime` threads through |
 | `database.ts` | `createLazyDatabase` — lazy on-device SQLite open/`migrate()`, the lifetime seam `createRuntime` owns and disposes |
+| `release-model-gate.ts` | `checkShippedModelTags(probe)` — the release-time verdict on every shipped default tag: it still resolves, the copy we can interrogate is the one the registry serves, and it reports its role's capability. Pure with the probe injected; the networked probe is `scripts/model-tag-probe.mjs`, run only by `pre-release --strict` |
 | `index.ts` | Public surface (`createRuntime`, `createAppApi`, `createEngineDeps`, re-exported contract types) |
 | `*.test.ts` | Offline unit tests (scripted runner, fake sidecars, real engine/theme/templates/knowledge/gate) |
 

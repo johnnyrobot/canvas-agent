@@ -51,6 +51,22 @@ function dirSizeMb(dir) {
   return bytes / 1048576;
 }
 
+/** Most recent mtime (ms) among files under `dir` with extension `ext`. 0 when absent/unreadable. */
+function newestMtimeMs(dir, ext) {
+  if (!existsSync(dir)) return 0;
+  let newest = 0;
+  try {
+    for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(ext)) continue;
+      const { mtimeMs } = statSync(path.join(entry.parentPath ?? entry.path, entry.name));
+      if (mtimeMs > newest) newest = mtimeMs;
+    }
+  } catch {
+    return 0;
+  }
+  return newest;
+}
+
 /**
  * "Staged" means the extraResources entry holds real payload. A directory counts
  * when it has a real child beyond .gitkeep / dotfiles; a single file entry (e.g.
@@ -182,14 +198,28 @@ if (build.mac?.notarize === true) {
 //    the gate follows a default swap automatically instead of restating tags a
 //    build script could not keep in sync. `npm run package` builds first; a
 //    stand-alone strict run must too, and says so when it has not.
+//    Which makes `dist/` freshness part of the gate, not a footnote: a stale
+//    build verifies the PREVIOUS defaults and prints a row of ticks about tags
+//    the DMG will not contain.
+const newestSrc = newestMtimeMs(path.join(ROOT, 'src'), '.ts');
+const newestDist = newestMtimeMs(path.join(ROOT, 'dist'), '.js');
+const built = newestDist > 0 && newestDist >= newestSrc;
+check(built, 'staged', 'dist/ is built from the current src/ (the model gate reads it)',
+  built ? 'up to date' : 'STALE/ABSENT — run `npm run build`; a stale dist/ would check the tags of the PREVIOUS build and pass');
+
 try {
-  const [{ checkShippedModelTags }, { probeShippedTag }] = await Promise.all([
+  const [{ checkShippedModelTags }, { REQUIRED_MODEL_ROLES }, { probeShippedTag }] = await Promise.all([
     import('../dist/runtime/release-model-gate.js'),
+    import('../dist/llm/types.js'),
     import('./model-tag-probe.mjs'),
   ]);
-  for (const c of await checkShippedModelTags(probeShippedTag)) {
-    check(c.ok, 'staged', c.label, c.detail);
-  }
+  const checks = await checkShippedModelTags(probeShippedTag);
+  // Completeness, not presence — the lesson the half-mirrored catalog seed
+  // taught. An empty result adds no rows at all, and a gate that reports
+  // nothing is indistinguishable from a gate that passed.
+  check(checks.length === REQUIRED_MODEL_ROLES.length, 'staged', 'every shipped default reached the report',
+    `${checks.length}/${REQUIRED_MODEL_ROLES.length} required roles checked`);
+  for (const c of checks) check(c.ok, 'staged', c.label, c.detail);
 } catch (err) {
   check(false, 'staged', 'shipped model defaults checked against the registry',
     `UNCHECKABLE (${err instanceof Error ? err.message : String(err)}) — run \`npm run build\` first; this gate reads the shipped defaults out of dist/`);
