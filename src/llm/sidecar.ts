@@ -14,7 +14,7 @@ import {
   type PullProgress,
   type RequiredModelRole,
   type RequiredModelStatus,
-  REQUIRED_ROLES,
+  missingCapabilities,
 } from './types.js';
 import { loadLLMConfig, reportedModels, requiredModelTags, type Env } from './config.js';
 import { OllamaClient, OllamaError, type FetchLike } from './client.js';
@@ -131,7 +131,7 @@ export class OllamaSidecar {
     } catch {
       return 'ready';
     }
-    return REQUIRED_ROLES[role].capabilities.every((c) => capabilities.includes(c)) ? 'ready' : 'incapable';
+    return missingCapabilities(role, capabilities).length === 0 ? 'ready' : 'incapable';
   }
 
   /**

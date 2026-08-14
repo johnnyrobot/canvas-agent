@@ -107,6 +107,25 @@ export const REQUIRED_ROLES: Readonly<Record<RequiredModelRole, RequiredRoleSpec
   },
 };
 
+/**
+ * What `role` demands that `capabilities` does not supply — empty when the tag
+ * can do the job.
+ *
+ * One expression of the rule, for the same reason `REQUIRED_ROLES` is one table:
+ * the runtime asks it of an installed tag (`modelStatus`) and packaging asks it
+ * of a shipped default (`checkShippedModelTags`), and two hand-written
+ * `every`/`includes` walks would be free to drift — silently, since each side
+ * has its own tests and both would keep passing. Returning the missing list
+ * rather than a boolean is what lets a caller say WHICH capability is absent;
+ * callers that only need the verdict read `.length === 0`.
+ */
+export function missingCapabilities(
+  role: RequiredModelRole,
+  capabilities: readonly string[],
+): string[] {
+  return REQUIRED_ROLES[role].capabilities.filter((c) => !capabilities.includes(c));
+}
+
 /** A piece of a multimodal message. */
 export type ContentPart =
   | { type: 'text'; text: string }
