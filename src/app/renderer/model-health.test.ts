@@ -12,6 +12,7 @@ import {
   unsatisfiedRequiredModels,
   unsatisfiedModelsText,
   disabledCapabilityText,
+  deferredCapabilityText,
 } from './model-health.js';
 
 const model = (tag: string, available: boolean) =>
@@ -219,6 +220,59 @@ test('a disabled model contributes no gigabytes and no segment to the pull bar',
   assert.equal(affordance.text, 'Download model');
   assert.equal(affordance.sizeText, 'About 5.3 GB to download');
   assert.doesNotMatch(affordance.label, /vision:2b/, 'a disabled model is not part of the download');
+});
+
+// ── A model fetched on first use, not at first run (ADR-0012) ────────────────
+
+const deferred = (tag: string) =>
+  ({ tag, status: 'deferred' as const, recovery: `${tag} downloads the first time you use alt-text suggestion.` });
+
+test('a DEFERRED model is neither missing nor unsatisfied', () => {
+  const health: RuntimeHealth = {
+    llm: true,
+    ingest: true,
+    model: model('text:1b', true),
+    visionModel: deferred('vision:2b'),
+  };
+  assert.deepEqual(missingRequiredModels(health), [], 'the first-run download must not offer it');
+  assert.deepEqual(
+    unsatisfiedRequiredModels(health),
+    [],
+    'nothing is wrong — the weights are one sized, offered download away',
+  );
+});
+
+test('a deferred model contributes no gigabytes and no segment to the first-run bar', () => {
+  // The bug this catches: `requiredTagsFromHealth` excluded only `disabled`, so
+  // a deferred model widened the denominator to two while `pullModel` fetched
+  // one — leaving the first-run bar stuck at 50% forever, which reads as a hung
+  // download of a model that was never going to arrive.
+  const health: RuntimeHealth = {
+    llm: true,
+    ingest: true,
+    model: model('text:1b', false),
+    visionModel: deferred('vision:2b'),
+  };
+  assert.deepEqual(
+    requiredTagsFromHealth(health),
+    ['text:1b'],
+    'the bar denominator must match what pullModel will actually fetch',
+  );
+
+  const affordance = downloadModelAffordance(missingRequiredModels(health), SIZES);
+  assert.equal(affordance.sizeText, 'About 5.3 GB to download', 'first run states what first run will fetch');
+  assert.doesNotMatch(affordance.label, /vision:2b/);
+});
+
+test('a deferred capability is stated, with what it will later cost', () => {
+  // The number shrank by 3.3 GB; saying nothing would make it a promise the app
+  // later breaks, which is the silent hole ADR-0009 and ADR-0010 both refused.
+  const health: RuntimeHealth = { llm: true, ingest: true, visionModel: deferred('vision:2b') };
+  const text = deferredCapabilityText(health, SIZES);
+  assert.match(text, /alt.text/i, 'names the capability, not the tag');
+  assert.match(text, /3\.3 GB/, 'and what it will cost when it is taken');
+  assert.equal(deferredCapabilityText({ visionModel: model('vision:2b', true) }, SIZES), '', 'silent once fetched');
+  assert.equal(deferredCapabilityText({ visionModel: disabled('vision:2b') }, SIZES), '', 'disabled has its own line');
 });
 
 // ── What the user is told BEFORE committing to the download (issue #32) ──────

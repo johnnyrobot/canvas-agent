@@ -467,7 +467,9 @@ export interface TurnView {
 
 /**
  * How a required model stands (ADR-0010): present and capable, absent,
- * present-but-unable-to-do-its-role's-job, or switched off by the operator.
+ * present-but-unable-to-do-its-role's-job, switched off by the operator, or not
+ * fetched yet because this role's weights are downloaded on first use
+ * (ADR-0012).
  *
  * Declared here as well as in `src/llm/types.ts` because this module imports
  * nothing — it is the boundary, and implementations reach it by dependency
@@ -479,7 +481,7 @@ export interface TurnView {
  * added HERE and not there stays assignable and compiles clean — it would simply
  * be a state the sidecar can never produce. Add to `src/llm/types.ts` first.
  */
-export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled';
+export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled' | 'deferred';
 
 /** Health of the local sidecars (for a UI status indicator). */
 export interface ModelHealth {
@@ -557,6 +559,19 @@ export interface AppApi {
    * Rejects outside the packaged app (no bundled Python) or on a download error.
    */
   pullIngestModel(onProgress?: OnModelPullProgress): Promise<void>;
+  /**
+   * Download the model this configuration defers to first use — the vision
+   * model, ~3.3 GB (ADR-0012), streaming progress to `onProgress`.
+   *
+   * Called when the instructor first asks for something that needs vision, so
+   * first run does not spend those gigabytes on a capability many sessions never
+   * reach. Resolves once the model is present; a no-op when the role is not
+   * required (vision switched off) or its tag already arrived with the first-run
+   * pull, so a caller may invoke it without first deciding which of those is
+   * true. Never call it from inside a turn: a turn is a streaming interaction
+   * being watched, and blocking one for minutes reads as a hang.
+   */
+  pullVisionModel(onProgress?: OnModelPullProgress): Promise<void>;
 
   // ── Sessions (storage-backed; the runtime persists each turn) ──
   createSession(init: { title: string; mode: ProductMode }): Promise<Session>;

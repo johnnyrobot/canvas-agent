@@ -15,8 +15,10 @@ import {
   type RequiredModelRole,
   type RequiredModelStatus,
   missingCapabilities,
+  REQUIRED_ROLES,
+  SATISFYING_MODEL_STATES,
 } from './types.js';
-import { loadLLMConfig, reportedModels, requiredModelTags, type Env } from './config.js';
+import { loadLLMConfig, modelTagsToPull, reportedModels, type Env } from './config.js';
 import { OllamaClient, OllamaError, type FetchLike } from './client.js';
 import { OllamaProcess, type SidecarLogger } from './process.js';
 import { Mutex } from './mutex.js';
@@ -107,11 +109,21 @@ export class OllamaSidecar {
     const models: RequiredModelStatus[] = await Promise.all(
       reportedModels(this.config).map(async ({ role, tag, required }) => {
         if (!required) return { role, tag, status: 'disabled' as const };
-        if (!installed.has(tag)) return { role, tag, status: 'missing' as const };
+        // Not installed is two different facts. For a role provisioned at first
+        // run it is a broken install; for one fetched on demand it is simply a
+        // download nobody has asked for yet (ADR-0012).
+        if (!installed.has(tag)) {
+          const absent: ModelStatusState =
+            REQUIRED_ROLES[role].provisioning === 'first-use' ? 'deferred' : 'missing';
+          return { role, tag, status: absent };
+        }
         return { role, tag, status: await this.capabilityStatus(role, tag) };
       }),
     );
-    return { ready: models.every((m) => m.status === 'ready' || m.status === 'disabled'), models };
+    // `deferred` satisfies the set for the same reason `disabled` does: nothing
+    // is wrong. The weights are one sized, offered download away, taken at the
+    // moment the capability is first asked for (ADR-0012).
+    return { ready: models.every((m) => SATISFYING_MODEL_STATES.has(m.status)), models };
   }
 
   /**
@@ -149,8 +161,42 @@ export class OllamaSidecar {
    * serialized against chat — there is nothing to chat with until this finishes.
    */
   async pullModel(onProgress?: (p: PullProgress) => void): Promise<void> {
+    await this.pullTags(modelTagsToPull(this.config, 'first-run'), onProgress);
+  }
+
+  /**
+   * Download the models this configuration defers to first use (ADR-0012) —
+   * today, the vision model, ~3.3 GB.
+   *
+   * Called when the instructor first asks for something that needs the
+   * capability, never inside a turn: a running turn is a streaming interaction
+   * being watched, and blocking one for the minutes this takes reads as a hang.
+   *
+   * Downloads NOTHING when the role is not required — an operator who set
+   * `LLM_VISION_ENABLED=false` chose to have no vision, and a download that
+   * appears anyway is the multi-gigabyte surprise the derived required set
+   * exists to prevent. Idempotent in practice: Ollama re-pulling an installed
+   * tag reports `success` almost immediately.
+   */
+  async pullVisionModel(onProgress?: (p: PullProgress) => void): Promise<void> {
+    await this.pullTags(modelTagsToPull(this.config, 'first-use'), onProgress);
+  }
+
+  /**
+   * Pull each tag in sequence, naming the model on every progress line.
+   *
+   * Shared by both pull entry points so they cannot drift on the details that
+   * matter to the bar above them: the daemon is brought up first; `percent`
+   * restarts per pull, so only a caller that knows the tag can aggregate across
+   * a set; and a failure stops the sequence rather than pressing on, leaving the
+   * status probe to report honestly what is still absent. Nothing is serialized
+   * against chat — there is nothing to chat with until a first-run pull
+   * finishes, and a deferred pull is gated by the UI before the turn starts.
+   */
+  private async pullTags(tags: readonly string[], onProgress?: (p: PullProgress) => void): Promise<void> {
+    if (tags.length === 0) return;
     await this.process.ensureAlive(); // make sure the bundled `ollama serve` is up
-    for (const tag of requiredModelTags(this.config)) {
+    for (const tag of tags) {
       for await (const raw of this.client.pullModel(tag)) {
         onProgress?.({ ...normalizePullProgress(raw), model: tag });
       }

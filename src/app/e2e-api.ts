@@ -268,6 +268,9 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
   let modelsPulled = false;
   /** The same, for the INDEPENDENT document-model download. */
   let ingestPulled = false;
+  /** And for the vision model, which is fetched on first use, not at first run (ADR-0012). */
+  let visionPulled = false;
+  const visionTag = (): string => 'e2e-scripted-vision';
 
   return {
     async runTurn(req): Promise<TurnView> {
@@ -312,11 +315,19 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
         status: installed ? ('ready' as const) : ('missing' as const),
         recovery: installed ? '' : 'CANVAS_AGENT_E2E_API=scripted',
       });
+      // The vision model is DEFERRED, not missing, until something asks for it
+      // (ADR-0012): on first run it is absent by design, so a UI that offered it
+      // in the first-run download would show the seam here.
+      const visionStatus = installed && (scenario !== 'models-missing' || visionPulled);
       return {
         llm: up,
         ingest: up,
         model: model('e2e-scripted'),
-        visionModel: model('e2e-scripted-vision'),
+        visionModel: {
+          tag: visionTag(),
+          status: visionStatus ? ('ready' as const) : ('deferred' as const),
+          recovery: visionStatus ? '' : `${visionTag()} downloads the first time you use alt-text suggestion.`,
+        },
         // First run has no document models either, which is what makes the two
         // INDEPENDENT downloads drivable together — finishing one calls back
         // into the health probe while the other is still streaming.
@@ -348,6 +359,16 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
       failIfDown();
       onProgress?.({ status: 'success' });
       ingestPulled = true;
+    },
+    async pullVisionModel(onProgress): Promise<void> {
+      // The deferred vision download (ADR-0012). Scripted like the first-run
+      // pull so a UI test can watch the bar it drives, and recorded so a test
+      // can assert it happened BEFORE the turn that needed it ran.
+      failIfDown();
+      const tag = visionTag();
+      onProgress?.({ status: 'downloading', model: tag, total: 100, completed: 100, percent: 100 });
+      onProgress?.({ status: 'success', model: tag });
+      visionPulled = true;
     },
 
     async createSession(init): Promise<Session> {

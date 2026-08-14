@@ -31,6 +31,8 @@ import {
   PULL_MODEL,
   PULL_PROGRESS,
   PULL_INGEST_MODEL,
+  PULL_VISION_MODEL,
+  VISION_PULL_PROGRESS,
   INGEST_PULL_PROGRESS,
   CHUNK,
 } from './channels.js';
@@ -125,6 +127,18 @@ export function registerIpc(ipcMain: IpcMainLike, api: AppApi): void {
       if (pullId === undefined) return api.pullIngestModel();
       const sender = (event as IpcEventLike).sender;
       return api.pullIngestModel((progress) => sender.send(INGEST_PULL_PROGRESS, { pullId, progress }));
+    });
+  });
+
+  // The deferred vision download (ADR-0012) — same streaming shape again,
+  // tagged over its own VISION_PULL_PROGRESS event channel so it cannot be
+  // mistaken for the first-run pull by a renderer listening to both.
+  handle(PULL_VISION_MODEL, (event, payload) => {
+    const { pullId } = (payload ?? {}) as { pullId?: string };
+    return envelope(() => {
+      if (pullId === undefined) return api.pullVisionModel();
+      const sender = (event as IpcEventLike).sender;
+      return api.pullVisionModel((progress) => sender.send(VISION_PULL_PROGRESS, { pullId, progress }));
     });
   });
 

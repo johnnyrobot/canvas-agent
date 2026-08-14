@@ -45,6 +45,8 @@ import {
   PULL_MODEL,
   PULL_PROGRESS,
   PULL_INGEST_MODEL,
+  PULL_VISION_MODEL,
+  VISION_PULL_PROGRESS,
   INGEST_PULL_PROGRESS,
 } from './channels.js';
 
@@ -131,6 +133,22 @@ export function createBridge(invoke: Invoke, subscribe: Subscribe): AppApi {
       });
       try {
         return unwrap(await invoke(PULL_INGEST_MODEL, { pullId }));
+      } finally {
+        off();
+      }
+    },
+    async pullVisionModel(onProgress) {
+      // Same streaming shape again, over VISION_PULL_PROGRESS (ADR-0012).
+      if (!onProgress) {
+        return unwrap(await invoke(PULL_VISION_MODEL, {}));
+      }
+      const pullId = crypto.randomUUID();
+      const off = subscribe(VISION_PULL_PROGRESS, (payload) => {
+        const p = payload as { pullId: string; progress: ModelPullProgress };
+        if (p.pullId === pullId) onProgress(p.progress);
+      });
+      try {
+        return unwrap(await invoke(PULL_VISION_MODEL, { pullId }));
       } finally {
         off();
       }

@@ -6,6 +6,7 @@ import {
   REQUIRED_MODEL_ROLES,
   REQUIRED_ROLES,
   type LLMConfig,
+  type ModelProvisioning,
   type ModelRole,
   type RequiredModelRole,
 } from './types.js';
@@ -153,4 +154,35 @@ export function reportedModels(
  */
 export function requiredModelTags(config: LLMConfig): string[] {
   return [...new Set(requiredModels(config).map((m) => m.tag))];
+}
+
+/**
+ * The required tags fetched at `when` — the split of `requiredModelTags` by the
+ * moment a role's weights are downloaded (ADR-0012).
+ *
+ * `'first-run'` is what provisioning pulls before the app is usable;
+ * `'first-use'` is what is fetched on demand, the first time the capability is
+ * exercised. Both read the same `REQUIRED_ROLES` declaration and both drop a
+ * role this configuration does not require, so a disabled capability is neither
+ * pulled at setup nor offered later.
+ *
+ * Deduplicated, like `requiredModelTags`, for the configuration that collapses
+ * both required roles onto one multimodal tag: there the tag is fetched at first
+ * run under the text role, and the vision role finds it already present rather
+ * than pulling the same gigabytes again.
+ */
+export function modelTagsToPull(config: LLMConfig, when: ModelProvisioning): string[] {
+  const firstRun = new Set(
+    requiredModels(config)
+      .filter((m) => REQUIRED_ROLES[m.role].provisioning === 'first-run')
+      .map((m) => m.tag),
+  );
+  if (when === 'first-run') return [...firstRun];
+  return [
+    ...new Set(
+      requiredModels(config)
+        .filter((m) => REQUIRED_ROLES[m.role].provisioning === 'first-use' && !firstRun.has(m.tag))
+        .map((m) => m.tag),
+    ),
+  ];
 }
