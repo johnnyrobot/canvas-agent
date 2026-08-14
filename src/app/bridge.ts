@@ -62,7 +62,15 @@ export type Subscribe = (channel: string, handler: (payload: unknown) => void) =
 function unwrap<T>(result: unknown): T {
   const res = result as IpcResult<T>;
   if (res.ok) return res.value;
-  const err = new Error(res.error.message);
+  // `name` is set here AND folded into the message, because it does not survive
+  // on its own: this runs in the preload, and contextBridge re-creates the
+  // rejection in the renderer's world as a bare `Error`, dropping own
+  // properties. A UI that BRANCHES on the kind of failure — offering to fetch a
+  // deferred model rather than showing a dead end (ADR-0012) — therefore reads
+  // the prefix. `errorMessage()` strips it again before any of it is displayed,
+  // so the person still reads a sentence rather than a class name.
+  const named = res.error.name !== '' && res.error.name !== 'Error';
+  const err = new Error(named ? `${res.error.name}: ${res.error.message}` : res.error.message);
   err.name = res.error.name;
   throw err;
 }

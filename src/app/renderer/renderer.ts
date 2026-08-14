@@ -11,7 +11,19 @@
  */
 import { composeAlignmentPrompt } from './alignment.js';
 import { previewFrame, previewSrcdoc } from './preview.js';
-import { api, byId, copyText, el, errorMessage, later, onReady, readStorage, writeStorage, type El } from './ui.js';
+import {
+  api,
+  byId,
+  copyText,
+  el,
+  errorMessage,
+  isErrorKind,
+  later,
+  onReady,
+  readStorage,
+  writeStorage,
+  type El,
+} from './ui.js';
 import { turnViewToVm, type FragmentVm } from '../view.js';
 import { appChromeClass, themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
 import { createRemediationPanel, type RemediationDeps } from './remediation.js';
@@ -44,6 +56,7 @@ import {
   type InstIngestDeps,
   type InstRole,
 } from './institutional-screens.js';
+import { MODEL_NOT_FETCHED } from '../../contracts/index.js';
 import type {
   BrandKit,
   CanvasPage,
@@ -143,7 +156,7 @@ interface State {
    * different moments by different screens, and one bar driven by two pulls
    * would jump backwards when the second started.
    */
-  visionPull: { text: string; percent: number | undefined } | undefined;
+  visionPull: ModelPullState | undefined;
   /**
    * The last health payload, kept because `state.health` is a two-word summary
    * and the deferred-download decision needs the per-role status behind it
@@ -682,7 +695,7 @@ export interface HealthStatusView {
   ingestModelMissing: boolean;
   ingestPull: { text: string; percent: number | undefined } | undefined;
   /** In flight while the deferred vision model is being fetched (ADR-0012). */
-  visionPull: { text: string; percent: number | undefined } | undefined;
+  visionPull: ModelPullState | undefined;
   onDownloadModel: () => void;
   onDownloadIngestModel: () => void;
 }
@@ -730,7 +743,7 @@ export function healthStatus(view: HealthStatusView): El {
   // they just started IS the initiation.
   if (view.visionPull) {
     children.push(
-      progressWrap(view.visionPull.percent ?? 0, 'Alt-text model download progress'),
+      progressWrap(view.visionPull.percent, 'Alt-text model download progress'),
       el('span', { class: 'status__pull', 'data-testid': 'vision-pull' }, view.visionPull.text),
     );
   }
@@ -1720,19 +1733,21 @@ async function downloadModel(): Promise<void> {
  */
 async function ensureVisionModel(turnNeedsVision: boolean): Promise<boolean> {
   const offer = visionDownloadOffer(state.healthPayload ?? {}, turnNeedsVision);
-  if (!offer || state.visionPull) return true;
+  if (!offer) return true;
+  // Already fetching means NOT ready — the two are only the same to a caller
+  // that would then run the turn against a model still arriving.
+  if (state.visionPull) return false;
   state.error = undefined;
   state.notice = `${offer.sizeText} — alt-text suggestion needs ${offer.tag}.`;
-  state.visionPull = { text: 'Starting download…', percent: undefined };
+  // The same aggregate the first-run bar folds, over a one-model set: the status
+  // text is worth having identical, and a second formatter would drift from it.
+  let pull = startModelPull([offer.tag]);
+  state.visionPull = pull;
   render();
   try {
     await api().pullVisionModel((p) => {
-      const percent = typeof p.percent === 'number' ? p.percent : undefined;
-      const label = p.model ? `${p.status} ${p.model}` : p.status;
-      state.visionPull = {
-        text: p.status === 'success' ? 'Finishing…' : percent !== undefined ? `${label} ${percent}%` : label,
-        percent,
-      };
+      pull = advanceModelPull(pull, p);
+      state.visionPull = pull;
       render();
     });
     state.visionPull = undefined;
@@ -2159,17 +2174,30 @@ function removeScreenshot(id: string): void {
 
 async function runTurn(req: TurnRequest): Promise<TurnView | undefined> {
   if (state.busy) return undefined;
-  // A turn carrying an image is the one case the renderer can know needs vision
-  // before it starts (ADR-0012). Everything else that reaches the model — the
-  // tool loop choosing to suggest alt text — is caught by the in-turn guard,
-  // which fails with a diagnosis rather than a raw 404.
-  if (!(await ensureVisionModel((req.attachments ?? []).length > 0))) return undefined;
+  // `busy` covers the DOWNLOAD as well as the turn. It has to: the pull takes
+  // minutes, and with the flag set afterwards a second ask would sail past this
+  // guard and run against a model still being fetched — the very thing the gate
+  // exists to prevent.
   state.busy = true;
   state.error = undefined;
   render();
   if (state.activeSessionId) req.sessionId = state.activeSessionId;
   try {
-    return await api().runTurn(req);
+    // A turn carrying an image is the one case the renderer can know needs
+    // vision BEFORE it starts (ADR-0012).
+    if (!(await ensureVisionModel((req.attachments ?? []).length > 0))) return undefined;
+    try {
+      return await api().runTurn(req);
+    } catch (err) {
+      // The other case, which no pre-turn check can predict: the tool loop chose
+      // to suggest alt text on a turn that carried no image. The sidecar names
+      // that failure, and `MODEL_NOT_FETCHED` survives IPC as the error's
+      // `name` — so rather than hand the instructor a dead end, fetch what was
+      // missing and run the turn they asked for. Once: a second failure is real.
+      if (!isModelNotFetched(err)) throw err;
+      if (!(await ensureVisionModel(true))) return undefined;
+      return await api().runTurn(req);
+    }
   } catch (err) {
     state.error = errorMessage(err);
     return undefined;
@@ -2177,6 +2205,11 @@ async function runTurn(req: TurnRequest): Promise<TurnView | undefined> {
     state.busy = false;
     render();
   }
+}
+
+/** Whether a turn failed only because a deferred model had not been fetched (ADR-0012). */
+function isModelNotFetched(err: unknown): boolean {
+  return isErrorKind(err, MODEL_NOT_FETCHED);
 }
 
 async function copyFragment(fragment: FragmentVm | undefined): Promise<void> {

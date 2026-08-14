@@ -298,7 +298,7 @@ test('the deferred vision download gets its own bar, and offers no button', () =
       health: 'ready',
       healthText: 'Local runtime ready - granite4.1:8b',
       modelsMissing: [],
-      visionPull: { text: 'downloading vision:2b 40%', percent: 40 },
+      visionPull: advanceModelPull(startModelPull(['vision:2b']), { status: 'downloading', model: 'vision:2b', percent: 40 }),
     }),
   ) as unknown as FakeEl;
 
@@ -319,7 +319,14 @@ test('a finished first-run download and a running vision download never share a 
     percent: 80,
   });
   const status = healthStatus(
-    healthView({ modelPull: firstRun, visionPull: { text: 'downloading vision:2b 10%', percent: 10 } }),
+    healthView({
+      modelPull: firstRun,
+      visionPull: advanceModelPull(startModelPull(['vision:2b']), {
+        status: 'downloading',
+        model: 'vision:2b',
+        percent: 10,
+      }),
+    }),
   ) as unknown as FakeEl;
 
   const values = progressBars(status).map((b) => b.attrs['aria-valuenow']);

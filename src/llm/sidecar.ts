@@ -307,6 +307,8 @@ export class ModelNotFetchedError extends OllamaError {
         `start the download and try again. Alt-text detection does not need it.`,
       404,
     );
+    // Mirrors `MODEL_NOT_FETCHED` in `src/contracts` — the one thing that
+    // survives IPC, and what the UI matches on to offer the download.
     this.name = 'ModelNotFetchedError';
   }
 }
@@ -320,6 +322,12 @@ export class ModelNotFetchedError extends OllamaError {
  * that change nothing.
  */
 function isModelAbsent(err: unknown, tag: string): boolean {
+  // 404 and not 400, deliberately. The `Ollama /api/chat returned 400` that #39
+  // and ADR-0010 quote is a DIFFERENT failure: a model that is installed and
+  // cannot see, which is `incapable` — and the recovery for that is to change
+  // the tag, never to download the one already on disk. Rewriting a 400 here
+  // would send an instructor to wait on gigabytes that cannot help them. An
+  // absent model is Ollama's 404.
   if (!(err instanceof OllamaError) || err.status !== 404) return false;
   // The transport puts the status in `message` and the daemon's own words in
   // `body` (`post()` in client.ts) — so the phrasing to match on is in `body`,

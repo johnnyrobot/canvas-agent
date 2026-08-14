@@ -122,9 +122,11 @@ export const RUNTIME_DEFAULT_MODEL = 'granite4.1:8b';
  * empty. Neither appeared across 30 live calls through the app's own
  * `describeImage`. Both belong to the full gate (#42/#43).
  *
- * ~3.3 GB — the same as the tag it replaces, so the required set still totals
- * ~8.6 GB, the figure first run states before the user commits
- * (`MODEL_DOWNLOAD_SIZES_GB`).
+ * ~3.3 GB — the same as the tag it replaces. The required set still totals
+ * ~8.6 GB, but first run no longer spends it all: since ADR-0012 these weights
+ * are fetched the first time alt-text suggestion is used, so the figure quoted
+ * before the user commits is the text model's 5.3 GB, with the rest named
+ * separately (`MODEL_DOWNLOAD_SIZES_GB`).
  */
 export const RUNTIME_DEFAULT_VISION_MODEL = 'qwen3-vl:4b';
 

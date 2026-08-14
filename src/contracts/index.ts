@@ -483,6 +483,24 @@ export interface TurnView {
  */
 export type ModelStatusState = 'ready' | 'missing' | 'incapable' | 'disabled' | 'deferred';
 
+/**
+ * The `name` a required-but-unfetched model's error carries (ADR-0012).
+ *
+ * Declared here for the same reason `ModelStatusState` is, and with the same
+ * drift direction: this module imports nothing, so the renderer cannot reach
+ * `src/llm/sidecar.ts` to ask. Matching on it is what lets the UI tell "fetch
+ * this and retry" from every other way a turn can fail; matching on the message
+ * prose instead would break the first time someone improves the wording.
+ *
+ * Getting it to the renderer takes work, and the reason is recorded because it
+ * cost a debugging session: the error class does not cross IPC, `toIpcError`
+ * reduces it to `{name, message}` — and then contextBridge re-creates it in the
+ * renderer's world as a bare `Error`, dropping the `name` too. So `unwrap` in
+ * `bridge.ts` folds the name into the message and `isErrorKind` reads either
+ * form. A UI branch that trusted `err.name` alone was silently dead.
+ */
+export const MODEL_NOT_FETCHED = 'ModelNotFetchedError';
+
 /** Health of the local sidecars (for a UI status indicator). */
 export interface ModelHealth {
   tag: string;

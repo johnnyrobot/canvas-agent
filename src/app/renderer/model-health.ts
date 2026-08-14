@@ -42,8 +42,10 @@ const NOT_PULLED_AT_FIRST_RUN: ReadonlySet<ModelHealth['status']> = new Set(['di
  * figures in prose (they are the sizing case for 16 GB Macs) — the two move
  * together, and the guard test is what forces a new default through here.
  *
- * The two entries are the required set of ADR-0009, text then vision: ~8.6 GB
- * total, which is the number first run states.
+ * The two entries are the required set of ADR-0009, text then vision. First run
+ * no longer states their sum: the vision model is fetched on first use
+ * (ADR-0012), so the download sentence quotes 5.3 GB and a second sentence names
+ * the 3.3 GB that follows when alt-text suggestion is first asked for.
  */
 export const MODEL_DOWNLOAD_SIZES_GB: Readonly<Record<string, number>> = {
   'granite4.1:8b': 5.3,

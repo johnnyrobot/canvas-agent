@@ -433,6 +433,23 @@ test('describeImage on a not-yet-fetched model fails with the deferred diagnosis
   );
 });
 
+test('a 400 from a model that cannot see is NOT reported as a missing download', async () => {
+  // The failure #39 and ADR-0010 quote verbatim — `Ollama /api/chat returned
+  // 400` — is a model that is INSTALLED and text-only. Its fix is to change the
+  // tag (`incapable`), never to download the one already on disk, so rewriting
+  // it here would send an instructor to wait on gigabytes that cannot help.
+  const cannotSee: FetchLike = async () =>
+    new Response(JSON.stringify({ error: 'this model does not support images' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    });
+  const sidecar = createOllamaSidecar({ env: deferredEnv, fetch: cannotSee });
+  await assert.rejects(
+    async () => sidecar.describeImage({ image: 'QUJD', prompt: 'alt?' }),
+    (err: Error) => !(err instanceof ModelNotFetchedError),
+  );
+});
+
 test('describeImage does not disguise an unrelated failure as a deferred model', async () => {
   // Rewriting every error into "just download it" would send a user to a
   // download that fixes nothing — the same loop the incapable state refuses.

@@ -7,8 +7,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { WCAG } from '../contracts/index.js';
+import { MODEL_NOT_FETCHED, WCAG } from '../contracts/index.js';
 import type {
+  OnModelPullProgress,
   AppApi,
   AuditIssue,
   BrandKit,
@@ -270,11 +271,39 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
   let ingestPulled = false;
   /** And for the vision model, which is fetched on first use, not at first run (ADR-0012). */
   let visionPulled = false;
-  const visionTag = (): string => 'e2e-scripted-vision';
+  /** The scripted vision tag — deferred until something needs it (ADR-0012). */
+  const VISION_TAG = 'e2e-scripted-vision';
+  /** The first-run model — the only one this configuration fetches at setup. */
+  const TEXT_TAG = 'e2e-scripted';
+  /** One model's worth of progress lines, slow enough for a UI test to sample. */
+  const streamPull = async (onProgress: OnModelPullProgress, tag: string): Promise<void> => {
+    onProgress({ status: 'pulling manifest', model: tag });
+    for (const percent of [10, 45, 80, 100]) {
+      await sleep(120);
+      onProgress({ status: 'downloading', model: tag, percent, completed: percent, total: 100 });
+    }
+    onProgress({ status: 'success', model: tag });
+  };
 
   return {
     async runTurn(req): Promise<TurnView> {
       failIfDown();
+      // A turn carrying an image needs the vision model, and on `models-missing`
+      // it has not been fetched yet — so this double FAILS exactly as the real
+      // sidecar does (ADR-0012), naming the error the renderer matches on. A
+      // scripted API that answered happily here could not tell a UI that fetches
+      // the model first from one that does not, and the sequencing test would
+      // pass against a deleted gate.
+      // Two ways a turn reaches the vision model: it carries an image, or the
+      // tool loop decides to suggest alt text. The second is the one no
+      // pre-turn check can predict, so the double models it too — a request
+      // that ASKS for alt text fails exactly as the tool path would.
+      const wantsVision = (req.attachments ?? []).length > 0 || /alt.?text/i.test(req.user);
+      if (wantsVision && !visionPulled && scenario === 'models-missing') {
+        const err = new Error(`${VISION_TAG} has not been downloaded yet.`);
+        err.name = MODEL_NOT_FETCHED;
+        throw err;
+      }
       if (req.mode === 'guidance') return guidanceView(req);
       if (req.mode === 'remediate' && req.remediateInput) {
         return scenario === 'remediate-residual'
@@ -324,9 +353,9 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
         ingest: up,
         model: model('e2e-scripted'),
         visionModel: {
-          tag: visionTag(),
+          tag: VISION_TAG,
           status: visionStatus ? ('ready' as const) : ('deferred' as const),
-          recovery: visionStatus ? '' : `${visionTag()} downloads the first time you use alt-text suggestion.`,
+          recovery: visionStatus ? '' : `${VISION_TAG} downloads the first time you use alt-text suggestion.`,
         },
         // First run has no document models either, which is what makes the two
         // INDEPENDENT downloads drivable together — finishing one calls back
@@ -343,16 +372,11 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
      */
     async pullModel(onProgress): Promise<void> {
       failIfDown();
-      if (onProgress) {
-        for (const tag of ['e2e-scripted', 'e2e-scripted-vision']) {
-          onProgress({ status: 'pulling manifest', model: tag });
-          for (const percent of [10, 45, 80, 100]) {
-            await sleep(120);
-            onProgress({ status: 'downloading', model: tag, percent, completed: percent, total: 100 });
-          }
-          onProgress({ status: 'success', model: tag });
-        }
-      }
+      // The FIRST-RUN set only (ADR-0012) — the text model. This double used to
+      // stream both tags, which meant the scripted first run fetched the very
+      // model the app now defers, and every UI test watched a download the real
+      // runtime no longer performs.
+      if (onProgress) await streamPull(onProgress, TEXT_TAG);
       modelsPulled = true;
     },
     async pullIngestModel(onProgress): Promise<void> {
@@ -361,13 +385,11 @@ export function createE2eAppApi(scenarioValue = process.env.CANVAS_AGENT_E2E_SCE
       ingestPulled = true;
     },
     async pullVisionModel(onProgress): Promise<void> {
-      // The deferred vision download (ADR-0012). Scripted like the first-run
-      // pull so a UI test can watch the bar it drives, and recorded so a test
-      // can assert it happened BEFORE the turn that needed it ran.
+      // The deferred download (ADR-0012), streamed exactly like the first-run
+      // one so a UI test can watch the bar it drives — and recorded, so the
+      // scripted `runTurn` above can refuse a turn that reaches it too early.
       failIfDown();
-      const tag = visionTag();
-      onProgress?.({ status: 'downloading', model: tag, total: 100, completed: 100, percent: 100 });
-      onProgress?.({ status: 'success', model: tag });
+      if (onProgress) await streamPull(onProgress, VISION_TAG);
       visionPulled = true;
     },
 
