@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
-import type { ChildProcess } from 'node:child_process';
+import { spawn as realSpawn, type ChildProcess } from 'node:child_process';
 import {
   downloadModels,
   resolveDownloadTooling,
@@ -96,4 +96,51 @@ test('downloadModels refuses to run in dev (no bundled Python)', async () => {
       // drain
     }
   }, IngestDownloadError);
+});
+
+test('downloadModels really kills its child on abort — verified against a REAL process (#24)', async () => {
+  // Everything the sidecar-level tests assert rests on one claim: Node's real
+  // `child_process.spawn({ signal })` actually terminates the child when the
+  // signal aborts. Manually confirmed once against `sleep` (real Node emits
+  // 'error' with an AbortError, THEN 'exit' with code=null, signal='SIGTERM')
+  // — this test proves the SAME thing through `downloadModels`'s own code, with
+  // a real OS process, not a fake standing in for one. `spawnImpl` here ignores
+  // the fake python/driver path `resolveDownloadTooling` derives and spawns a
+  // real, harmless, long-running Node subprocess instead — but forwards
+  // `options` (which carries the real `signal` `downloadModels` set) untouched,
+  // so the abort really reaches a real child.
+  let spawnedPid: number | undefined;
+  const spawnRealButHarmless: DownloadSpawnLike = (_command, _args, options) => {
+    const real = realSpawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options);
+    spawnedPid = real.pid;
+    return real;
+  };
+
+  const controller = new AbortController();
+  const run = (async () => {
+    for await (const _ of downloadModels({
+      modelsDir: '/d',
+      spawnImpl: spawnRealButHarmless,
+      resolveCommand: TOOLING,
+      signal: controller.signal,
+    })) {
+      // drain
+    }
+  })();
+
+  // Give the real child a moment to actually start before killing it.
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(spawnedPid, 'precondition: a real child process was spawned');
+
+  controller.abort();
+  await assert.rejects(run, /abort/i, 'downloadModels must surface the kill as a rejection, not hang or succeed');
+
+  // The rejection alone already proves the child is gone (the code path
+  // requires stdout to have closed, which only happens once the OS process
+  // exits) — confirmed independently rather than trusted on inference.
+  assert.throws(
+    () => process.kill(spawnedPid!, 0),
+    /ESRCH/,
+    'the real OS process must no longer exist after the abort',
+  );
 });

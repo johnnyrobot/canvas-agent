@@ -43,6 +43,14 @@ export class DoclingSidecar {
   private readonly process: SidecarProcess;
   private readonly downloadSpawn: DownloadSpawnLike | undefined;
   private readonly downloadResolveCommand: ((name: string) => string) | undefined;
+  /** Cancels the CURRENT `pullModel` download; unset when nothing is in flight. */
+  private downloadAbort: AbortController | undefined;
+  /**
+   * Resolves once the most recent download attempt has settled (success,
+   * failure, or cancellation) — never rejects. `stop()` awaits this so it can
+   * report the child is actually gone, not merely signalled.
+   */
+  private downloadSettled: Promise<void> = Promise.resolve();
 
   constructor(options: CreateIngestOptions = {}) {
     this.config = loadIngestConfig(options.env);
@@ -68,6 +76,13 @@ export class DoclingSidecar {
    * daemon — it drives the bundled Python downloader directly, so it works
    * before docling-serve can even start. Rejects if run outside the packaged app
    * (no bundled Python) or on a download failure.
+   *
+   * Owns an internal `AbortController` so `stop()` can cancel a download
+   * nothing else was going to (#24): this spawns a raw child process directly,
+   * not routed through the daemon `stop()` already reaches, so quitting the app
+   * mid-download used to leave that child running and still writing into the
+   * per-user model store. A caller-supplied `signal` cancels the SAME download —
+   * there is only one abort path, not two independent ones.
    */
   async pullModel(
     onProgress?: (p: IngestPullProgress) => void,
@@ -89,12 +104,30 @@ export class DoclingSidecar {
     if (!this.config.modelsDir) {
       throw new Error('In-app model download requires a configured model store (DOCLING_MODELS_DIR).');
     }
-    const opts: Parameters<typeof downloadModels>[0] = { modelsDir: this.config.modelsDir };
-    if (signal) opts.signal = signal;
+
+    const abort = new AbortController();
+    this.downloadAbort = abort;
+    if (signal) {
+      if (signal.aborted) abort.abort();
+      else signal.addEventListener('abort', () => abort.abort(), { once: true });
+    }
+
+    const opts: Parameters<typeof downloadModels>[0] = { modelsDir: this.config.modelsDir, signal: abort.signal };
     if (this.downloadSpawn) opts.spawnImpl = this.downloadSpawn;
     if (this.downloadResolveCommand) opts.resolveCommand = this.downloadResolveCommand;
-    for await (const p of downloadModels(opts)) {
-      onProgress?.(p);
+
+    const run = (async () => {
+      for await (const p of downloadModels(opts)) {
+        onProgress?.(p);
+      }
+    })();
+    // A cancelled download is EXPECTED to reject; `stop()` must be able to wait
+    // for that without the wait itself throwing.
+    this.downloadSettled = run.catch(() => undefined);
+    try {
+      await run;
+    } finally {
+      if (this.downloadAbort === abort) this.downloadAbort = undefined;
     }
   }
 
@@ -123,6 +156,13 @@ export class DoclingSidecar {
   }
 
   async stop(): Promise<void> {
+    // Cancel any in-flight first-run model download BEFORE stopping the
+    // daemon, and wait for the killed child to actually exit — otherwise this
+    // (and therefore `createRuntime().dispose()`, ADR-0006) could return while
+    // a raw Python process is still alive and still writing into the per-user
+    // model store (#24).
+    this.downloadAbort?.abort();
+    await this.downloadSettled;
     await this.process.stop();
   }
 
