@@ -137,6 +137,86 @@ test('pullModel drives the download driver and streams progress when models are 
   assert.equal(seen[1]!.percent, 100);
 });
 
+/** Let queued microtasks/macrotasks settle so async orchestration catches up. */
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+/**
+ * A fake spawn that models what Node's REAL `child_process.spawn({ signal })`
+ * does — verified against an actual `sleep` process, not assumed: on abort it
+ * emits `'error'` with an `AbortError` (name `AbortError`, code `ABORT_ERR`),
+ * THEN `'exit'` with `code=null, signal='SIGTERM'`. That ordering matters —
+ * `downloadModels` detects an aborted spawn from the 'error' event alone,
+ * because its exit-code check (`code ?? 0`) treats a null (signal-killed) exit
+ * code as success. A fake that skipped the 'error' event, or exited with a
+ * plain 0, would make this test pass whether or not the abort path actually
+ * propagates a failure — proven the hard way: this fake originally did that,
+ * and `pull` resolved successfully instead of rejecting.
+ *
+ * It never exits on its own before that — a fake that did would let a test
+ * pass whether or not `stop()` ever aborted anything.
+ */
+function neverEndingDownload(): { spawn: DownloadSpawnLike; wasKilled: () => boolean } {
+  let killed = false;
+  const spawn: DownloadSpawnLike = (_command, _args, options) => {
+    const child = new EventEmitter() as unknown as ChildProcess;
+    const stdout = new Readable({ read() {} });
+    const stderr = new Readable({ read() {} });
+    (child as unknown as { stdout: Readable }).stdout = stdout;
+    (child as unknown as { stderr: Readable }).stderr = stderr;
+    options.signal?.addEventListener(
+      'abort',
+      () => {
+        killed = true;
+        const abortError = new Error('The operation was aborted');
+        abortError.name = 'AbortError';
+        (child as unknown as EventEmitter).emit('error', abortError);
+        stdout.push(null);
+        stderr.push(null);
+        setImmediate(() => (child as unknown as EventEmitter).emit('exit', null, 'SIGTERM'));
+      },
+      { once: true },
+    );
+    return child;
+  };
+  return { spawn, wasKilled: () => killed };
+}
+
+test('stop() cancels an in-flight first-run model download and waits for it to exit (#24)', async () => {
+  const f = fakes(false);
+  const { spawn, wasKilled } = neverEndingDownload();
+  const sidecar = createDoclingSidecar({
+    env: { DOCLING_MODELS_DIR: '/data/models' },
+    process: f.process,
+    client: f.client,
+    downloadSpawn: spawn,
+    downloadResolveCommand: (n) => `/Resources/sidecars/${n}/${n}`,
+  });
+
+  const pull = sidecar.pullModel(() => {});
+  await flush();
+  assert.equal(wasKilled(), false, 'precondition: the download is still running, nothing has aborted it yet');
+
+  await sidecar.stop();
+
+  assert.equal(
+    wasKilled(),
+    true,
+    'stop() must cancel a download nothing else was going to — it spawns a raw child, not routed through the daemon stop() already reaches',
+  );
+  await assert.rejects(pull, 'the caller sees the download report that it was cancelled, not a silent hang');
+});
+
+test('stop() still stops the daemon normally when no download is in flight', async () => {
+  const f = fakes(true); // models present — pullModel never spawns anything
+  let daemonStopped = false;
+  const sidecar = createDoclingSidecar({
+    process: { ...f.process, stop: async () => { daemonStopped = true; } },
+    client: f.client,
+  });
+  await sidecar.stop();
+  assert.equal(daemonStopped, true, 'stop() must not skip the daemon just because downloadAbort is unset');
+});
+
 test('pullModel refuses to download in a bundled build, even if presence reports missing', async () => {
   // ADR-0008: the bundle is read-only and code-signed — a download would write
   // into it and break the signature Gatekeeper checks. The presence probe is

@@ -136,10 +136,21 @@ export async function* downloadModels(opts: DownloadModelsOptions): AsyncGenerat
     }
   }
 
+  // Always wait for the OS to confirm the child has actually exited before
+  // returning or throwing — not merely that a kill was signalled (#24). On
+  // abort, Node emits 'error' (an AbortError) and closes stdout as soon as the
+  // kill is INITIATED, which can race ahead of the process actually being
+  // reaped by the OS. A caller using this rejection to decide it is safe to
+  // continue shutting down (`DoclingSidecar.stop` → ADR-0006 `dispose()`)
+  // needs "gone", not "signalled" — otherwise it can report success while a
+  // few more milliseconds of writes into the per-user model store are still
+  // possible. Verified against a real spawned process, not assumed: a version
+  // of this that threw on `spawnErr` before awaiting `exit` let a real child's
+  // PID still answer `kill(pid, 0)` at the moment the rejection was observed.
+  const code = await exit;
   if (spawnErr) {
     throw new IngestDownloadError(`Failed to spawn model download driver: ${spawnErr.message}`);
   }
-  const code = await exit;
   if (code !== 0) {
     throw new IngestDownloadError(`Model download exited ${code}: ${stderr.trim().slice(-500)}`);
   }
