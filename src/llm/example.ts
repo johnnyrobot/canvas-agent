@@ -56,14 +56,14 @@ async function main(): Promise<void> {
   await llm.start();
 
   console.error('\n--- streaming chat ---');
-  for await (const chunk of llm.chatStream({ role: 'fast', messages: [{ role: 'user', content: prompt }] })) {
+  for await (const chunk of llm.chatStream({ role: 'text', messages: [{ role: 'user', content: prompt }] })) {
     process.stdout.write(chunk.delta);
   }
   process.stdout.write('\n');
 
   console.error('\n--- json mode ---');
   const json = await llm.chatJSON({
-    role: 'deep',
+    role: 'text',
     messages: [{ role: 'user', content: 'Return {"ok": true, "rubric": "D4"} as JSON.' }],
   });
   console.log(json);

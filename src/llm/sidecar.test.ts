@@ -70,11 +70,11 @@ test('chat() and chatStream() ensure the daemon is alive before issuing the requ
   const proc = new CountingProcess(loadLLMConfig(baseEnv));
   const sidecar = createOllamaSidecar({ env: baseEnv, fetch: rec.fetch, process: proc });
 
-  await sidecar.chat({ role: 'deep', messages: [{ role: 'user', content: 'hi' }] });
+  await sidecar.chat({ role: 'text', messages: [{ role: 'user', content: 'hi' }] });
   assert.equal(proc.ensureAliveCalls, 1, 'chat() checks daemon liveness first');
   assert.equal(rec.bodies.length, 1, 'the chat request still goes through');
 
-  for await (const _chunk of sidecar.chatStream({ role: 'deep', messages: [{ role: 'user', content: 'hi' }] })) {
+  for await (const _chunk of sidecar.chatStream({ role: 'text', messages: [{ role: 'user', content: 'hi' }] })) {
     // drain
   }
   assert.equal(proc.ensureAliveCalls, 2, 'chatStream() checks daemon liveness first too');
@@ -193,9 +193,10 @@ test('pullModel requests a shared tag ONCE, not once per role', async () => {
   assert.deepEqual(pulled, ['test-text:1b']);
 });
 
-test('pullModel never downloads a role outside the required set, however it is configured', async () => {
-  // A `deep` override is a real, huge tag no production path calls (ADR-0009);
-  // provisioning must not turn it into a multi-gigabyte first-run surprise.
+test('pullModel never downloads a retired role, however it is configured', async () => {
+  // `fast`/`deep`/`cheap` are gone (#41), but a developer's environment can
+  // still carry the vars, and MODEL_DEEP=granite4.1:30b is a real 17 GB tag.
+  // Provisioning must not turn a stale export into a first-run surprise.
   const { sidecar, pulled } = pullingSidecar({
     ...baseEnv,
     MODEL_DEEP: 'test-deep:30b',

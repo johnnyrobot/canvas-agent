@@ -7,18 +7,24 @@
  * never a hard-coded model string (PRD §15.1).
  */
 
-/** Logical model roles. In v1 every role resolves to the same local model. */
-export type ModelRole = 'text' | 'vision' | 'fast' | 'deep' | 'cheap';
-
-export const MODEL_ROLES: readonly ModelRole[] = ['text', 'vision', 'fast', 'deep', 'cheap'];
-
 /**
- * The roles the app actually provisions and gates readiness on (ADR-0009).
+ * Logical model roles. Callers select a role, never a hard-coded model string.
  *
- * `fast`, `deep` and `cheap` are tiering aliases nothing outside `example.ts`
- * calls; they are deliberately NOT provisioned, so pointing one of them at a
- * different tag can never trigger a multi-gigabyte first-run download.
+ * There used to be three more — `fast`, `deep` and `cheap` — tiering aliases
+ * that were configured, never provisioned, and called only from `example.ts`.
+ * They are gone (#41). Each silently inherited `MODEL_TEXT`, and a role whose
+ * capability nobody asserts, resolving to whatever the text default happens to
+ * be, is the exact mechanism that broke the vision role: alt-text suggestion
+ * 400'd against a text-only model while every screen reported ready. A role
+ * that nothing provisions and nothing checks is not a feature, it is a latent
+ * version of that bug — so the role model now contains only roles the app
+ * actually stands behind.
  */
+export type ModelRole = 'text' | 'vision';
+
+export const MODEL_ROLES: readonly ModelRole[] = ['text', 'vision'];
+
+/** The roles the app provisions and gates readiness on (ADR-0009). */
 export const REQUIRED_MODEL_ROLES = ['text', 'vision'] as const satisfies readonly ModelRole[];
 
 export type RequiredModelRole = (typeof REQUIRED_MODEL_ROLES)[number];
