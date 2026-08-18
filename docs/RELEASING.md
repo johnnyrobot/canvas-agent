@@ -35,7 +35,7 @@ The large binaries are not committed (see `resources/STAGING.md`):
 ```sh
 npm run stage:browsers                                   # Chromium → resources/ms-playwright
 
-# The course-catalog seed (~900 MB). SLOW (~1h+) and network-bound — start it first.
+# The course-catalog seed (~937 MB <!-- payload:catalogSeed -->). SLOW (~1h+), network-bound — start it first.
 CATALOG_CLI_BIN="$(command -v laccd-courses-pp-cli)" \
   node scripts/build-catalog-seed.mjs                    # seed → resources/sidecars/laccd-courses-pp-cli/seed/
 
@@ -45,6 +45,13 @@ OLLAMA_BIN="$(command -v ollama)" \
   npm run stage:sidecars                                 # sidecars → resources/sidecars/*
 npm run pre-release -- --strict                          # asserts paths exist, payloads + sidecar launchers staged
 ```
+
+> `stage:sidecars` is safe to re-run: each sidecar is built in a scratch dir and
+> swapped into place only once it checks out, so re-staging after one payload
+> changes neither fails nor leaves a half-updated tree, and a rejected source
+> leaves the previous payload untouched. (It used to die `EEXIST` on the second
+> run — `cpSync` will not overwrite an existing symlink, and both the Ollama
+> runner set and the bundled Python are full of them.)
 
 > `DOCLING_SERVE_DIR` must be the docling-serve **onedir app dir** — the directory
 > whose *immediate child* is the `docling-serve` launcher (e.g. PyInstaller's
@@ -64,7 +71,11 @@ npm run pre-release -- --strict                          # asserts paths exist, 
 > cut off mid-mirror (http2 GOAWAY) while the CLI still exits 0. If it dies, resume
 > rather than restart — the sync is incremental and the script prints the home:
 > `CATALOG_SEED_HOME=<printed path> CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs`.
-> `pre-release --strict` additionally rejects a seed under 700 MB as partial.
+> `pre-release --strict` additionally holds the seed to a size **band** around
+> ~937 MB <!-- payload:catalogSeed -->, so a half-mirrored seed AND an
+> unexplained one both fail. Every expected size lives in
+> `src/runtime/release-payload-sizes.ts`; change it there and the drift test
+> names whatever else still disagrees.
 
 > **The strict gate needs a network and a running Ollama with the shipped
 > defaults pulled** (#40). It re-checks every default model tag the app ships:

@@ -26,7 +26,7 @@ PYVER="3.13"
 command -v uv >/dev/null || { echo "error: uv not on PATH (brew install uv)"; exit 1; }
 
 echo "==> [1/7] clean output"
-# Preserve embedded models across the wipe. They are ~1.2GB and re-fetching them
+# Preserve embedded models across the wipe. They are ~1.8 GB and re-fetching them  # payload:doclingModels
 # is by far the slowest step here; without this the "already present — skipping"
 # branch below is unreachable, because this rm deletes what it checks for.
 # Delete build/docling-serve/models by hand to force a refetch.
@@ -103,7 +103,7 @@ echo "==> [7/8] models: embedded by default (DOCLING_BUNDLE_MODELS=0 to skip)"
 # out of the box, with no first-run download. This embeds the classic pipeline
 # (layout, tableformer, code_formula, picture_classifier, rapidocr) + the
 # Granite-Docling MLX VLM (with_granitedocling_mlx defaults to False upstream, so
-# we opt in explicitly), and costs ~1.2GB of DMG.
+# we opt in explicitly), and costs ~1.8 GB of DMG.  # payload:doclingModels
 #
 # Set DOCLING_BUNDLE_MODELS=0 for a smaller build whose models download into the
 # app's per-user store on first run (see scripts/docling-download-models.py).
@@ -113,7 +113,7 @@ if [ "${DOCLING_BUNDLE_MODELS:-1}" = "1" ]; then
   if [ -d "$OUT/models" ] && [ -n "$(ls -A "$OUT/models" 2>/dev/null)" ]; then
     echo "    models already present — skipping (delete $OUT/models to refetch)"
   else
-    echo "    embedding models — classic + granite_docling MLX (~1.2GB, this is slow)"
+    echo "    embedding models — classic + granite_docling MLX (~1.8 GB, this is slow)"  # payload:doclingModels
     "$PYBIN" -c "from docling.utils.model_downloader import download_models; from pathlib import Path; download_models(output_dir=Path('$OUT/models'), progress=False, with_granitedocling_mlx=True); print('    models downloaded (classic + granite_docling MLX)')"
   fi
 else
