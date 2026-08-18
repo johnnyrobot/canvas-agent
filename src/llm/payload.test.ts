@@ -39,7 +39,7 @@ test('toNativeMessage passes plain strings through without images', () => {
 
 test('buildChatRequest sets model, options, keep_alive and stream flag', () => {
   const opts: ChatOptions = {
-    role: 'deep',
+    role: 'text',
     messages: [{ role: 'user', content: 'hi' }],
     temperature: 0.1,
     maxTokens: 2048,

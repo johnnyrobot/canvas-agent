@@ -60,7 +60,7 @@ test('isHealthy() is true once started', { skip }, async () => {
 
 test('chat() returns non-empty text', { skip }, async () => {
   const res = await llm!.chat({
-    role: 'fast',
+    role: 'text',
     messages: [{ role: 'user', content: 'Reply with the single word: ready.' }],
     maxTokens: 512,
   });
@@ -72,7 +72,7 @@ test('chatStream() yields deltas and a terminal done', { skip }, async () => {
   let text = '';
   let sawDone = false;
   for await (const chunk of llm!.chatStream({
-    role: 'fast',
+    role: 'text',
     messages: [{ role: 'user', content: 'Count: one two three.' }],
     maxTokens: 512,
   })) {
@@ -85,7 +85,7 @@ test('chatStream() yields deltas and a terminal done', { skip }, async () => {
 
 test('chatJSON() returns a parsed object', { skip }, async () => {
   const obj = await llm!.chatJSON<{ ok: boolean }>({
-    role: 'deep',
+    role: 'text',
     messages: [{ role: 'user', content: 'Return {"ok": true} as JSON, nothing else.' }],
     maxTokens: 512,
   });

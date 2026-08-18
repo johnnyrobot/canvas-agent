@@ -65,9 +65,6 @@ export function loadLLMConfig(env: Env = process.env): LLMConfig {
   const models: Record<ModelRole, string> = {
     text,
     vision: str(env, 'MODEL_VISION', text),
-    fast: str(env, 'MODEL_FAST', text),
-    deep: str(env, 'MODEL_DEEP', text),
-    cheap: str(env, 'MODEL_CHEAP', text),
   };
 
   return {
@@ -106,9 +103,10 @@ export function roleIsRequired(config: LLMConfig, role: RequiredModelRole): bool
  * The roles this configuration actually requires, paired with the tags they
  * resolve to (ADR-0009), in role order.
  *
- * Roles outside the required set never appear here, so `MODEL_DEEP=granite4.1:30b`
- * can neither be downloaded nor gate readiness for a role nothing calls — and
- * nor can a role whose capability is switched off (ADR-0010).
+ * Every role is now a required role (#41 deleted the three that were not), so
+ * this narrows only by capability: a role whose capability is switched off
+ * drops out (ADR-0010). A retired var like `MODEL_DEEP=granite4.1:30b` resolves
+ * to no role at all and so can neither be downloaded nor gate readiness.
  *
  * This is the *requirement* question, and it is deliberately not the *reporting*
  * question: `modelStatus` reports one entry per required role whether or not this

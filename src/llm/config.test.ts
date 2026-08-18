@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deriveNativeUrl, loadLLMConfig, modelTagsToPull, requiredModelTags, uniqueModels } from './config.js';
-import { REQUIRED_MODEL_ROLES } from './types.js';
+import { MODEL_ROLES, REQUIRED_MODEL_ROLES } from './types.js';
 
 // This module holds no shipping default (ADR-0007), so every config here names
 // its own model. A placeholder tag, not a real one: these tests are about
@@ -25,10 +25,11 @@ test('defaults match PRD Appendix H (local-only, single model)', () => {
 });
 
 test('per-role overrides fall back to MODEL_TEXT', () => {
-  const c = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_CHEAP: 'test-cheap:0.5b' });
-  assert.equal(c.models.text, TEXT);
-  assert.equal(c.models.deep, TEXT); // inherits text
-  assert.equal(c.models.cheap, 'test-cheap:0.5b'); // explicit override
+  const inherited = loadLLMConfig({ MODEL_TEXT: TEXT });
+  assert.equal(inherited.models.vision, TEXT); // inherits text when unset
+  const overridden = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_VISION: 'test-vision:2b' });
+  assert.equal(overridden.models.text, TEXT);
+  assert.equal(overridden.models.vision, 'test-vision:2b'); // explicit override
 });
 
 test('deriveNativeUrl strips a trailing /v1', () => {
@@ -38,8 +39,8 @@ test('deriveNativeUrl strips a trailing /v1', () => {
 });
 
 test('uniqueModels dedups across roles (for warm-loading)', () => {
-  const c = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_CHEAP: 'test-cheap:0.5b' });
-  assert.deepEqual(uniqueModels(c).sort(), ['test-cheap:0.5b', TEXT].sort());
+  const c = loadLLMConfig({ MODEL_TEXT: TEXT, MODEL_VISION: 'test-vision:2b' });
+  assert.deepEqual(uniqueModels(c).sort(), ['test-vision:2b', TEXT].sort());
 });
 
 test('the required model set is exactly text and vision (ADR-0009)', () => {
@@ -58,16 +59,25 @@ test('requiredModelTags dedups a tag shared by both required roles', () => {
   assert.deepEqual(requiredModelTags(c), [TEXT]);
 });
 
-test('requiredModelTags ignores roles outside the required set (ADR-0009)', () => {
-  // MODEL_DEEP=granite4.1:30b is a real 17 GB tag no production path calls;
-  // provisioning must never be steered into pulling it.
+test('the role model is exactly text and vision — no vestigial tiers (#41)', () => {
+  assert.deepEqual([...MODEL_ROLES], ['text', 'vision']);
+});
+
+test('the retired fast/deep/cheap env vars are inert, not merely unprovisioned (#41)', () => {
+  // They used to be real roles that silently inherited MODEL_TEXT, and
+  // MODEL_DEEP=granite4.1:30b is a real 17 GB tag no production path calls.
+  // Being outside the required set kept provisioning away from them; being
+  // deleted means they cannot resolve to anything at all. This is the guard
+  // against a partial revert that re-adds the config without the role.
   const c = loadLLMConfig({
     MODEL_TEXT: TEXT,
     MODEL_DEEP: 'test-deep:30b',
     MODEL_FAST: 'test-fast:1b',
     MODEL_CHEAP: 'test-cheap:0.5b',
   });
+  assert.deepEqual(Object.keys(c.models).sort(), ['text', 'vision']);
   assert.deepEqual(requiredModelTags(c), [TEXT]);
+  assert.deepEqual(uniqueModels(c), [TEXT], 'a retired tag must never reach warm-loading');
 });
 
 // ── What is fetched when (ADR-0012) ──────────────────────────────────────────

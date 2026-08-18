@@ -26,11 +26,17 @@ API** — this is the runtime layer the orchestrator (PRD §13/§15) sits on top
 
 ## The required model set (ADR-0009)
 
-Five roles are configurable, but only **`text` and `vision`** are *required*:
+There are two roles, **`text` and `vision`**, and both are *required*:
 `requiredModelTags()` is what `pullModel()` downloads and what `modelStatus()`
-gates readiness on. `fast`, `deep` and `cheap` inherit the text model and are
-never provisioned — an operator pointing `MODEL_DEEP` at a 17 GB tag no
-production path calls must not turn first run into a 17 GB download.
+gates readiness on.
+
+There were once three more — `fast`, `deep` and `cheap` — configurable, never
+provisioned, and called only from `example.ts`. They are deleted (#41). Each
+silently inherited `MODEL_TEXT`, and a role whose capability nobody asserts,
+resolving to whatever the text default happens to be, is exactly how the vision
+role broke: alt-text suggestion returned 400 against a text-only model while
+every screen read ready. Their env vars are now inert — a stale `MODEL_DEEP`
+export naming a 17 GB tag resolves to nothing and cannot reach a download.
 
 Three consequences worth keeping:
 
@@ -65,12 +71,12 @@ const llm = createOllamaSidecar();           // reads env (PRD Appendix H)
 await llm.start();                           // attach-or-spawn ollama + warm-load
 
 // Streaming text (role-based; never hard-code a model)
-for await (const { delta } of llm.chatStream({ role: 'fast', messages: [
+for await (const { delta } of llm.chatStream({ role: 'text', messages: [
   { role: 'user', content: 'How do I make a Canvas table accessible?' },
 ]})) process.stdout.write(delta);
 
 // Structured JSON (e.g. the remediation ChangeLog — schema-validate downstream)
-const changeLog = await llm.chatJSON({ role: 'deep', schema: myJsonSchema, messages: [...] });
+const changeLog = await llm.chatJSON({ role: 'text', schema: myJsonSchema, messages: [...] });
 
 // Alt text for a USER-SUPPLIED image (never fetched — PRD §16.3)
 const alt = await llm.describeImage({ image: base64, prompt: 'Concise alt text (<=80 chars).' });
@@ -83,8 +89,8 @@ Wire `llm.stop()` to `SIGINT`/`SIGTERM` (see `example.ts`).
 ## Configuration (env)
 
 See PRD Appendix H. Key vars: `LLM_BASE_URL` (default `http://localhost:11434/v1`),
-`MODEL_TEXT`/`MODEL_VISION`/`MODEL_FAST`/`MODEL_DEEP`/`MODEL_CHEAP`
-(**required** — the runtime injects it; see ADR-0007), `OLLAMA_HOST`, `OLLAMA_KEEP_ALIVE`,
+`MODEL_TEXT` (**required** — the runtime injects it; see ADR-0007),
+`MODEL_VISION` (falls back to `MODEL_TEXT`), `OLLAMA_HOST`, `OLLAMA_KEEP_ALIVE`,
 `OLLAMA_NUM_PARALLEL`, `LLM_NUM_CTX`, `LLM_MAX_OUTPUT_TOKENS`, `LLM_TEMPERATURE`,
 `LLM_TIMEOUT_MS`, `LLM_VISION_ENABLED`, `LLM_MANAGE_PROCESS`.
 
