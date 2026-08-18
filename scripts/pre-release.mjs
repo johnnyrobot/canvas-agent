@@ -29,12 +29,55 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const strict = process.argv.includes('--strict');
+// `--artifacts` is the POST-build pass: the DMG and zip do not exist yet when
+// this gate runs before electron-builder, so the one number the product is
+// actually judged on — what the instructor downloads — had no check at all.
+// That is how 966 MB became 2.86 GB unremarked.
+const artifactsOnly = process.argv.includes('--artifacts');
 const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const build = pkg.build ?? {};
 
 /** @type {{ok:boolean, level:'required'|'staged', label:string, detail:string}[]} */
 const results = [];
 const check = (ok, level, label, detail = '') => results.push({ ok: !!ok, level, label, detail });
+
+// The expected sizes and the band arithmetic have ONE home,
+// `src/runtime/release-payload-sizes.ts`, read here out of `dist/` for the same
+// reason the model gate is: a build script that restates figures is a build
+// script whose figures drift, which is precisely the bug (#48). Unimportable
+// means UNCHECKABLE, never "fine" — the freshness of `dist/` is itself checked
+// further down.
+let payloadSizes;
+try {
+  payloadSizes = await import('../dist/runtime/release-payload-sizes.js');
+} catch {
+  payloadSizes = undefined;
+}
+const payloadLabel = (id) => payloadSizes?.EXPECTED_PAYLOADS?.[id]?.label ?? `payload size: ${id}`;
+const checkPayload = (id, actualMb) =>
+  payloadSizes
+    ? payloadSizes.checkPayloadSize(id, actualMb)
+    : {
+        ok: false,
+        detail: `UNCHECKABLE (measured ${actualMb.toFixed(0)} MB) — run \`npm run build\`; the expected sizes compile from src/runtime/release-payload-sizes.ts`,
+      };
+
+/** Print every row, then exit non-zero if any applicable check failed. */
+function report(successMessage) {
+  let failed = 0;
+  for (const r of results) {
+    const isRequired = r.level === 'required' || (r.level === 'staged' && strict);
+    const mark = r.ok ? '✓' : isRequired ? '✗' : '⚠';
+    if (!r.ok && isRequired) failed += 1;
+    console.log(`${mark} [${r.level}] ${r.label}${r.detail ? ` — ${r.detail}` : ''}`);
+  }
+  console.log('');
+  if (failed > 0) {
+    console.error(`pre-release: ${failed} required check(s) failed${strict ? ' (strict)' : ''}. Fix the above before packaging.`);
+    process.exit(1);
+  }
+  console.log(successMessage);
+}
 
 /** Total size of `dir` in MB, recursively. 0 when absent/unreadable. */
 function dirSizeMb(dir) {
@@ -77,6 +120,43 @@ function hasPayload(p) {
   if (!existsSync(p)) return false;
   if (statSync(p).isFile()) return statSync(p).size > 0;
   return readdirSync(p).some((n) => n !== '.gitkeep' && !n.startsWith('.'));
+}
+
+// 0. `--artifacts`: the post-build pass over what was actually produced. Runs on
+//    its own — the structure and staging tiers were already checked before the
+//    build, and re-probing the registry here would only slow the release path
+//    down. Every row is `required`: this mode is invoked deliberately, after a
+//    build, and has nothing advisory to say.
+if (artifactsOnly) {
+  // The bands come out of dist/, so a stale dist/ would judge this build against
+  // the PREVIOUS build's expected sizes and print ticks either way — the same
+  // trap the model gate guards against, and worth repeating here because this
+  // pass runs on its own.
+  const freshSrc = newestMtimeMs(path.join(ROOT, 'src'), '.ts');
+  const freshDist = newestMtimeMs(path.join(ROOT, 'dist'), '.js');
+  const isFresh = freshDist > 0 && freshDist >= freshSrc;
+  check(isFresh, 'required', 'dist/ is built from the current src/ (the size bands read it)',
+    isFresh ? 'up to date' : 'STALE/ABSENT — run `npm run build`; the bands would come from the PREVIOUS build');
+
+  const releaseDir = path.join(ROOT, 'release');
+  const found = existsSync(releaseDir) ? readdirSync(releaseDir) : [];
+  const version = pkg.version;
+  for (const [id, suffix] of [['dmg', `${version}-arm64.dmg`], ['zip', `${version}-arm64-mac.zip`]]) {
+    // Match this version explicitly. `release/` accumulates older builds, and a
+    // gate that measured whichever DMG it found first would happily bless 0.3.0
+    // and report a tidy tick about a file the run never produced.
+    const name = found.find((f) => f.endsWith(suffix));
+    if (!name) {
+      check(false, 'required', payloadLabel(id),
+        `NOT FOUND — no release/*${suffix}; this pass runs AFTER \`electron-builder\` + \`scripts/make-dmg.sh\``);
+      continue;
+    }
+    const mb = statSync(path.join(releaseDir, name)).size / 1048576;
+    const res = checkPayload(id, mb);
+    check(res.ok, 'required', `${payloadLabel(id)} (${name})`, res.detail);
+  }
+  report('pre-release: built artifacts are within their expected size bands.');
+  process.exit(0);
 }
 
 // 1. npm scripts the release flow depends on.
@@ -137,26 +217,19 @@ for (const res of build.extraResources ?? []) {
     if (name === 'laccd-courses-pp-cli') {
       const seed = path.join(from, 'seed/data.db');
       const seedMb = existsSync(seed) && statSync(seed).isFile() ? statSync(seed).size / 1048576 : 0;
-      const seedOk = seedMb > 700;
-      check(seedOk, 'staged', 'catalog seed present: sidecars/laccd-courses-pp-cli/seed/data.db',
-        seedOk ? `present (${seedMb.toFixed(0)} MB)`
-          : `MISSING/PARTIAL (${seedMb.toFixed(0)} MB, expected ~900 MB+) — offline catalog search would be empty or miss whole colleges; rebuild with \`CATALOG_CLI_BIN=… node scripts/build-catalog-seed.mjs\``);
+      const seedRes = checkPayload('catalogSeed', seedMb);
+      check(seedRes.ok, 'staged', payloadLabel('catalogSeed'), seedRes.detail);
     }
     // The document models ship INSIDE the app (ADR-0008), so ingestion is offline
     // out of the box and the first-run download is gone. Stage them with
     // DOCLING_BUNDLE_MODELS=1. Gate on SIZE, not presence: `download_models`
     // fetches several models in sequence, so an interrupted or partially-failed
     // fetch leaves a populated-but-incomplete dir that a presence check waves
-    // through — exactly how a 461 MB half-mirrored catalog once passed. A
-    // complete payload (classic pipeline + Granite-Docling MLX) is ~1.2 GB;
-    // 800 MB is the floor. Re-tighten it once a real build has been measured.
+    // through — exactly how a 461 MB half-mirrored catalog once passed.
     if (name === 'docling-serve') {
-      const models = path.join(from, 'models');
-      const mb = dirSizeMb(models);
-      const ok = mb > 800;
-      check(ok, 'staged', 'docling models bundled: sidecars/docling-serve/models',
-        ok ? `present (${mb.toFixed(0)} MB)`
-          : `MISSING/PARTIAL (${mb.toFixed(0)} MB, expected ~1.2 GB) — PDF and scanned-image conversion would need a first-run download; re-stage with \`DOCLING_BUNDLE_MODELS=1 npm run stage:sidecars\``);
+      const mb = dirSizeMb(path.join(from, 'models'));
+      const res = checkPayload('doclingModels', mb);
+      check(res.ok, 'staged', payloadLabel('doclingModels'), res.detail);
     }
   }
 }
@@ -225,20 +298,7 @@ try {
     `UNCHECKABLE (${err instanceof Error ? err.message : String(err)}) — run \`npm run build\` first; this gate reads the shipped defaults out of dist/`);
 }
 
-// Report.
-let failed = 0;
-for (const r of results) {
-  const isRequired = r.level === 'required' || (r.level === 'staged' && strict);
-  const mark = r.ok ? '✓' : isRequired ? '✗' : '⚠';
-  if (!r.ok && isRequired) failed += 1;
-  console.log(`${mark} [${r.level}] ${r.label}${r.detail ? ` — ${r.detail}` : ''}`);
-}
-console.log('');
-if (failed > 0) {
-  console.error(`pre-release: ${failed} required check(s) failed${strict ? ' (strict)' : ''}. Fix the above before packaging.`);
-  process.exit(1);
-}
-console.log(
+report(
   strict
     ? 'pre-release: all checks passed (strict — payloads staged). Safe to invoke electron-builder.'
     : 'pre-release: structure checks passed. Run `npm run pre-release -- --strict` (after staging) before an actual build.',

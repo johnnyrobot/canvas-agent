@@ -25,11 +25,20 @@
  * Chromium for the audit engine is staged separately: `npm run stage:browsers`.
  * After staging, `npm run pre-release -- --strict` verifies everything is present.
  */
-import { existsSync, mkdirSync, copyFileSync, cpSync, realpathSync, readdirSync, rmSync, chmodSync, openSync, readSync, closeSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, cpSync, realpathSync, readdirSync, renameSync, rmSync, chmodSync, openSync, readSync, closeSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Where staged payloads land. Defaults to the packaged-resources dir; overridable
+// so a run can be pointed at a throwaway tree — which is how the suite exercises
+// this script without touching a developer's real (multi-GB, slow to rebuild)
+// staging dir. `resolveSidecarCommand` reads the default path at runtime, so a
+// real staging run must leave this unset.
+const STAGE_ROOT = process.env.CANVAS_AGENT_STAGE_ROOT
+  ? path.resolve(process.env.CANVAS_AGENT_STAGE_ROOT)
+  : path.join(ROOT, 'resources');
+const sidecarDest = (name) => path.join(STAGE_ROOT, 'sidecars', name);
 const ollamaBin = process.env.OLLAMA_BIN;
 const doclingDir = process.env.DOCLING_SERVE_DIR;
 const catalogBin = process.env.CATALOG_CLI_BIN;
@@ -47,12 +56,61 @@ function isArm64MachO(file) {
   return head.readUInt32LE(0) === 0xfeedfacf && head.readUInt32LE(4) === 0x0100000c;
 }
 
+/**
+ * Replace `dst` with a freshly built tree, atomically (#47).
+ *
+ * `build(tmp)` populates a scratch sibling and returns an error string if the
+ * result is unusable; only when it returns nothing does the new tree take the
+ * destination's place. Two problems that both cost a release run:
+ *
+ *   1. Copying straight onto a staged tree dies `EEXIST`. `cpSync`'s `force`
+ *      replaces an existing regular file but NOT an existing symlink, and both
+ *      real inputs are full of symlinks (the Ollama runner set; the bundled
+ *      Python interpreter). So re-staging — the common case, whenever one
+ *      payload changes — failed partway and left a half-updated tree.
+ *   2. Validating after copying is too late. The launcher assertion fired
+ *      against a destination that had already been overwritten, so a bad source
+ *      destroyed a good staged payload and THEN complained. Worse, a stale
+ *      launcher left over from the previous stage could satisfy the assertion
+ *      and wave the mis-stage through.
+ *
+ * Building in `tmp` fixes both: the destination is untouched until the payload
+ * is known-good, and the check can only see what this run actually staged.
+ */
+function stageAtomically(dst, build) {
+  const tmp = `${dst}.staging-${process.pid}`;
+  const previous = `${dst}.previous-${process.pid}`;
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  let error;
+  try {
+    error = build(tmp);
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  }
+  if (error) {
+    rmSync(tmp, { recursive: true, force: true });
+    return error;
+  }
+  // `resources/sidecars/<name>/.gitkeep` is tracked — it is what keeps the
+  // directory in git. The old `rm -rf` workaround deleted it, so the operator
+  // had to spot the deletion and restore it by hand; a swap would do the same
+  // silently. Re-create it as part of the new tree instead.
+  writeFileSync(path.join(tmp, '.gitkeep'), '');
+  // rename(2) refuses a non-empty destination, so move the old tree aside first.
+  // Both renames are within one directory, hence one filesystem, hence atomic.
+  const hadPrevious = existsSync(dst);
+  if (hadPrevious) renameSync(dst, previous);
+  renameSync(tmp, dst);
+  if (hadPrevious) rmSync(previous, { recursive: true, force: true });
+  return undefined;
+}
+
 let staged = 0;
 const missing = [];
 
 if (ollamaBin && existsSync(ollamaBin)) {
-  const dst = path.join(ROOT, 'resources/sidecars/ollama');
-  mkdirSync(dst, { recursive: true });
+  const dst = sidecarDest('ollama');
   // `ollama serve` does NOT run standalone: it spawns a SIBLING `llama-server`
   // runner and loads sibling dylibs + mlx_metal_* via @loader_path. So the WHOLE
   // Ollama.app/Contents/Resources tree must travel, not just the `ollama` binary.
@@ -60,19 +118,24 @@ if (ollamaBin && existsSync(ollamaBin)) {
   // resolve it to find the real Resources dir. OLLAMA_RESOURCES_DIR overrides.
   const realOllama = realpathSync(ollamaBin);
   const srcRes = process.env.OLLAMA_RESOURCES_DIR || path.dirname(realOllama);
-  // verbatimSymlinks keeps symlinks RELATIVE; without it Node rewrites them to absolute
-  // paths, which `codesign --strict` rejects ("invalid destination for symbolic link").
-  cpSync(srcRes, dst, { recursive: true, dereference: false, verbatimSymlinks: true });
-  // Drop app-icon junk; keep every runtime binary/dylib/metallib.
-  for (const name of readdirSync(dst)) {
-    if (/\.(icns|png)$/i.test(name)) rmSync(path.join(dst, name), { force: true });
-  }
-  // Guarantee the resolver leaf name `ollama`, and that the runner is present.
-  if (!existsSync(path.join(dst, 'ollama'))) copyFileSync(realOllama, path.join(dst, 'ollama'));
-  if (!existsSync(path.join(dst, 'llama-server'))) {
-    console.error(`✗ staged Ollama from ${srcRes}, but no \`llama-server\` runner at sidecars/ollama/llama-server.`);
+  const failure = stageAtomically(dst, (tmp) => {
+    // verbatimSymlinks keeps symlinks RELATIVE; without it Node rewrites them to absolute
+    // paths, which `codesign --strict` rejects ("invalid destination for symbolic link").
+    cpSync(srcRes, tmp, { recursive: true, dereference: false, verbatimSymlinks: true });
+    // Drop app-icon junk; keep every runtime binary/dylib/metallib.
+    for (const name of readdirSync(tmp)) {
+      if (/\.(icns|png)$/i.test(name)) rmSync(path.join(tmp, name), { force: true });
+    }
+    // Guarantee the resolver leaf name `ollama`, and that the runner is present.
+    if (!existsSync(path.join(tmp, 'ollama'))) copyFileSync(realOllama, path.join(tmp, 'ollama'));
+    if (!existsSync(path.join(tmp, 'llama-server'))) return 'no `llama-server` runner';
+    return undefined;
+  });
+  if (failure) {
+    console.error(`✗ staged Ollama from ${srcRes}, but ${failure} at sidecars/ollama/llama-server.`);
     console.error('  `ollama serve` spawns llama-server as a sibling — point OLLAMA_BIN (or');
     console.error('  OLLAMA_RESOURCES_DIR) at the full Ollama.app Contents/Resources dir.');
+    console.error('  (Any previously staged payload was left untouched.)');
     process.exit(1);
   }
   console.log(`✓ staged Ollama runner set from ${srcRes} → sidecars/ollama/ (ollama + llama-server + dylibs + mlx_metal_*)`);
@@ -82,20 +145,25 @@ if (ollamaBin && existsSync(ollamaBin)) {
 }
 
 if (doclingDir && existsSync(doclingDir)) {
-  const dst = path.join(ROOT, 'resources/sidecars/docling-serve');
-  mkdirSync(dst, { recursive: true });
-  // verbatimSymlinks: keep the PBS interpreter's symlinks RELATIVE (python3 -> python3.13
-  // etc.); without it Node rewrites them absolute → codesign --strict rejects + breaks relocation.
-  cpSync(doclingDir, dst, { recursive: true, verbatimSymlinks: true });
-  // The runtime spawns sidecars/docling-serve/docling-serve. cpSync copies the source
-  // dir's CONTENTS, so the launcher lands at the leaf ONLY when DOCLING_SERVE_DIR's
-  // immediate child is the `docling-serve` executable. Assert it rather than letting a
-  // mis-stage fall back to a bare-PATH lookup that ENOENTs in a Finder-launched .app.
-  const launcher = path.join(dst, 'docling-serve');
-  if (!existsSync(launcher)) {
-    console.error(`✗ docling-serve staged from ${doclingDir}, but no launcher at sidecars/docling-serve/docling-serve.`);
+  const dst = sidecarDest('docling-serve');
+  const failure = stageAtomically(dst, (tmp) => {
+    // verbatimSymlinks: keep the PBS interpreter's symlinks RELATIVE (python3 -> python3.13
+    // etc.); without it Node rewrites them absolute → codesign --strict rejects + breaks relocation.
+    cpSync(doclingDir, tmp, { recursive: true, verbatimSymlinks: true });
+    // The runtime spawns sidecars/docling-serve/docling-serve. cpSync copies the source
+    // dir's CONTENTS, so the launcher lands at the leaf ONLY when DOCLING_SERVE_DIR's
+    // immediate child is the `docling-serve` executable. Assert it rather than letting a
+    // mis-stage fall back to a bare-PATH lookup that ENOENTs in a Finder-launched .app.
+    // Checked inside `tmp`, so a leftover launcher from a previous stage cannot
+    // vouch for a source that does not have one.
+    if (!existsSync(path.join(tmp, 'docling-serve'))) return 'no launcher at';
+    return undefined;
+  });
+  if (failure) {
+    console.error(`✗ docling-serve staged from ${doclingDir}, but ${failure} sidecars/docling-serve/docling-serve.`);
     console.error('  Point DOCLING_SERVE_DIR at the onedir app dir whose immediate child is the');
     console.error('  `docling-serve` executable (e.g. ".../dist/docling-serve"), NOT the parent "dist".');
+    console.error('  (Any previously staged payload was left untouched.)');
     process.exit(1);
   }
   console.log(`✓ staged docling-serve from ${doclingDir} → sidecars/docling-serve/docling-serve`);
@@ -105,7 +173,14 @@ if (doclingDir && existsSync(doclingDir)) {
 }
 
 if (catalogBin && existsSync(catalogBin)) {
-  const dst = path.join(ROOT, 'resources/sidecars/laccd-courses-pp-cli');
+  // Deliberately NOT staged through `stageAtomically`: unlike the other two, this
+  // destination is not wholly derived from its source. The ~900 MB course seed is
+  // built directly INTO `<dst>/seed/` by `build-catalog-seed.mjs` over roughly an
+  // hour, so replacing the directory would delete it. Copying one file over
+  // another is already idempotent, which is why this block never had the EEXIST
+  // problem — `copyFileSync` overwrites a regular file, and there are no symlinks
+  // here to refuse.
+  const dst = sidecarDest('laccd-courses-pp-cli');
   mkdirSync(dst, { recursive: true });
   const realCatalog = realpathSync(catalogBin);
   // Validate the SOURCE before touching the staged leaf. Copying first and checking
