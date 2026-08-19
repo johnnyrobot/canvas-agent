@@ -28,7 +28,8 @@ import { turnViewToVm, type FragmentVm } from '../view.js';
 import { appChromeClass, themedScreenRoot, uiThemeRootClass, type UiTheme } from './ui-theme.js';
 import { createRemediationPanel, type RemediationDeps } from './remediation.js';
 import { createRemediateReviewModel, type ReviewAction, type ReviewSource } from './remediate-review.js';
-import { catalogSummaryLabel, catalogPromptLines } from './catalog-view.js';
+import { catalogSummaryLabel } from './catalog-view.js';
+import { buildPagePrompt } from './build-prompt.js';
 import {
   advanceModelPull,
   downloadModelAffordance,
@@ -1634,9 +1635,6 @@ function sessionRows(): El[] {
   });
 }
 
-function templateLabel(id: TemplateType): string {
-  return TEMPLATE_OPTIONS.find((t) => t.id === id)?.title ?? id;
-}
 
 function roleName(role: string): string {
   return role
@@ -2166,14 +2164,18 @@ async function selectCatalogCourse(id: number): Promise<void> {
 }
 
 async function generateBuild(): Promise<void> {
-  const prompt = [
-    `Build a ${templateLabel(state.selectedTemplate)} Canvas page.`,
-    `Title: ${state.buildTitle || 'Module 1 - Getting Started'}`,
-    state.buildRhythm ? `Dates or rhythm: ${state.buildRhythm}` : 'Dates or rhythm: [TBD]',
-    state.buildTasks ? `Learner tasks: ${state.buildTasks}` : 'Learner tasks: read chapter 1; post to the introductions discussion.',
-    ...catalogPromptLines(state.catalogSelected),
-    `Use the ${currentBrandKit().name} brand kit when accessible.`,
-  ].join('\n');
+  // The prompt names the chosen template id and that template's slots outright
+  // (see `build-prompt.ts`): the label alone left the model to reconstruct both,
+  // and it got the id wrong, then the slot names wrong, then ran the tool loop
+  // out of iterations.
+  const prompt = buildPagePrompt({
+    template: state.selectedTemplate,
+    title: state.buildTitle,
+    rhythm: state.buildRhythm,
+    tasks: state.buildTasks,
+    course: state.catalogSelected,
+    brandKitName: currentBrandKit().name,
+  });
   const view = await runTurn({ user: prompt, mode: 'build' });
   if (view) {
     state.buildView = view;

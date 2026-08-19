@@ -97,16 +97,73 @@ export type ThemeResolver = (
 
 // ── Templates (templates track; consumes ThemeResult + AllowlistValidator) ───
 
-/** The eight canonical Canvas templates (PRD §15.3). */
-export type TemplateType =
-  | 'syllabus'
-  | 'module-overview'
-  | 'assignment'
-  | 'discussion'
-  | 'page-content'
-  | 'lecture-notes'
-  | 'study-guide'
-  | 'rubric';
+/**
+ * The eight canonical Canvas templates (PRD §15.3), as a runtime value.
+ *
+ * An array rather than a bare union because `render_template` has to ADVERTISE
+ * these to the model. The union is derived from it, so the list the model is
+ * offered and the list the compiler enforces cannot come apart. When they could,
+ * they did: the tool declared `type: { type: 'string' }` with no enum, the model
+ * turned the label "General content page" into `general_content_page`, and the
+ * turn burned its whole iteration budget guessing.
+ */
+export const TEMPLATE_TYPES = [
+  'syllabus',
+  'module-overview',
+  'assignment',
+  'discussion',
+  'page-content',
+  'lecture-notes',
+  'study-guide',
+  'rubric',
+] as const;
+
+export type TemplateType = (typeof TEMPLATE_TYPES)[number];
+
+/**
+ * The slot names each template reads, in the order a page usually wants them.
+ *
+ * Also advertised to the model, and for the same reason: `slots` is an opaque
+ * `Record<string, unknown>`, so a caller with no manifest invents names. That is
+ * not hypothetical either — `module-overview` was handed `dates_or_rhythm`,
+ * `learner_tasks` and `official_course_outcomes` when it reads `title`,
+ * `objectives` and `items`, so every value was dropped and the fragment came
+ * back empty but for its heading.
+ *
+ * `src/templates/slots.test.ts` holds this to what the renderers actually read,
+ * by rendering each one with no slots and reading the names out of its own
+ * missing-slot warnings.
+ */
+export const TEMPLATE_SLOTS: Readonly<Record<TemplateType, readonly string[]>> = {
+  syllabus: ['title', 'instructor', 'description', 'schedule', 'policies'],
+  'module-overview': ['title', 'objectives', 'items'],
+  assignment: ['title', 'overview', 'dueDate', 'points', 'instructions'],
+  discussion: ['title', 'prompt', 'guidelines', 'expectations'],
+  'page-content': ['title', 'sections'],
+  'lecture-notes': ['title', 'topics'],
+  'study-guide': ['title', 'keyTerms', 'questions'],
+  rubric: ['title', 'criteria'],
+};
+
+/**
+ * The inner shape of the slots whose values are lists of objects.
+ *
+ * Naming the slot is not enough for these. The model sent
+ * `sections: [{ heading, content }]` — right slot, right outer shape, one wrong
+ * key — and `page-content`, which reads `body`, emitted the headings and
+ * silently dropped every paragraph with no warning at all. A hollow page that
+ * reports success is worse than the loop error it replaced, so the shapes are
+ * advertised too. Slots absent from this map take a plain list of strings.
+ *
+ * Held to the renderers behaviourally in `src/templates/slots.test.ts`: each
+ * documented shape is rendered and its content must survive into the HTML.
+ */
+export const TEMPLATE_SLOT_SHAPES: Readonly<Record<string, string>> = {
+  sections: '[{ heading, body }]',
+  topics: '[{ heading, points: [string] }]',
+  keyTerms: '[{ term, definition }]',
+  criteria: '[{ name, levels: [{ label, points, descriptor }] }]',
+};
 
 /** Slot content passed into a template (shape validated per-template internally). */
 export type TemplateSlots = Record<string, unknown>;
