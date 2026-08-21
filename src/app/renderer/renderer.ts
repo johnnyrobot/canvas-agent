@@ -21,6 +21,7 @@ import {
   later,
   onReady,
   readStorage,
+  scrollToTop,
   writeStorage,
   type El,
 } from './ui.js';
@@ -1717,6 +1718,16 @@ function go(screenName: Screen): void {
   state.previousScreen = state.screen;
   state.screen = screenName;
   render();
+  // A new screen starts at its top. `render()` replaces the whole DOM but not
+  // the scroll offset, and the app bar is `position: static` — so arriving from
+  // a scrolled screen put the back button ABOVE the window and left the user
+  // with no way out. The hub is taller than the window and its "Saved work" link
+  // sits near the bottom, so that path scrolled every time.
+  //
+  // Only here, never in `render()`: `render()` also runs for in-screen updates
+  // (a toggle, a tally, a streaming turn), and resetting there would yank the
+  // page to the top under someone mid-read.
+  scrollToTop();
 }
 
 async function refreshHealth(): Promise<void> {

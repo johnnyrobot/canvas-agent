@@ -467,3 +467,53 @@ test('M26 a health probe landing mid-pull does not contradict the running bar', 
     assert.deepEqual(contradictions, [], 'status said "not installed" beside a running progress bar');
   });
 });
+
+/**
+ * Navigating from a scrolled screen must not hide the way back.
+ *
+ * The home hub is taller than the window and the "Saved work" link sits near its
+ * bottom, so reaching it means scrolling. Navigation replaces the whole DOM but
+ * left `scrollY` where it was, and the app bar is `position: static` — so the
+ * next screen rendered with its back button 53px above the top of the window,
+ * unreachable by mouse. Saved work is 861px against an 808px viewport, giving it
+ * barely any scroll range and no visible hint that anything is above, so it read
+ * as a dead end with every visible control leading nowhere else.
+ *
+ * Asserted on geometry rather than on `scrollY`, because what broke was not the
+ * scroll offset itself — it was a control the user could not reach.
+ */
+test('M29 navigating from a scrolled screen leaves the back button on screen', { skip, timeout: 60_000 }, async () => {
+  await withApp('default', async (win) => {
+    // The DOM is reached through an element handle, never a bare `window` /
+    // `document`: the e2e tsconfig has no `dom` lib, by the same choice `ui.ts`
+    // documents, so globals do not type-check here.
+    const appRoot = win.locator('#app');
+
+    // Reach the link the way a user does: scroll down the hub to click it.
+    const scrolled = await appRoot.evaluate((app) => {
+      const view = app.ownerDocument.defaultView;
+      if (!view) return 0;
+      view.scrollTo(0, app.ownerDocument.body.scrollHeight);
+      return Math.round(view.scrollY);
+    });
+    assert.ok(scrolled > 0, 'the hub did not scroll — this test would prove nothing');
+
+    await win.getByTestId('inst-link-saved').click();
+    await win.getByTestId('session-row-build').waitFor({ timeout: 10_000 });
+
+    const back = await appRoot.evaluate((app) => {
+      const view = app.ownerDocument.defaultView;
+      const el = app.ownerDocument.querySelector('.appbar__back');
+      const viewport = view ? view.innerHeight : 0;
+      if (!el) return { found: false, top: 0, bottom: 0, viewport };
+      const r = el.getBoundingClientRect();
+      return { found: true, top: Math.round(r.top), bottom: Math.round(r.bottom), viewport };
+    });
+
+    assert.ok(back.found, 'saved work rendered with no back button at all');
+    assert.ok(
+      back.top >= 0 && back.bottom <= back.viewport,
+      `back button is off screen (top ${back.top}, bottom ${back.bottom}, viewport ${back.viewport}) — the user cannot leave`,
+    );
+  });
+});

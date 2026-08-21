@@ -59,7 +59,12 @@ interface StorageLike {
   setItem(key: string, value: string): void;
 }
 declare const document: Doc;
-declare const window: { canvasAgent: AppApi; navigator: Nav; open(url: string): void };
+declare const window: {
+  canvasAgent: AppApi;
+  navigator: Nav;
+  open(url: string): void;
+  scrollTo(x: number, y: number): void;
+};
 declare const localStorage: StorageLike;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,6 +92,18 @@ export function byId(id: string): El | null {
 /** Show / hide an element via the `hidden` attribute (CSS hides `[hidden]`). */
 export function setHidden(node: El, hidden: boolean): void {
   node.hidden = hidden;
+}
+
+/**
+ * Scroll the window back to the top — what a screen change owes the reader.
+ *
+ * Here rather than inline in the renderer because this module is the only place
+ * allowed to touch the DOM, and because the `dom` lib is deliberately not in
+ * `lib` (see the note at the top): `window.scrollTo` has to be declared on the
+ * narrow facade above before anything can call it.
+ */
+export function scrollToTop(): void {
+  window.scrollTo(0, 0);
 }
 
 /** Run `fn` once the DOM is ready (now if it already is). */
