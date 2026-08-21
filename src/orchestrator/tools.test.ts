@@ -83,6 +83,18 @@ describe('render_template advertises what it will actually accept', () => {
     assert.ok(description.includes('body'), 'the key the model got wrong must be spelled out');
   });
 
+  test('the description says the theme is resolve_theme’s result, passed through', () => {
+    // `theme: { type: 'object' }` said nothing, so the model built its own
+    // `{ heading: {...}, body: {...} }` map instead of forwarding what
+    // resolve_theme had just returned — and the render threw a TypeError,
+    // spending one of five iterations on a reply it could not learn from.
+    const { description } = definitionOf('render_template');
+    assert.ok(
+      /resolve_theme/.test(description),
+      '`theme` must be described as resolve_theme’s output or the model composes its own shape',
+    );
+  });
+
   test('the slot names the model actually invented are absent', () => {
     // Guards the description against being vacuously "complete" by listing
     // everything: these are the names granite sent, and no renderer reads them.
