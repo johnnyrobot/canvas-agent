@@ -18,13 +18,18 @@ async function main() {
     env: { ...process.env },
   });
   const win = await app.firstWindow();
-  await win.waitForSelector('[data-testid="home-build"]', { timeout: 30_000 });
+  // The home tiles are `inst-task-*` since the institutional redesign cutover
+  // deleted the classic screens. This script kept waiting on the old
+  // `home-build`, so it timed out at launch and drove nothing — a verification
+  // harness that fails closed on its FIRST selector reads as "the app is broken"
+  // when the app is fine.
+  await win.waitForSelector('[data-testid="inst-task-build"]', { timeout: 30_000 });
   await sleep(1500); // let the health probe settle
   const health = (await win.textContent('[data-testid="health"]').catch(() => '')) ?? '';
   console.log('HEALTH:', health.trim());
   await win.screenshot({ path: `${OUT}-1-launched.png` });
 
-  await win.click('[data-testid="home-build"]');
+  await win.click('[data-testid="inst-task-build"]');
   await win.click('[data-testid="build-template-continue"]');
   await win.fill('[data-testid="build-title"]', TITLE);
   await win.fill('[data-testid="build-tasks"]', PROMPT);
