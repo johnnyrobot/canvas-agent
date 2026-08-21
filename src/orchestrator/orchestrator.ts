@@ -13,6 +13,17 @@ import type { ToolRegistry } from './registry.js';
 import { groundSystemPrompt } from './prompt.js';
 import { packsForMode, toolsForMode } from './modes.js';
 
+/**
+ * What the model is told when it ends a turn without saying anything.
+ *
+ * A blind retry re-reads identical context and produces the identical empty
+ * reply, so the retry has to carry the correction. Mode-agnostic on purpose:
+ * the final answer is a fragment in Build and prose in Guidance, and this must
+ * not push one mode's shape onto another.
+ */
+const EMPTY_ANSWER_NUDGE =
+  'Your last reply was empty. Answer the request now, in your reply: if you already have what you need, write the final answer out; call a tool only if you still need one.';
+
 export class OrchestratorError extends Error {
   constructor(message: string) {
     super(message);
@@ -79,6 +90,19 @@ export class Orchestrator {
 
       if (!res.toolCalls || res.toolCalls.length === 0) {
         messages.push({ role: 'assistant', content: res.content });
+
+        // "No tool calls" is not the same as "answered". Live on a plain
+        // "generate a page" the model called resolve_theme, read the result and
+        // then replied with nothing at all — no call, no text — and this loop
+        // returned that as the final answer, so the instructor got a blank
+        // result screen reported as a success. An empty reply is never accepted:
+        // while budget remains it is asked again, and a turn that only ever
+        // returns empty falls out of the loop as an error instead of a blank page.
+        if (res.content.trim() === '') {
+          if (iterations < maxIterations) messages.push({ role: 'user', content: EMPTY_ANSWER_NUDGE });
+          continue;
+        }
+
         // Non-streaming callers still get the final text as one terminal event.
         if (ctx.onEvent && !streaming && res.content) ctx.onEvent({ type: 'text', delta: res.content });
         const result: TurnResult = { text: res.content, iterations, toolInvocations, messages };
