@@ -151,6 +151,31 @@ test('a provided theme applies its ResolvedColors and stays allowlist-safe', asy
   assert.equal(validated.html, html, 'themed html not allowlist-stable');
 });
 
+test('a theme that is not resolve_theme’s output renders unthemed instead of throwing', async () => {
+  // The model composes this shape on its own instead of forwarding what
+  // resolve_theme returned — `{ heading: {...}, body: {...} }` rather than
+  // `{ colors: [...] }`. `pick()` then read `.colors.find` off undefined and the
+  // tool call came back as a raw TypeError, costing an iteration of a budget of
+  // five. A render that cannot use a theme must still produce the page.
+  const improvised = {
+    heading: { background: '#0066CC', foreground: '#ffffff' },
+    body: { background: '#0044AA', foreground: '#ffffff' },
+  } as unknown as ThemeResult;
+
+  const { html, warnings } = await renderTemplate(
+    'module-overview',
+    { title: 'Module 1', objectives: ['Read chapter 1'] },
+    improvised,
+  );
+
+  assert.ok(html.includes('Module 1'), 'the page must render even when the theme is unusable');
+  assert.ok(html.includes('Read chapter 1'), 'slot content must survive an unusable theme');
+  assert.ok(
+    warnings.some((w) => w.includes('theme')),
+    `the unusable theme must be named so the model can correct it.\nwarnings: ${JSON.stringify(warnings)}`,
+  );
+});
+
 test('without a theme, no colors are emitted (safe defaults)', async () => {
   const { html } = await renderTemplate('syllabus', FIXTURES.syllabus);
   assert.ok(!/color\s*:/.test(html), 'unthemed output should not emit color declarations');

@@ -14,7 +14,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { describe, test } from 'node:test';
-import { TEMPLATE_SLOTS, TEMPLATE_TYPES } from '../contracts/index.js';
+import { TEMPLATE_SLOTS, TEMPLATE_SLOT_SHAPES, TEMPLATE_TYPES } from '../contracts/index.js';
 import { renderTemplate } from './index.js';
 
 /** Every slot name a renderer complains about when handed nothing. */
@@ -55,6 +55,111 @@ describe('the template slot manifest matches the renderers', () => {
     for (const type of TEMPLATE_TYPES) {
       assert.ok(TEMPLATE_SLOTS[type].length > 0, `"${type}" advertises no slots`);
     }
+  });
+});
+
+describe('the manifest documents the shape of every slot that is not a plain string', () => {
+  /**
+   * Naming a slot is only enough when a plain string is what it takes.
+   *
+   * `module-overview: title, objectives, items` reads as three strings, and that
+   * is what the model sent. `objectives` and `items` are read with `strList`,
+   * which drops a non-array outright — so the fragment came back as a bare
+   * heading and the renderer reported `no "objectives" slot provided` about a
+   * slot that HAD been provided. Nothing in that reply tells the model what it
+   * got wrong, so it rephrased the same string and the bounded loop ran out.
+   *
+   * The kind of each slot is derived from the renderer here rather than
+   * restated: feed a plain string and ask whether the renderer took it at face
+   * value — rendered, and with no complaint about that slot. A slot that has to
+   * salvage the string first is not a string slot, and must carry a documented
+   * shape.
+   */
+  const PROBE = 'ProbeSlotValue';
+
+  async function keepsAPlainString(
+    type: (typeof TEMPLATE_TYPES)[number],
+    slot: string,
+  ): Promise<boolean> {
+    const { html, warnings } = await renderTemplate(type, { [slot]: PROBE });
+    return html.includes(PROBE) && !warnings.some((w) => w.includes(`"${slot}"`));
+  }
+
+  for (const type of TEMPLATE_TYPES) {
+    for (const slot of TEMPLATE_SLOTS[type]) {
+      test(`${type}.${slot}: documented as a list exactly when a string is not enough`, async () => {
+        const scalar = await keepsAPlainString(type, slot);
+        const documented = TEMPLATE_SLOT_SHAPES[slot];
+        if (scalar) {
+          assert.equal(
+            documented,
+            undefined,
+            `"${slot}" renders a plain string, so advertising the shape "${documented}" would mislead`,
+          );
+        } else {
+          assert.ok(
+            documented,
+            `"${slot}" DROPS a plain string, so the model must be told its shape — it is advertised as a bare name today`,
+          );
+        }
+      });
+    }
+  }
+
+  test('every documented list-of-strings shape renders its content', async () => {
+    // Non-vacuity: the manifest could claim `[string]` for a slot that reads
+    // something else entirely. Each one is fed the shape it advertises.
+    for (const type of TEMPLATE_TYPES) {
+      for (const slot of TEMPLATE_SLOTS[type]) {
+        if (TEMPLATE_SLOT_SHAPES[slot] !== '[string]') continue;
+        const { html } = await renderTemplate(type, { title: 'T', [slot]: [PROBE] });
+        assert.ok(
+          html.includes(PROBE),
+          `"${type}.${slot}" is advertised as [string] but dropped one.\nhtml: ${html}`,
+        );
+      }
+    }
+  });
+});
+
+describe('a slot filled with the wrong shape is not silently discarded', () => {
+  /**
+   * Defense in depth behind the manifest above. The model still gets shapes
+   * wrong, and when it does the reply has to say so: a warning that denies the
+   * slot was provided at all is worse than useless, because the only correction
+   * it suggests is the one the model already made.
+   */
+  test('a string sent to a list slot keeps its text', async () => {
+    const { html } = await renderTemplate('module-overview', {
+      title: 'T',
+      objectives: 'Understand the course structure',
+    });
+    assert.ok(
+      html.includes('Understand the course structure'),
+      `instructor content sent in the wrong shape must not vanish.\nhtml: ${html}`,
+    );
+  });
+
+  test('a string sent to a list slot is not reported as missing', async () => {
+    const { warnings } = await renderTemplate('module-overview', {
+      title: 'T',
+      objectives: 'Understand the course structure',
+    });
+    assert.ok(
+      !warnings.some((w) => w.includes('no "objectives" slot provided')),
+      `the slot WAS provided; claiming otherwise sends the model back the same way.\nwarnings: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  test('the warning names the slot and the shape it wanted', async () => {
+    const { warnings } = await renderTemplate('module-overview', {
+      title: 'T',
+      objectives: 'Understand the course structure',
+    });
+    assert.ok(
+      warnings.some((w) => w.includes('"objectives"') && w.includes('list of strings')),
+      `a correctable warning has to name both.\nwarnings: ${JSON.stringify(warnings)}`,
+    );
   });
 });
 

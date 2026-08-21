@@ -150,3 +150,54 @@ test('streaming path executes a tool call surfaced mid-stream, then finalizes (C
     'Found 1 issue.',
   );
 });
+
+/**
+ * An empty terminal response is not an answer.
+ *
+ * Observed live on a plain "generate a page": the model called resolve_theme,
+ * read the result, then replied with no tool call and no text at all. The loop
+ * took "no tool calls" to mean "final answer" and returned `text: ''` with no
+ * fragment, so the instructor pressed Generate and landed on a blank result
+ * screen — reported as a success. A hollow success is worse than a loud error;
+ * the turn still has budget, so it is spent asking for the answer.
+ */
+test('an empty final response is not accepted as the answer while budget remains', async () => {
+  const runner = new ScriptedRunner([
+    { content: '', model: 'm', raw: {}, toolCalls: [{ name: 'resolve_theme', arguments: {} }] },
+    { content: '', model: 'm', raw: {} },
+    { content: '<h2>The page</h2>', model: 'm', raw: {} },
+  ]);
+  const registry = new ToolRegistry().register(echoTool('resolve_theme', () => ({ colors: [] })));
+  const orch = new Orchestrator(runner, registry);
+
+  const res = await orch.handleTurn({ user: 'build a page' });
+
+  assert.equal(res.text, '<h2>The page</h2>', 'the empty reply should not have ended the turn');
+  assert.equal(res.iterations, 3);
+});
+
+test('an empty final response is retried with an explicit prompt for the answer', async () => {
+  const runner = new ScriptedRunner([
+    { content: '', model: 'm', raw: {} },
+    { content: 'the answer', model: 'm', raw: {} },
+  ]);
+  const orch = new Orchestrator(runner, new ToolRegistry());
+
+  await orch.handleTurn({ user: 'build a page' });
+
+  // Blind retries see identical context and repeat themselves, so the model is
+  // told what was missing. It must be the last thing it reads.
+  const roles = runner.callRoles[1] ?? [];
+  assert.equal(roles.at(-1), 'user', `nothing was added for the retry to react to: ${roles.join(',')}`);
+});
+
+test('an all-empty turn fails loudly rather than returning a blank success', async () => {
+  const runner = new ScriptedRunner(Array.from({ length: 5 }, () => ({ content: '', model: 'm', raw: {} })));
+  const orch = new Orchestrator(runner, new ToolRegistry(), { maxToolIterations: 3 });
+
+  await assert.rejects(
+    () => orch.handleTurn({ user: 'build a page' }),
+    OrchestratorError,
+    'a turn that never answers must surface as an error, not an empty view',
+  );
+});

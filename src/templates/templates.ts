@@ -44,6 +44,33 @@ function strList(value: unknown): string[] {
   return out;
 }
 
+/**
+ * Read a list-of-strings slot, salvaging a value sent in the wrong shape.
+ *
+ * `strList` alone drops anything that is not an array, and the caller then
+ * warned `no "objectives" slot provided` — about a slot that had been provided,
+ * as a string. That reply is a dead end for a model: it denies the input it just
+ * received, so the only correction it suggests is the one already made, and the
+ * bounded tool loop spends its budget re-sending the same thing.
+ *
+ * A lone string is therefore kept as a single item — instructor content is never
+ * worth discarding over its container — and the warning names the slot and the
+ * shape that was wanted, which is a correction the model can act on.
+ */
+function listSlot(slots: TemplateSlots, name: string, warnings: string[]): string[] {
+  const value = slots[name];
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return strList(value);
+
+  const single = str(value);
+  if (single !== undefined) {
+    warnings.push(`"${name}" was a single string; expected a list of strings — kept it as one item`);
+    return [single];
+  }
+  warnings.push(`"${name}" was not a list of strings; omitted it`);
+  return [];
+}
+
 /** Coerce a slot into a list of plain objects (non-objects/arrays dropped). */
 function recList(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
@@ -118,11 +145,11 @@ export const renderSyllabus: Renderer = (slots, theme) => {
   if (description !== undefined) parts.push(paragraph(description));
   else warnings.push('no "description" slot provided; omitted the course description');
 
-  const schedule = strList(slots.schedule);
+  const schedule = listSlot(slots, 'schedule', warnings);
   if (schedule.length > 0) parts.push(subHeading('Course Schedule'), bullets(schedule));
   else warnings.push('no "schedule" slot provided; omitted the schedule');
 
-  const policies = strList(slots.policies);
+  const policies = listSlot(slots, 'policies', warnings);
   if (policies.length > 0) parts.push(subHeading('Policies'), bullets(policies));
   else warnings.push('no "policies" slot provided; omitted the policies');
 
@@ -133,11 +160,11 @@ export const renderModuleOverview: Renderer = (slots, theme) => {
   const warnings: string[] = [];
   const parts: string[] = [topHeading(resolveTitle(slots, warnings, 'module-overview'), theme)];
 
-  const objectives = strList(slots.objectives);
+  const objectives = listSlot(slots, 'objectives', warnings);
   if (objectives.length > 0) parts.push(subHeading('Learning Objectives'), bullets(objectives));
   else warnings.push('no "objectives" slot provided; omitted the learning objectives');
 
-  const items = strList(slots.items);
+  const items = listSlot(slots, 'items', warnings);
   if (items.length > 0) parts.push(subHeading('In This Module'), bullets(items));
   else warnings.push('no "items" slot provided; omitted the module checklist');
 
@@ -163,7 +190,7 @@ export const renderAssignment: Renderer = (slots, theme) => {
 
   if (meta.length > 0) parts.push(callout(meta.join(''), theme));
 
-  const instructions = strList(slots.instructions);
+  const instructions = listSlot(slots, 'instructions', warnings);
   if (instructions.length > 0) parts.push(subHeading('Instructions'), bullets(instructions, true));
   else warnings.push('no "instructions" slot provided; omitted the instructions');
 
@@ -186,7 +213,7 @@ export const renderDiscussion: Renderer = (slots, theme) => {
     parts.push(el('blockquote', {}, paragraph('(Discussion prompt to be provided.)')));
   }
 
-  const guidelines = strList(slots.guidelines);
+  const guidelines = listSlot(slots, 'guidelines', warnings);
   if (guidelines.length > 0) parts.push(subHeading('Guidelines'), bullets(guidelines));
   else warnings.push('no "guidelines" slot provided; omitted the guidelines');
 
@@ -230,7 +257,7 @@ export const renderLectureNotes: Renderer = (slots, theme) => {
   if (topics.length > 0) {
     for (const topic of topics) {
       const heading = str(topic.heading);
-      const points = strList(topic.points);
+      const points = listSlot(topic, 'points', warnings);
       if (heading !== undefined) parts.push(subHeading(heading));
       if (points.length > 0) parts.push(bullets(points));
       if (heading === undefined && points.length === 0) {
@@ -264,7 +291,7 @@ export const renderStudyGuide: Renderer = (slots, theme) => {
     warnings.push('no "keyTerms" slot provided; omitted the key terms');
   }
 
-  const questions = strList(slots.questions);
+  const questions = listSlot(slots, 'questions', warnings);
   if (questions.length > 0) parts.push(subHeading('Review Questions'), bullets(questions, true));
   else warnings.push('no "questions" slot provided; omitted the review questions');
 

@@ -146,19 +146,37 @@ export const TEMPLATE_SLOTS: Readonly<Record<TemplateType, readonly string[]>> =
 };
 
 /**
- * The inner shape of the slots whose values are lists of objects.
+ * The shape of every slot that does not take a plain string.
  *
- * Naming the slot is not enough for these. The model sent
+ * Naming the slot is not enough for these, in two ways that both reached the
+ * user as "Tool loop exceeded 5 iterations".
+ *
+ * The list-of-objects slots were the first: the model sent
  * `sections: [{ heading, content }]` — right slot, right outer shape, one wrong
  * key — and `page-content`, which reads `body`, emitted the headings and
- * silently dropped every paragraph with no warning at all. A hollow page that
- * reports success is worse than the loop error it replaced, so the shapes are
- * advertised too. Slots absent from this map take a plain list of strings.
+ * silently dropped every paragraph with no warning at all.
  *
- * Held to the renderers behaviourally in `src/templates/slots.test.ts`: each
- * documented shape is rendered and its content must survive into the HTML.
+ * The list-of-STRINGS slots were the second, and were missing here because the
+ * bare name reads as a string. `module-overview: title, objectives, items` is
+ * three slots that look alike and are not: `title` is a string, the other two
+ * are lists, and `strList` dropped the strings the model sent for them. The
+ * fragment came back as a bare heading — with a warning that said the slots had
+ * not been provided, which was untrue and which the model could not act on, so
+ * it re-sent the same shape until the loop ran out.
+ *
+ * So every non-scalar slot is advertised. A slot absent from this map takes a
+ * plain string; `src/templates/slots.test.ts` derives which is which from the
+ * renderers themselves and fails if this map disagrees, and each documented
+ * shape is rendered there to prove its content survives into the HTML.
  */
 export const TEMPLATE_SLOT_SHAPES: Readonly<Record<string, string>> = {
+  schedule: '[string]',
+  policies: '[string]',
+  objectives: '[string]',
+  items: '[string]',
+  instructions: '[string]',
+  guidelines: '[string]',
+  questions: '[string]',
   sections: '[{ heading, body }]',
   topics: '[{ heading, points: [string] }]',
   keyTerms: '[{ term, definition }]',

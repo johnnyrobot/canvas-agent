@@ -120,7 +120,9 @@ export function createCanonicalTools(deps: Partial<EngineDeps>): Tool[] {
         description:
           'Fill one of the eight Canvas templates with slot content + resolved theme. ' +
           `Each template reads only its own slots — ${SLOT_GUIDE}. ` +
-          'Slots you invent are ignored, so use these names exactly.',
+          'Slots you invent are ignored, so use these names exactly, and match the shape shown: ' +
+          'a slot written [string] takes a list of strings, never one string. ' +
+          'For "theme", pass resolve_theme\'s result object through unchanged; do not build your own.',
         parameters: {
           type: 'object',
           properties: {
